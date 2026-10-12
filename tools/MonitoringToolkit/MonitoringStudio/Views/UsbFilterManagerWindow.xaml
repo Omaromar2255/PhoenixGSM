@@ -1,0 +1,282 @@
+<Window x:Class="PhoenixGSM.MonitoringStudio.Views.UsbFilterManagerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="PhoenixGSM — USB &amp; WinUSB Filter Driver Manager" 
+        Height="720" Width="1020"
+        MinHeight="600" MinWidth="850"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource BgDarkBrush}"
+        Foreground="{StaticResource TextPrimaryBrush}">
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <!-- 0: Header & Service Status -->
+            <RowDefinition Height="Auto" />
+            <!-- 1: Connected Devices Table (Main) -->
+            <RowDefinition Height="*" MinHeight="220" />
+            <!-- 2: Class Filters & Custom GUID -->
+            <RowDefinition Height="Auto" />
+            <!-- 3: Rollback & Active Summary -->
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ╔══════════════════════════════════════════════════════════╗ -->
+        <!-- ║ ROW 0: HEADER & DRIVER SERVICE CONTROLS                   ║ -->
+        <!-- ╚══════════════════════════════════════════════════════════╝ -->
+        <Border Grid.Row="0" Background="{StaticResource CardBgBrush}" 
+                BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1" 
+                CornerRadius="8" Padding="14,10" Margin="0,0,0,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="🔌" FontSize="20" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <TextBlock Text="USB &amp; WinUSB Filter Manager" FontSize="16" FontWeight="Bold" Foreground="#00E5FF" VerticalAlignment="Center" />
+                        <Border Background="#1C382F" BorderBrush="#00FF9D" BorderThickness="1" CornerRadius="4" Margin="10,0,0,0" Padding="6,1">
+                            <TextBlock Text="KERNEL LEVEL" FontSize="9" FontWeight="Bold" Foreground="#00FF9D" />
+                        </Border>
+                    </StackPanel>
+                    <TextBlock Text="ربط وإدارة فلتر PhoenixUsbMonitor لأجهزة WinUSB وFastboot ومنافذ Qualcomm EDL وMediaTek وSamsung" 
+                               FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="28,2,0,0" />
+                </StackPanel>
+
+                <!-- Service State & Controls -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Background="#121520" BorderBrush="#2F364E" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,8,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Service: " FontSize="11" Foreground="{StaticResource TextMutedBrush}" />
+                            <TextBlock x:Name="TxtServiceStatus" Text="Checking..." FontSize="11" FontWeight="Bold" Foreground="#FFB800" Margin="0,0,10,0" />
+                            <TextBlock Text="TestSigning: " FontSize="11" Foreground="{StaticResource TextMutedBrush}" />
+                            <TextBlock x:Name="TxtTestSigning" Text="Checking..." FontSize="11" FontWeight="Bold" Foreground="#00FF9D" />
+                        </StackPanel>
+                    </Border>
+
+                    <Button Content="▶ Start Service" Click="BtnStartService_Click" Style="{StaticResource GreenActionBtn}" Margin="0,0,6,0" Padding="8,4" FontSize="11" />
+                    <Button Content="⏹ Stop Service" Click="BtnStopService_Click" Style="{StaticResource AmberActionBtn}" Margin="0,0,6,0" Padding="8,4" FontSize="11" />
+                    <Button Content="⚙️ Register Service" Click="BtnInstallService_Click" Style="{StaticResource ModernBtn}" Padding="8,4" FontSize="11" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ╔══════════════════════════════════════════════════════════╗ -->
+        <!-- ║ ROW 1: CONNECTED DEVICES & PER-DEVICE FILTER ATTACHMENT  ║ -->
+        <!-- ╚══════════════════════════════════════════════════════════╝ -->
+        <Border Grid.Row="1" Background="{StaticResource CardBgBrush}" 
+                BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1" 
+                CornerRadius="8" Padding="12" Margin="0,0,0,12">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Section Header -->
+                <Grid Grid.Row="0" Margin="0,0,0,8">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="📱 الأجهزة المتصلة حالياً (ربط الفلتر بجهاز محدد - Per-Device LowerFilter)" FontSize="12" FontWeight="Bold" Foreground="#FFFFFF" />
+                        <TextBlock Text=" — الطريقة الأكثر أماناً لعزل الجهاز المستهدف" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="8,0,0,0" />
+                    </StackPanel>
+
+                    <Button HorizontalAlignment="Right" Content="🔄 تحديث القائمة (Refresh)" Click="BtnRefreshDevices_Click" Style="{StaticResource ModernBtn}" Padding="10,3" FontSize="11" />
+                </Grid>
+
+                <!-- Devices Grid -->
+                <DataGrid x:Name="GridDevices" Grid.Row="1"
+                          AutoGenerateColumns="False"
+                          CanUserAddRows="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          GridLinesVisibility="Horizontal"
+                          HorizontalGridLinesBrush="#1F2436"
+                          Background="Transparent"
+                          RowBackground="#151824"
+                          AlternatingRowBackground="#181C2B"
+                          Foreground="#E0E6ED"
+                          BorderThickness="1"
+                          BorderBrush="#252B3D"
+                          HeadersVisibility="Column"
+                          FontFamily="Consolas, Segoe UI"
+                          FontSize="11.5">
+
+                    <DataGrid.ColumnHeaderStyle>
+                        <Style TargetType="DataGridColumnHeader">
+                            <Setter Property="Background" Value="#10121C" />
+                            <Setter Property="Foreground" Value="#00E5FF" />
+                            <Setter Property="FontWeight" Value="SemiBold" />
+                            <Setter Property="Padding" Value="8,6" />
+                            <Setter Property="BorderBrush" Value="#22283A" />
+                            <Setter Property="BorderThickness" Value="0,0,1,1" />
+                        </Style>
+                    </DataGrid.ColumnHeaderStyle>
+
+                    <DataGrid.RowStyle>
+                        <Style TargetType="DataGridRow">
+                            <Setter Property="Height" Value="26" />
+                            <Style.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="#20263A" />
+                                </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter Property="Background" Value="#003554" />
+                                    <Setter Property="BorderBrush" Value="#00E5FF" />
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGrid.RowStyle>
+
+                    <DataGrid.Columns>
+                        <!-- Status Badge -->
+                        <DataGridTemplateColumn Header="FILTER STATUS" Width="120">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Border Background="{Binding StatusBgColor}" CornerRadius="3" Padding="6,2" HorizontalAlignment="Center">
+                                        <TextBlock Text="{Binding FilterStatusText}" Foreground="{Binding StatusFgColor}" FontWeight="Bold" FontSize="10" />
+                                    </Border>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+
+                        <!-- Device Name -->
+                        <DataGridTextColumn Header="DEVICE NAME" Binding="{Binding DeviceName}" Width="220" />
+
+                        <!-- Hardware ID (VID:PID) -->
+                        <DataGridTextColumn Header="VID:PID" Binding="{Binding VidPidHex}" Width="95">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="#FFB800" />
+                                    <Setter Property="FontWeight" Value="Bold" />
+                                    <Setter Property="HorizontalAlignment" Value="Center" />
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+
+                        <!-- Driver/Service -->
+                        <DataGridTextColumn Header="DRIVER / SVC" Binding="{Binding Driver}" Width="100">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="#00FF9D" />
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+
+                        <!-- Device Instance ID -->
+                        <DataGridTextColumn Header="DEVICE INSTANCE ID" Binding="{Binding InstanceId}" Width="*" />
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <!-- Device Actions -->
+                <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
+                    <Button Content="⚡ ربط الفلتر بالجهاز المحدد (Attach Filter)" Click="BtnAttachDevice_Click" Style="{StaticResource CyanActionBtn}" Margin="0,0,8,0" Padding="14,6" />
+                    <Button Content="❌ إلغاء ربط الفلتر من الجهاز (Detach Filter)" Click="BtnDetachDevice_Click" Style="{StaticResource AmberActionBtn}" Margin="0,0,8,0" Padding="14,6" />
+                    <Button Content="🔄 إعادة تشغيل تعريف الجهاز (Restart Device via PnP)" Click="BtnRestartDevice_Click" Style="{StaticResource ModernBtn}" Padding="12,6" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ╔══════════════════════════════════════════════════════════╗ -->
+        <!-- ║ ROW 2: CLASS FILTERS (1-CLICK & CUSTOM GUID)             ║ -->
+        <!-- ╚══════════════════════════════════════════════════════════╝ -->
+        <Border Grid.Row="2" Background="{StaticResource CardBgBrush}" 
+                BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1" 
+                CornerRadius="8" Padding="12" Margin="0,0,0,12">
+            <StackPanel>
+                <TextBlock Text="🏷️ ربط الفلتر بفئات التعريف الكاملة (Class LowerFilters)" FontSize="12" FontWeight="Bold" Foreground="#FFFFFF" Margin="0,0,0,8" />
+
+                <WrapPanel Orientation="Horizontal" Margin="0,0,0,10">
+                    <!-- WinUSB Devices -->
+                    <Border Background="#141724" BorderBrush="#252B3D" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,8,8">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="📱 WinUSB Devices" FontWeight="SemiBold" Foreground="#00E5FF" VerticalAlignment="Center" Margin="0,0,10,0" />
+                            <Button Content="Attach" Click="BtnAttachWinUsb_Click" Style="{StaticResource GreenActionBtn}" Padding="8,2" FontSize="11" Margin="0,0,4,0" />
+                            <Button Content="Detach" Click="BtnDetachWinUsb_Click" Style="{StaticResource AmberActionBtn}" Padding="8,2" FontSize="11" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- COM Ports & EDL -->
+                    <Border Background="#141724" BorderBrush="#252B3D" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,8,8">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="📟 COM Ports / EDL Mode" FontWeight="SemiBold" Foreground="#FFB800" VerticalAlignment="Center" Margin="0,0,10,0" />
+                            <Button Content="Attach" Click="BtnAttachPorts_Click" Style="{StaticResource GreenActionBtn}" Padding="8,2" FontSize="11" Margin="0,0,4,0" />
+                            <Button Content="Detach" Click="BtnDetachPorts_Click" Style="{StaticResource AmberActionBtn}" Padding="8,2" FontSize="11" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- USB Modems (Huawei / Honor / Samsung AT) -->
+                    <Border Background="#141724" BorderBrush="#252B3D" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,8,8">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="📶 Modems (AT / Huawei / Honor)" FontWeight="SemiBold" Foreground="#38BDF8" VerticalAlignment="Center" Margin="0,0,10,0" />
+                            <Button Content="Attach" Click="BtnAttachModem_Click" Style="{StaticResource GreenActionBtn}" Padding="8,2" FontSize="11" Margin="0,0,4,0" />
+                            <Button Content="Detach" Click="BtnDetachModem_Click" Style="{StaticResource AmberActionBtn}" Padding="8,2" FontSize="11" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Combined 1-Click Modem + COM Ports UpperFilter -->
+                    <Border Background="#141724" BorderBrush="#38BDF8" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,8,8">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="⚡ 1-Click (Modem + COM Ports)" FontWeight="Bold" Foreground="#00FF9D" VerticalAlignment="Center" Margin="0,0,10,0" />
+                            <Button Content="Attach Both" Click="BtnAttachModemAndPorts_Click" Style="{StaticResource GreenActionBtn}" Padding="10,2" FontSize="11" Margin="0,0,4,0" />
+                            <Button Content="Detach Both" Click="BtnDetachModemAndPorts_Click" Style="{StaticResource AmberActionBtn}" Padding="10,2" FontSize="11" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Android Devices -->
+                    <Border Background="#141724" BorderBrush="#252B3D" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,8,8">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="🤖 Android USB" FontWeight="SemiBold" Foreground="#00FF9D" VerticalAlignment="Center" Margin="0,0,10,0" />
+                            <Button Content="Attach" Click="BtnAttachAndroid_Click" Style="{StaticResource GreenActionBtn}" Padding="8,2" FontSize="11" Margin="0,0,4,0" />
+                            <Button Content="Detach" Click="BtnDetachAndroid_Click" Style="{StaticResource AmberActionBtn}" Padding="8,2" FontSize="11" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- USB Controllers & Hubs -->
+                    <Border Background="#141724" BorderBrush="#252B3D" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,8,8">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="🔌 USB Hubs &amp; Controllers" FontWeight="SemiBold" Foreground="#E066FF" VerticalAlignment="Center" Margin="0,0,10,0" />
+                            <Button Content="Attach" Click="BtnAttachUsb_Click" Style="{StaticResource GreenActionBtn}" Padding="8,2" FontSize="11" Margin="0,0,4,0" />
+                            <Button Content="Detach" Click="BtnDetachUsb_Click" Style="{StaticResource AmberActionBtn}" Padding="8,2" FontSize="11" />
+                        </StackPanel>
+                    </Border>
+                </WrapPanel>
+
+                <!-- Custom Class GUID -->
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Custom Class GUID:" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
+                    <TextBox x:Name="TxtCustomGuid" Grid.Column="1" Background="#121520" Foreground="#FFFFFF" BorderBrush="#2F364E" Padding="8,4" FontSize="11" Margin="0,0,8,0" />
+                    <Button Grid.Column="2" Content="Attach GUID" Click="BtnAttachCustomGuid_Click" Style="{StaticResource ModernBtn}" Margin="0,0,6,0" Padding="10,4" FontSize="11" />
+                    <Button Grid.Column="3" Content="Detach GUID" Click="BtnDetachCustomGuid_Click" Style="{StaticResource ModernBtn}" Padding="10,4" FontSize="11" />
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- ╔══════════════════════════════════════════════════════════╗ -->
+        <!-- ║ ROW 3: ACTIVE ATTACHMENTS & FULL ROLLBACK                 ║ -->
+        <!-- ╚══════════════════════════════════════════════════════════╝ -->
+        <Border Grid.Row="3" Background="#121520" BorderBrush="#2A3045" BorderThickness="1" CornerRadius="8" Padding="12,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="الفلاتر النشطة حالياً في النظام:" FontSize="11" FontWeight="Bold" Foreground="#00E5FF" Margin="0,0,0,4" />
+                    <TextBlock x:Name="TxtActiveFilters" Text="لا توجد فلاتر نشطة حالياً" FontSize="11" Foreground="#00FF9D" TextWrapping="Wrap" />
+                </StackPanel>
+
+                <Button Grid.Column="1" Content="🛡️ Complete Rollback (إزالة جميع الفلاتر واستعادة الأصلية)" 
+                        Click="BtnRollback_Click" Style="{StaticResource AmberActionBtn}" Padding="16,8" FontSize="11" VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

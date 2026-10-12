@@ -1,0 +1,43 @@
+<UserControl x:Class="PhoenixGSM.MonitoringStudio.Views.Components.StatusBarFooterView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             mc:Ignorable="d" 
+             d:DesignHeight="24" d:DesignWidth="1200">
+    <Border Background="#0C0E16" Padding="12,2" CornerRadius="4" Height="24">
+        <Grid VerticalAlignment="Center">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Status Metrics (Arabic / Telemetry) -->
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="⚡ الحالة: " Foreground="{StaticResource TextMutedBrush}" FontSize="11" VerticalAlignment="Center" />
+                <TextBlock Text="محرك الالتقاط نشط" Foreground="#00FF9D" FontWeight="SemiBold" FontSize="11" Margin="0,0,16,0" VerticalAlignment="Center" />
+                
+                <TextBlock Text="إجمالي السجلات: " Foreground="{StaticResource TextMutedBrush}" FontSize="11" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding TotalEventsCount}" Foreground="#FFFFFF" FontWeight="Bold" FontSize="11" Margin="0,0,16,0" VerticalAlignment="Center" />
+
+                <TextBlock Text="المعروض حالياً: " Foreground="{StaticResource TextMutedBrush}" FontSize="11" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding VisibleEventsCount}" Foreground="#00E5FF" FontWeight="Bold" FontSize="11" Margin="0,0,16,0" VerticalAlignment="Center" />
+
+                <TextBlock Text="المستثنى والمخفي: " Foreground="{StaticResource TextMutedBrush}" FontSize="11" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding HiddenEventsCount}" Foreground="#FF758F" FontWeight="Bold" FontSize="11" Margin="0,0,16,0" VerticalAlignment="Center" />
+
+                <TextBlock Text="التمرير التلقائي: " Foreground="{StaticResource TextMutedBrush}" FontSize="11" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding AutoScrollShortText}" Foreground="{Binding AutoScrollStatusColor}" FontWeight="Bold" FontSize="11" Margin="0,0,16,0" VerticalAlignment="Center" />
+
+                <TextBlock Text="وصلة الأجهزة: " Foreground="{StaticResource TextMutedBrush}" FontSize="11" VerticalAlignment="Center" />
+                <TextBlock Text="متصلة وجاهزة" Foreground="#00FF9D" FontSize="11" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <!-- Brand Tagline (Right) -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="PhoenixGSM Studio • Forensic Telemetry for Samsung, Qualcomm, MTK &amp; Apple" 
+                           Foreground="{StaticResource TextMutedBrush}" FontSize="10.5" VerticalAlignment="Center" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

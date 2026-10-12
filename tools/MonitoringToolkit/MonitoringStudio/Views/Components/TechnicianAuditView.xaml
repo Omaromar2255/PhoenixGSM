@@ -1,0 +1,822 @@
+<UserControl x:Class="PhoenixGSM.MonitoringStudio.Views.Components.TechnicianAuditView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:vm="clr-namespace:PhoenixGSM.MonitoringStudio.ViewModels"
+             mc:Ignorable="d" 
+             d:DataContext="{d:DesignInstance Type=vm:MainViewModel, IsDesignTimeCreatable=False}"
+             d:DesignHeight="700" d:DesignWidth="1200">
+
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <!-- 0: Layer Control & Protocol Chips Bar -->
+            <RowDefinition Height="Auto" />
+            <!-- 1: Dedicated Technician Commands Stream Table (60%) -->
+            <RowDefinition Height="60*" MinHeight="180" />
+            <!-- 2: Splitter -->
+            <RowDefinition Height="6" />
+            <!-- 3: Dedicated Inspector Drawer (40%) -->
+            <RowDefinition Height="40*" MinHeight="140" />
+        </Grid.RowDefinitions>
+
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <!-- ROW 0: LAYER BANNER, FILTER CHIPS & CONTROLS                   -->
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="0" Background="{StaticResource CardBgBrush}" 
+                BorderBrush="{StaticResource BorderDarkBrush}" 
+                BorderThickness="1" CornerRadius="8" Padding="10,7" Margin="0,0,0,8">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Sub-row 0: Title, Persistence Indicator & Master Action Buttons -->
+                <Grid Grid.Row="0" Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Title & Live Save Badge -->
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="🛡️" FontSize="16" VerticalAlignment="Center" Margin="0,0,6,0" />
+                        <TextBlock Text="Technician ➔ Phone Audit Layer" FontSize="13" FontWeight="Bold" Foreground="#00FFC2" VerticalAlignment="Center" />
+                        
+                        <!-- Auto-Save Badge -->
+                        <Border Background="#0B2B20" BorderBrush="#00FF9D" BorderThickness="1" CornerRadius="4" Margin="10,0,0,0" Padding="7,2" VerticalAlignment="Center"
+                                ToolTip="{Binding AutoSaveLogPathDisplay}">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="🟢" FontSize="9" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Auto-Save Active (JSONL &amp; LOG)" FontSize="10" FontWeight="Bold" Foreground="#00FF9D" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- Search Filter Box -->
+                    <Grid Grid.Column="1" HorizontalAlignment="Right" Width="260" Margin="0,0,10,0">
+                        <TextBox Text="{Binding TechAuditSearchText, UpdateSourceTrigger=PropertyChanged}" 
+                                  Background="#0C0F17" Foreground="#FFFFFF" BorderBrush="#2A3347" 
+                                  CaretBrush="#00FFC2" Padding="8,3" FontSize="11" Height="26" VerticalContentAlignment="Center">
+                            <TextBox.Resources>
+                                <Style TargetType="{x:Type Border}">
+                                    <Setter Property="CornerRadius" Value="5"/>
+                                </Style>
+                            </TextBox.Resources>
+                        </TextBox>
+                        <TextBlock Text="🔍 Filter commands &amp; replies..." Foreground="{StaticResource TextMutedBrush}" FontSize="10.5" Margin="9,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding TechAuditSearchText}" Value="">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding TechAuditSearchText}" Value="{x:Null}">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+
+                    <!-- Action Buttons -->
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <!-- Auto-Scroll Toggle Button -->
+                        <Button Command="{Binding ToggleAutoScrollCommand}" 
+                                Height="26" FontSize="10.5" Padding="8,2" Margin="0,0,5,0"
+                                ToolTip="تشغيل أو إيقاف التمرير التلقائي لآخر أمر">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ModernBtn}">
+                                    <Setter Property="Background" Value="#171C28" />
+                                    <Setter Property="BorderBrush" Value="#2A3347" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding AutoScroll}" Value="True">
+                                            <Setter Property="Background" Value="#092B1E" />
+                                            <Setter Property="BorderBrush" Value="#00FF9D" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding AutoScroll}" Value="False">
+                                            <Setter Property="Background" Value="#332405" />
+                                            <Setter Property="BorderBrush" Value="#FFB800" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding AutoScrollIcon}" FontSize="10" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                <TextBlock Text="📜 التمرير: " Foreground="#FFFFFF" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding AutoScrollShortText}" FontWeight="Bold" Foreground="{Binding AutoScrollStatusColor}" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button Content="📂 Open Log Folder" 
+                                Command="{Binding OpenTechnicianAuditFolderCommand}" 
+                                Style="{StaticResource ModernBtn}" Height="26" FontSize="10.5" Padding="8,2" Margin="0,0,5,0"
+                                ToolTip="فتح مجلد السجلات المحفوظة تلقائياً في مستكشف ويندوز" />
+
+                        <Button Content="💾 Export Records" 
+                                Command="{Binding ExportTechnicianAuditCommand}" 
+                                Style="{StaticResource CyanActionBtn}" Height="26" FontSize="10.5" Padding="8,2" Margin="0,0,5,0"
+                                ToolTip="تصدير الأوامر وردود الهاتف المعروضة إلى ملف نصي صافٍ أو ملف JSON جنائي" />
+
+                        <Button Content="📋 Copy Text" 
+                                Command="{Binding CopyTechnicianCommandTextCommand}" 
+                                Style="{StaticResource ModernBtn}" Height="26" FontSize="10.5" Padding="8,2" Margin="0,0,5,0"
+                                ToolTip="نسخ النص المختار مباشرة إلى الحافظة" />
+
+                        <Button Content="🗗 Pop-out Window" 
+                                Command="{Binding OpenTechnicianAuditWindowCommand}" 
+                                Style="{StaticResource GreenActionBtn}" Height="26" FontSize="10.5" Padding="8,2" Margin="0,0,5,0"
+                                ToolTip="فتح هذه الشاشة في نافذة مستقلة منفصلة لمراقبة الأوامر جنباً إلى جنب" />
+
+                        <Button Content="🗑️ Clear View" 
+                                Command="{Binding ClearTechnicianAuditCommand}" 
+                                Style="{StaticResource ModernBtn}" Height="26" FontSize="10.5" Padding="8,2"
+                                ToolTip="تفريغ الشاشة الحالية (الملفات المحفوظة على القرص تظل محفوظة)" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- Sub-row 1: Direction & Protocol Filter Chips -->
+                <WrapPanel Grid.Row="1" Orientation="Horizontal" Margin="-3,0,-3,0">
+                    <!-- OPTIONAL TOGGLE: CAPTURE DEVICE INBOUND RESPONSES -->
+                    <Border CornerRadius="5" BorderThickness="1" Margin="3,1" Height="26">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#171C28" />
+                                <Setter Property="BorderBrush" Value="#232B3B" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsCaptureDeviceResponsesEnabled}" Value="True">
+                                        <Setter Property="Background" Value="#0B2B20" />
+                                        <Setter Property="BorderBrush" Value="#00FF9D" />
+                                        <Setter Property="BorderThickness" Value="1.5" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Button Command="{Binding ToggleDeviceResponseCaptureCommand}" 
+                                Style="{StaticResource ModernBtn}" Background="Transparent" BorderThickness="0" Padding="8,1" Height="24"
+                                ToolTip="{Binding DeviceResponseToggleTooltip}">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding DeviceResponseStatusIcon}" FontSize="10" Margin="0,0,5,0" VerticalAlignment="Center" />
+                                <TextBlock Text="📲 التقاط رد الهاتف: " Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="10.5" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding DeviceResponseToggleStatusText}" FontWeight="Bold" FontSize="10.5" VerticalAlignment="Center"
+                                           Foreground="{Binding DeviceResponseToggleStatusColor}" />
+                            </StackPanel>
+                        </Button>
+                    </Border>
+
+                    <!-- SEPARATOR -->
+                    <Rectangle Width="1" Height="18" Fill="#283347" Margin="6,4,6,4" VerticalAlignment="Center" />
+
+                    <!-- DIR: ALL -->
+                    <Border CornerRadius="5" BorderThickness="1" Margin="3,1" Height="26">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#171C28" />
+                                <Setter Property="BorderBrush" Value="#232B3B" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsTechAuditDirAllSelected}" Value="True">
+                                        <Setter Property="Background" Value="#0A2E22" />
+                                        <Setter Property="BorderBrush" Value="#00FFC2" />
+                                        <Setter Property="BorderThickness" Value="1.5" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Button Command="{Binding SelectTechAuditDirectionCommand}" CommandParameter="ALL"
+                                Style="{StaticResource ModernBtn}" Background="Transparent" BorderThickness="0" Padding="8,1" Height="24"
+                                ToolTip="عرض كافة السجلات (الأوامر الصادرة والردود الواردة معاً)">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="🌐 All Interceptions" Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="10.5" VerticalAlignment="Center" />
+                                <Border Background="#0E121D" BorderBrush="#00FFC2" BorderThickness="1" CornerRadius="3" Padding="4,1" Margin="5,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding TechAuditTotalCount}" FontSize="9.5" FontWeight="Bold" Foreground="#00FFC2" />
+                                </Border>
+                            </StackPanel>
+                        </Button>
+                    </Border>
+
+                    <!-- DIR: COMMANDS ONLY (>>) -->
+                    <Border CornerRadius="5" BorderThickness="1" Margin="3,1" Height="26">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#171C28" />
+                                <Setter Property="BorderBrush" Value="#232B3B" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsTechAuditDirCmdsSelected}" Value="True">
+                                        <Setter Property="Background" Value="#082A3A" />
+                                        <Setter Property="BorderBrush" Value="#00E5FF" />
+                                        <Setter Property="BorderThickness" Value="1.5" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Button Command="{Binding SelectTechAuditDirectionCommand}" CommandParameter="COMMANDS"
+                                Style="{StaticResource ModernBtn}" Background="Transparent" BorderThickness="0" Padding="8,1" Height="24"
+                                ToolTip="تصفية وعرض الأوامر الصادرة من الفني للهاتف فقط (Host ➔ Device)">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text=">> Commands Only" Foreground="#00E5FF" FontWeight="SemiBold" FontSize="10.5" VerticalAlignment="Center" />
+                                <Border Background="#0E121D" BorderBrush="#00E5FF" BorderThickness="1" CornerRadius="3" Padding="4,1" Margin="5,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding TechAuditOutboundCount}" FontSize="9.5" FontWeight="Bold" Foreground="#00E5FF" />
+                                </Border>
+                            </StackPanel>
+                        </Button>
+                    </Border>
+
+                    <!-- DIR: RESPONSES ONLY (<<) -->
+                    <Border CornerRadius="5" BorderThickness="1" Margin="3,1" Height="26">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#171C28" />
+                                <Setter Property="BorderBrush" Value="#232B3B" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsTechAuditDirResponsesSelected}" Value="True">
+                                        <Setter Property="Background" Value="#0B2B20" />
+                                        <Setter Property="BorderBrush" Value="#00FF9D" />
+                                        <Setter Property="BorderThickness" Value="1.5" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Button Command="{Binding SelectTechAuditDirectionCommand}" CommandParameter="RESPONSES"
+                                Style="{StaticResource ModernBtn}" Background="Transparent" BorderThickness="0" Padding="8,1" Height="24"
+                                ToolTip="تصفية وعرض ردود الهاتف الواردة فقط (Device ➔ Host)">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="&lt;&lt; Replies Only" Foreground="#00FF9D" FontWeight="SemiBold" FontSize="10.5" VerticalAlignment="Center" />
+                                <Border Background="#0E121D" BorderBrush="#00FF9D" BorderThickness="1" CornerRadius="3" Padding="4,1" Margin="5,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding TechAuditInboundCount}" FontSize="9.5" FontWeight="Bold" Foreground="#00FF9D" />
+                                </Border>
+                            </StackPanel>
+                        </Button>
+                    </Border>
+
+                    <!-- SEPARATOR -->
+                    <Rectangle Width="1" Height="18" Fill="#283347" Margin="6,4,6,4" VerticalAlignment="Center" />
+
+                    <!-- PROTO: ALL -->
+                    <Border CornerRadius="5" BorderThickness="1" Margin="3,1" Height="26">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#171C28" />
+                                <Setter Property="BorderBrush" Value="#232B3B" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsTechAuditAllSelected}" Value="True">
+                                        <Setter Property="Background" Value="#1F2636" />
+                                        <Setter Property="BorderBrush" Value="#E0E6ED" />
+                                        <Setter Property="BorderThickness" Value="1.5" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Button Command="{Binding SelectTechAuditProtocolCommand}" CommandParameter="ALL"
+                                Style="{StaticResource ModernBtn}" Background="Transparent" BorderThickness="0" Padding="8,1" Height="24"
+                                ToolTip="كافة البروتوكولات">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="All Protocols" Foreground="#E0E6ED" FontWeight="SemiBold" FontSize="10.5" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </Border>
+
+                    <!-- ADB -->
+                    <Border CornerRadius="5" BorderThickness="1" Margin="3,1" Height="26">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#171C28" />
+                                <Setter Property="BorderBrush" Value="#232B3B" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsTechAuditAdbSelected}" Value="True">
+                                        <Setter Property="Background" Value="#003D2A" />
+                                        <Setter Property="BorderBrush" Value="#00FF9D" />
+                                        <Setter Property="BorderThickness" Value="1.5" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Button Command="{Binding SelectTechAuditProtocolCommand}" CommandParameter="ADB"
+                                Style="{StaticResource ModernBtn}" Background="Transparent" BorderThickness="0" Padding="8,1" Height="24">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="⚡ ADB / Shell" Foreground="#00FF9D" FontWeight="SemiBold" FontSize="10.5" VerticalAlignment="Center" />
+                                <Border Background="#0E121D" BorderBrush="#252E42" BorderThickness="1" CornerRadius="3" Padding="4,1" Margin="5,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding TechAuditAdbCount}" FontSize="9.5" FontWeight="Bold" Foreground="#00FF9D" />
+                                </Border>
+                            </StackPanel>
+                        </Button>
+                    </Border>
+
+                    <!-- AT Modem -->
+                    <Border CornerRadius="5" BorderThickness="1" Margin="3,1" Height="26">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#171C28" />
+                                <Setter Property="BorderBrush" Value="#232B3B" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsTechAuditAtSelected}" Value="True">
+                                        <Setter Property="Background" Value="#382E00" />
+                                        <Setter Property="BorderBrush" Value="#FFC800" />
+                                        <Setter Property="BorderThickness" Value="1.5" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Button Command="{Binding SelectTechAuditProtocolCommand}" CommandParameter="AT"
+                                Style="{StaticResource ModernBtn}" Background="Transparent" BorderThickness="0" Padding="8,1" Height="24">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="📞 AT Modem / RIL" Foreground="#FFC800" FontWeight="SemiBold" FontSize="10.5" VerticalAlignment="Center" />
+                                <Border Background="#0E121D" BorderBrush="#252E42" BorderThickness="1" CornerRadius="3" Padding="4,1" Margin="5,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding TechAuditAtCount}" FontSize="9.5" FontWeight="Bold" Foreground="#FFC800" />
+                                </Border>
+                            </StackPanel>
+                        </Button>
+                    </Border>
+
+                    <!-- Fastboot -->
+                    <Border CornerRadius="5" BorderThickness="1" Margin="3,1" Height="26">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#171C28" />
+                                <Setter Property="BorderBrush" Value="#232B3B" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsTechAuditFastbootSelected}" Value="True">
+                                        <Setter Property="Background" Value="#002F38" />
+                                        <Setter Property="BorderBrush" Value="#00E5FF" />
+                                        <Setter Property="BorderThickness" Value="1.5" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Button Command="{Binding SelectTechAuditProtocolCommand}" CommandParameter="FASTBOOT"
+                                Style="{StaticResource ModernBtn}" Background="Transparent" BorderThickness="0" Padding="8,1" Height="24">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="🔥 Fastboot" Foreground="#00E5FF" FontWeight="SemiBold" FontSize="10.5" VerticalAlignment="Center" />
+                                <Border Background="#0E121D" BorderBrush="#252E42" BorderThickness="1" CornerRadius="3" Padding="4,1" Margin="5,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding TechAuditFastbootCount}" FontSize="9.5" FontWeight="Bold" Foreground="#00E5FF" />
+                                </Border>
+                            </StackPanel>
+                        </Button>
+                    </Border>
+
+                    <!-- MTK -->
+                    <Border CornerRadius="5" BorderThickness="1" Margin="3,1" Height="26">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#171C28" />
+                                <Setter Property="BorderBrush" Value="#232B3B" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsTechAuditMtkSelected}" Value="True">
+                                        <Setter Property="Background" Value="#381D00" />
+                                        <Setter Property="BorderBrush" Value="#FF6D00" />
+                                        <Setter Property="BorderThickness" Value="1.5" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Button Command="{Binding SelectTechAuditProtocolCommand}" CommandParameter="MTK"
+                                Style="{StaticResource ModernBtn}" Background="Transparent" BorderThickness="0" Padding="8,1" Height="24">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="⚙️ MediaTek BROM/DA" Foreground="#FF6D00" FontWeight="SemiBold" FontSize="10.5" VerticalAlignment="Center" />
+                                <Border Background="#0E121D" BorderBrush="#252E42" BorderThickness="1" CornerRadius="3" Padding="4,1" Margin="5,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding TechAuditMtkCount}" FontSize="9.5" FontWeight="Bold" Foreground="#FF6D00" />
+                                </Border>
+                            </StackPanel>
+                        </Button>
+                    </Border>
+
+                    <!-- Qualcomm EDL -->
+                    <Border CornerRadius="5" BorderThickness="1" Margin="3,1" Height="26">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#171C28" />
+                                <Setter Property="BorderBrush" Value="#232B3B" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsTechAuditEdlSelected}" Value="True">
+                                        <Setter Property="Background" Value="#38080E" />
+                                        <Setter Property="BorderBrush" Value="#FF1744" />
+                                        <Setter Property="BorderThickness" Value="1.5" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Button Command="{Binding SelectTechAuditProtocolCommand}" CommandParameter="EDL"
+                                Style="{StaticResource ModernBtn}" Background="Transparent" BorderThickness="0" Padding="8,1" Height="24">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="⚡ Qualcomm EDL 9008" Foreground="#FF1744" FontWeight="SemiBold" FontSize="10.5" VerticalAlignment="Center" />
+                                <Border Background="#0E121D" BorderBrush="#252E42" BorderThickness="1" CornerRadius="3" Padding="4,1" Margin="5,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding TechAuditEdlCount}" FontSize="9.5" FontWeight="Bold" Foreground="#FF1744" />
+                                </Border>
+                            </StackPanel>
+                        </Button>
+                    </Border>
+
+                    <!-- Unisoc SPD -->
+                    <Border CornerRadius="5" BorderThickness="1" Margin="3,1" Height="26">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#171C28" />
+                                <Setter Property="BorderBrush" Value="#232B3B" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsTechAuditSpdSelected}" Value="True">
+                                        <Setter Property="Background" Value="#31003D" />
+                                        <Setter Property="BorderBrush" Value="#E040FB" />
+                                        <Setter Property="BorderThickness" Value="1.5" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Button Command="{Binding SelectTechAuditProtocolCommand}" CommandParameter="SPD"
+                                Style="{StaticResource ModernBtn}" Background="Transparent" BorderThickness="0" Padding="8,1" Height="24">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="📱 Unisoc FDL" Foreground="#E040FB" FontWeight="SemiBold" FontSize="10.5" VerticalAlignment="Center" />
+                                <Border Background="#0E121D" BorderBrush="#252E42" BorderThickness="1" CornerRadius="3" Padding="4,1" Margin="5,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding TechAuditSpdCount}" FontSize="9.5" FontWeight="Bold" Foreground="#E040FB" />
+                                </Border>
+                            </StackPanel>
+                        </Button>
+                    </Border>
+
+                    <!-- Apple iOS -->
+                    <Border CornerRadius="5" BorderThickness="1" Margin="3,1" Height="26">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#171C28" />
+                                <Setter Property="BorderBrush" Value="#232B3B" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsTechAuditAppleSelected}" Value="True">
+                                        <Setter Property="Background" Value="#2B303C" />
+                                        <Setter Property="BorderBrush" Value="#FFFFFF" />
+                                        <Setter Property="BorderThickness" Value="1.5" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Button Command="{Binding SelectTechAuditProtocolCommand}" CommandParameter="APPLE"
+                                Style="{StaticResource ModernBtn}" Background="Transparent" BorderThickness="0" Padding="8,1" Height="24">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="🍏 Apple iOS (DFU/Rec)" Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="10.5" VerticalAlignment="Center" />
+                                <Border Background="#0E121D" BorderBrush="#252E42" BorderThickness="1" CornerRadius="3" Padding="4,1" Margin="5,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding TechAuditAppleCount}" FontSize="9.5" FontWeight="Bold" Foreground="#FFFFFF" />
+                                </Border>
+                            </StackPanel>
+                        </Button>
+                    </Border>
+                </WrapPanel>
+            </Grid>
+        </Border>
+
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <!-- ROW 1: DEDICATED TECHNICIAN COMMANDS STREAM DATAGRID           -->
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="1" Background="{StaticResource CardBgBrush}" 
+                BorderBrush="{StaticResource BorderDarkBrush}" 
+                BorderThickness="1" CornerRadius="8">
+            <Grid>
+                <DataGrid x:Name="TechAuditDataGrid"
+                          PreviewMouseWheel="TechAuditDataGrid_PreviewMouseWheel"
+                          ScrollViewer.ScrollChanged="TechAuditDataGrid_ScrollChanged"
+                          ItemsSource="{Binding FilteredTechnicianAuditRecords}"
+                          SelectedItem="{Binding SelectedTechnicianRecord}"
+                          AutoGenerateColumns="False"
+                          CanUserAddRows="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          GridLinesVisibility="Horizontal"
+                          HorizontalGridLinesBrush="#1F2436"
+                          Background="Transparent"
+                          RowBackground="#151824"
+                          AlternatingRowBackground="#181C2B"
+                      Foreground="#E0E6ED"
+                      BorderThickness="0"
+                      HeadersVisibility="Column"
+                      FontFamily="Consolas, Segoe UI"
+                      FontSize="11.5"
+                      VirtualizingStackPanel.IsVirtualizing="True"
+                      VirtualizingStackPanel.VirtualizationMode="Recycling"
+                      EnableRowVirtualization="True">
+
+                <DataGrid.ColumnHeaderStyle>
+                    <Style TargetType="DataGridColumnHeader">
+                        <Setter Property="Background" Value="#10121C" />
+                        <Setter Property="Foreground" Value="#00FFC2" />
+                        <Setter Property="FontWeight" Value="SemiBold" />
+                        <Setter Property="Padding" Value="8,6" />
+                        <Setter Property="BorderBrush" Value="#22283A" />
+                        <Setter Property="BorderThickness" Value="0,0,1,1" />
+                    </Style>
+                </DataGrid.ColumnHeaderStyle>
+
+                <DataGrid.RowStyle>
+                    <Style TargetType="DataGridRow">
+                        <Setter Property="Height" Value="24" />
+                        <Style.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#20263A" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" Value="#0A3326" />
+                                <Setter Property="BorderBrush" Value="#00FFC2" />
+                                <Setter Property="BorderThickness" Value="0,1,0,1" />
+                            </Trigger>
+                        </Style.Triggers>
+                    </Style>
+                </DataGrid.RowStyle>
+
+                <DataGrid.Columns>
+                    <!-- ID -->
+                    <DataGridTextColumn Header="#" Binding="{Binding Id}" Width="45">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="#607286" />
+                                <Setter Property="HorizontalAlignment" Value="Center" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+
+                    <!-- Timestamp -->
+                    <DataGridTextColumn Header="TIME" Binding="{Binding TimeFormatted}" Width="95">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="#8E9AA8" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                                <Setter Property="Margin" Value="6,0" />
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+
+                    <!-- Direction (DIR) Badge -->
+                    <DataGridTemplateColumn Header="DIR" Width="85">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <Border Background="{Binding DirectionBadgeBackground}" 
+                                        BorderBrush="{Binding DirectionBadgeColor}" 
+                                        BorderThickness="1" 
+                                        CornerRadius="3" Padding="4,1" Margin="2,1" HorizontalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding DirectionSymbol}" Foreground="{Binding DirectionBadgeColor}" 
+                                                   FontWeight="Bold" FontSize="10" Margin="0,0,4,0" />
+                                        <TextBlock Text="{Binding DirectionShort}" Foreground="{Binding DirectionBadgeColor}" 
+                                                   FontWeight="SemiBold" FontSize="9.5" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+
+                    <!-- Protocol Badge -->
+                    <DataGridTemplateColumn Header="PROTOCOL" Width="105">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <Border Background="#101622" BorderBrush="{Binding ProtocolBadgeColor}" BorderThickness="1" 
+                                        CornerRadius="3" Padding="6,1" Margin="3,1" HorizontalAlignment="Center">
+                                    <TextBlock Text="{Binding Protocol}" Foreground="{Binding ProtocolBadgeColor}" 
+                                               FontWeight="Bold" FontSize="10" />
+                                </Border>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+
+                    <!-- Device Mode -->
+                    <DataGridTextColumn Header="MODE" Binding="{Binding Mode}" Width="110">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="#00E5FF" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                                <Setter Property="Margin" Value="6,0" />
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+
+                    <!-- Target / Port -->
+                    <DataGridTextColumn Header="TARGET / PORT" Binding="{Binding TargetDeviceOrPort}" Width="125">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="#FFB800" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                                <Setter Property="Margin" Value="6,0" />
+                                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                <Setter Property="ToolTip" Value="{Binding TargetDeviceOrPort}" />
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+
+                    <!-- Technician Tool (PID) -->
+                    <DataGridTemplateColumn Header="TOOL (PID)" Width="125">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0">
+                                    <TextBlock Text="{Binding TechnicianTool}" Foreground="#E066FF" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding TechnicianProcessId, StringFormat=' ({0})'}" Foreground="#8E9AA8" FontSize="10.5" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+
+                    <!-- Command or Phone Response Payload -->
+                    <DataGridTemplateColumn Header="COMMAND / PHONE RESPONSE" Width="*">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0"
+                                            ToolTip="{Binding PureCommand}">
+                                    <TextBlock Text="{Binding DirectionSymbol, StringFormat='{}{0} '}" 
+                                               Foreground="{Binding DirectionBadgeColor}" 
+                                               FontWeight="Bold" FontFamily="Consolas" FontSize="11.5" />
+                                    <TextBlock Text="{Binding PureCommand}" 
+                                               Foreground="{Binding DirectionBadgeColor}" 
+                                               FontWeight="Bold" FontFamily="Consolas" FontSize="11.5"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding DeviceResponse, StringFormat=' [Reply: {0}]'}" 
+                                               Foreground="#00FF9D" FontSize="10" FontFamily="Consolas" FontStyle="Italic" Margin="8,0,0,0"
+                                               TextTrimming="CharacterEllipsis">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsResponse}" Value="False">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </StackPanel>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+
+                    <!-- Risk / Intent / Status -->
+                    <DataGridTemplateColumn Header="INTENT / STATUS" Width="115">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <Border Background="#121824" BorderBrush="{Binding RiskBadgeColor}" BorderThickness="1" 
+                                        CornerRadius="3" Padding="5,1" Margin="3,1" HorizontalAlignment="Center">
+                                    <TextBlock Text="{Binding RiskLevel}" Foreground="{Binding RiskBadgeColor}" 
+                                               FontWeight="Bold" FontSize="9.5" />
+                                </Border>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+
+                    <!-- Hash -->
+                    <DataGridTextColumn Header="SHA256" Binding="{Binding Sha256Hash}" Width="85">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="#6B7280" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                                <Setter Property="HorizontalAlignment" Value="Center" />
+                                <Setter Property="FontSize" Value="10" />
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <!-- Floating Jump-to-Bottom & Resume Banner (Shown when AutoScroll is paused) -->
+            <Border Visibility="{Binding IsAutoScrollPaused, Converter={StaticResource BoolToVis}}"
+                    HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                    Margin="0,0,24,20"
+                    Background="#111624" BorderBrush="#00FFC2" BorderThickness="1.5"
+                    CornerRadius="16" Padding="6,3">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="12" ShadowDepth="3" Opacity="0.6" Color="#000000" />
+                </Border.Effect>
+                <Button Command="{Binding ResumeAutoScrollCommand}"
+                        Background="Transparent" BorderThickness="0" Cursor="Hand" Padding="8,4">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <ContentPresenter />
+                        </ControlTemplate>
+                    </Button.Template>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="⏬" FontSize="13" Margin="0,0,6,0" VerticalAlignment="Center" />
+                        <TextBlock Text="التمرير التلقائي متوقف • انقر للانتقال لآخر أمر واستئناف" FontWeight="Bold" FontSize="11" Foreground="#00FFC2" VerticalAlignment="Center" />
+                        <Border Background="#0C3325" BorderBrush="#00FF9D" BorderThickness="1" CornerRadius="4" Padding="5,1" Margin="8,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="LIVE" FontWeight="Bold" FontSize="9" Foreground="#00FF9D" />
+                        </Border>
+                    </StackPanel>
+                </Button>
+            </Border>
+        </Grid>
+    </Border>
+
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <!-- ROW 2: DRAGGABLE SPLITTER                                      -->
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <GridSplitter Grid.Row="2" Height="6" HorizontalAlignment="Stretch" 
+                      Background="#121622" Cursor="SizeNS" ShowsPreview="True" />
+
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <!-- ROW 3: DETAILED COMMAND & PAYLOAD INSPECTOR DRAWER             -->
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="3" Background="{StaticResource CardBgBrush}" 
+                BorderBrush="{StaticResource BorderDarkBrush}" 
+                BorderThickness="1" CornerRadius="8" Padding="12,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <!-- Left: Pure Command & Context Details (55%) -->
+                    <ColumnDefinition Width="55*" />
+                    <!-- Divider -->
+                    <ColumnDefinition Width="12" />
+                    <!-- Right: Raw Command & Hex Dump (45%) -->
+                    <ColumnDefinition Width="45*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- LEFT PANE: Pure Command / Response & Metadata -->
+                <Grid Grid.Column="0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Dynamic Directional Header -->
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="{Binding SelectedTechnicianRecord.PrimaryHeaderIcon}" FontSize="13" Margin="0,0,6,0" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding SelectedTechnicianRecord.PrimaryHeaderTitle}" FontSize="12" FontWeight="Bold" Foreground="{Binding SelectedTechnicianRecord.DirectionBadgeColor}" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding SelectedTechnicianRecord.Protocol, StringFormat=' [{0}]'}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding SelectedTechnicianRecord.Mode, StringFormat=' - Mode: {0}'}" Foreground="#00E5FF" FontSize="11" VerticalAlignment="Center" Margin="6,0,0,0" />
+                        <TextBlock Text="{Binding SelectedTechnicianRecord.DirectionShort, StringFormat=' ({0})'}" Foreground="{Binding SelectedTechnicianRecord.DirectionBadgeColor}" FontSize="10.5" FontWeight="SemiBold" VerticalAlignment="Center" Margin="6,0,0,0" />
+                    </StackPanel>
+
+                    <!-- Interactive Command & Paired Response Display Grid -->
+                    <Grid Grid.Row="1">
+                        <Grid.RowDefinitions>
+                            <!-- Primary Payload Box -->
+                            <RowDefinition Height="*" MinHeight="65" />
+                            <!-- Paired Section (Command or Response) -->
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <!-- Primary Payload Display Box -->
+                        <TextBox Grid.Row="0" Text="{Binding SelectedTechnicianRecord.PureCommand, Mode=OneWay}" 
+                                 IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                                 Background="#0A0D14" Foreground="{Binding SelectedTechnicianRecord.DirectionBadgeColor}" BorderBrush="#1C2436" 
+                                 FontFamily="Consolas" FontSize="12.5" FontWeight="Bold" Padding="9" />
+
+                        <!-- Paired Payload Drawer (Visible only when paired command or response exists) -->
+                        <Border Grid.Row="1" Margin="0,6,0,0" Background="#061019" BorderBrush="#162E44" BorderThickness="1" CornerRadius="4" Padding="8,6"
+                                Visibility="{Binding SelectedTechnicianRecord.HasPairedData, Converter={StaticResource BoolToVis}}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,4">
+                                    <TextBlock Text="🔗" FontSize="10" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding SelectedTechnicianRecord.PairedHeaderTitle}" 
+                                               Foreground="{Binding SelectedTechnicianRecord.PairedBadgeColor}" 
+                                               FontSize="10" FontWeight="Bold" VerticalAlignment="Center" />
+                                </StackPanel>
+
+                                <TextBox Grid.Row="1" Text="{Binding SelectedTechnicianRecord.PairedPayload, Mode=OneWay}" 
+                                         IsReadOnly="True" TextWrapping="Wrap" MaxHeight="80" VerticalScrollBarVisibility="Auto"
+                                         Background="#040A10" Foreground="{Binding SelectedTechnicianRecord.PairedBadgeColor}" BorderBrush="#142636" 
+                                         FontFamily="Consolas" FontSize="11" Padding="6" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+
+                    <!-- Bottom Details Bar -->
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,6,0,0">
+                        <TextBlock Text="Tool: " Foreground="{StaticResource TextMutedBrush}" FontSize="10.5" />
+                        <TextBlock Text="{Binding SelectedTechnicianRecord.TechnicianTool}" Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="10.5" />
+                        <TextBlock Text="{Binding SelectedTechnicianRecord.TechnicianProcessId, StringFormat=' (PID: {0})'}" Foreground="#6B7280" FontSize="10.5" Margin="0,0,12,0" />
+
+                        <TextBlock Text="Target: " Foreground="{StaticResource TextMutedBrush}" FontSize="10.5" />
+                        <TextBlock Text="{Binding SelectedTechnicianRecord.TargetDeviceOrPort}" Foreground="#FFB800" FontWeight="SemiBold" FontSize="10.5" Margin="0,0,12,0" />
+
+                        <TextBlock Text="SHA256: " Foreground="{StaticResource TextMutedBrush}" FontSize="10.5" />
+                        <TextBlock Text="{Binding SelectedTechnicianRecord.Sha256Hash}" Foreground="#8E9AA8" FontFamily="Consolas" FontSize="10" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- DIVIDER -->
+                <Rectangle Grid.Column="1" Width="1" Fill="#20263A" HorizontalAlignment="Center" />
+
+                <!-- RIGHT PANE: Raw Buffer & Hex Dump -->
+                <Grid Grid.Column="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="📦" FontSize="13" Margin="0,0,6,0" VerticalAlignment="Center" />
+                        <TextBlock Text="Payload Hex Dump &amp; Evidence Stream:" FontSize="12" FontWeight="Bold" Foreground="#00E5FF" VerticalAlignment="Center" />
+                    </StackPanel>
+
+                    <TextBox Grid.Row="1" Text="{Binding SelectedTechnicianRecord.HexPayload, Mode=OneWay}" 
+                             IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                             Background="#0A0D14" Foreground="#E0E6ED" BorderBrush="#1C2436" 
+                             FontFamily="Consolas" FontSize="11" Padding="8" />
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

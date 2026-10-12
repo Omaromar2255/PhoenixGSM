@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>PhoenixGSM.MonitoringStudio</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>DevConfigStudio</AssemblyName>
+  </PropertyGroup>
+
+  <Target Name="CopyOutputAlias" AfterTargets="Build">
+    <Copy SourceFiles="$(TargetDir)DevConfigStudio.exe" DestinationFiles="$(TargetDir)MonitoringStudio.exe" Condition="Exists('$(TargetDir)DevConfigStudio.exe')" />
+  </Target>
+
+  <ItemGroup>
+    <ProjectReference Include="..\UsbMonitor\UsbMonitor\UsbMonitor.csproj" />
+    <ProjectReference Include="..\UsbMonitor\UsbMonitorDiscovery\UsbMonitorDiscovery.csproj" />
+    <ProjectReference Include="..\SerialSniffer\SerialSniffer.csproj" />
+    <ProjectReference Include="..\ProcessMonitor\ProcessMonitor.csproj" />
+    <ProjectReference Include="..\CommandAnalyzer\CommandAnalyzer.csproj" />
+    <ProjectReference Include="..\AdbMonitor\AdbMonitor.csproj" />
+    <ProjectReference Include="..\PhoenixOmniTrace\PhoenixOmniTrace.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Management" Version="10.0.12" />
+  </ItemGroup>
+
+</Project>

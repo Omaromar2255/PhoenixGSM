@@ -1,0 +1,97 @@
+<UserControl x:Class="PhoenixGSM.MonitoringStudio.Views.Components.MetricsDashboardView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             mc:Ignorable="d" 
+             d:DesignHeight="46" d:DesignWidth="1340">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Card 1: USB Kernel Driver -->
+        <Border Grid.Column="0" Background="{StaticResource CardBgBrush}" 
+                BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1" 
+                CornerRadius="6" Padding="8,4" Height="46" Margin="0,0,4,0">
+            <Grid VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="🔌" FontSize="17" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="USB KERNEL DRIVER" FontSize="9.5" FontWeight="Bold" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text=" • " FontSize="9" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="3,0" />
+                        <TextBlock Text="{Binding DriverStatusText}" FontSize="10.5" FontWeight="Bold" Foreground="{Binding DriverStatusColor}" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,2,0,0">
+                        <TextBlock Text="{Binding FilterMonitoringCardText}" FontSize="9.5" FontWeight="SemiBold" Foreground="{Binding FilterMonitoringStatusColor}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                        <Button Content="{Binding FilterToggleButtonText}" Command="{Binding ToggleFilterMonitoringCommand}" 
+                                Padding="5,0" FontSize="8.5" Height="17" Style="{StaticResource ModernBtn}" VerticalAlignment="Center" Margin="0,0,4,0" />
+                        <Button Content="⚙️ الفلاتر" Command="{Binding OpenFilterManagerCommand}" 
+                                Padding="5,0" FontSize="8.5" Height="17" Style="{StaticResource ModernBtn}" VerticalAlignment="Center" />
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Card 2: Connected USB -->
+        <Border Grid.Column="1" Background="{StaticResource CardBgBrush}" 
+                BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1" 
+                CornerRadius="6" Padding="8,4" Height="46" Margin="2,0,4,0"
+                ToolTip="{Binding ConnectedDevicesText}">
+            <Grid VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="📱" FontSize="17" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="CONNECTED USB (ADB &amp; WINUSB)" FontSize="9.5" FontWeight="Bold" Foreground="{StaticResource TextMutedBrush}" />
+                    <TextBlock Text="{Binding ConnectedDevicesText}" FontSize="11.5" FontWeight="Bold" Foreground="#00E5FF" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Card 3: Serial / Modem Ports -->
+        <Border Grid.Column="2" Background="{StaticResource CardBgBrush}" 
+                BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1" 
+                CornerRadius="6" Padding="8,4" Height="46" Margin="2,0,4,0"
+                ToolTip="{Binding ComPortsText}">
+            <Grid VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="📟" FontSize="17" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="SERIAL / MODEM PORTS" FontSize="9.5" FontWeight="Bold" Foreground="{StaticResource TextMutedBrush}" />
+                    <TextBlock Text="{Binding ComPortsText}" FontSize="11.5" FontWeight="Bold" Foreground="#FFC800" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Card 4: Repair Tools -->
+        <Border Grid.Column="3" Background="{StaticResource CardBgBrush}" 
+                BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1" 
+                CornerRadius="6" Padding="8,4" Height="46" Margin="2,0,0,0"
+                ToolTip="{Binding DetectedToolsText}">
+            <Grid VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="🛠️" FontSize="17" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="REPAIR TOOLS ACTIVE" FontSize="9.5" FontWeight="Bold" Foreground="{StaticResource TextMutedBrush}" />
+                    <TextBlock Text="{Binding DetectedToolsText}" FontSize="11.5" FontWeight="Bold" Foreground="#E066FF" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

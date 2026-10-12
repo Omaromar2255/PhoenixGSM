@@ -1,0 +1,309 @@
+﻿=================================================
+   DEEP RELOCK FORENSIC EXTRACTION ENGINE       
+=================================================
+Timestamp: 2026-10-06 01:34:51
+
+[+] Scanning Q-Unlocker.DMP (278 MB)...
+
+--- Target Term Matches in Q-Unlocker ---
+
+  === Term: [relock] (15 occurrences) ===
+    >> .failed to write data.w+.failed to truncate '%1'..Unlocking.Relocking.seccfg.%0.%0 Bootloader : .data.already unloced.OK..Erasing security backup data : .Rebooting device : .Done.v
+    >> MAIN.Perform Job.Unlock Bootloader.Unlock Bootloader (PERM).ReLock Bootloader.Remove FRP Lock.Factory Reset (Generic).Factory OPPO (Keep Media) .Backup NV.Write NV.Wipe NV.Disbale 
+    >> ayout.ProgressLayout_2.chk_unlock_bl.chk_unlock_bl_perm.chk_relock_bl.ProgressLayout_3.chk_reset_frp.chk_reset_userdata.chk_reset_oppo.ProgressLayout_5.chk_read_nvm.chk_write_nvm.c
+    >> P error:.Q UNLOCKER .MainWindow.Services.Change CSC.Carrier Relock..KNOX.Read Info.History.Support File.Read Code.FRP SAMSUNG.R/W Cert.Unlock.Other Services.Main.Unlock SIM.Do Job.
+    >> Layout_10.gridLayout_3.ptn_CsC.:/icon/my/frp/Globe_64px.png.Relockbtn.:/icon/my/frp/unlock_50px.png.ptn_Knox.:/icon/my/frp/Google_64px.png.btn_read_info.:/icon/my/frp/info_24px.png
+    >> s.samsung.Change CSC.READ CERT.WRITE CERT.Read Code.Carrier Relock.,.%1 Credit.FREE.             <tr style="background-color: %1;">                 <td style="border-bottom: 1px so
+    >> .mcc.mnc.countryName.operator.true.false.CheckModel.Carrier Relock.%0.Model supported.Function 1:.Function 2:.Function 3:.OK.Model Not Supported.Manual.-.Select at least one item..
+    >> ed_on.UserPass.97VxRtMuNtI6Glw.Block.#2cbaff.#00bd00.Method Relock.Choose the Relock Method..font-size:13pt; font-weight:bold;.Method 1.Method 2.Cancel.background:red;.|.HTTP GET E
+    >> xRtMuNtI6Glw.Block.#2cbaff.#00bd00.Method Relock.Choose the Relock Method..font-size:13pt; font-weight:bold;.Method 1.Method 2.Cancel.background:red;.|.HTTP GET Error:./Files/last_
+    >> json.Cannot open data file.Error. | .F.00.Invalid MCC-MNC .SRELOCK1....https://api.q-unlocker.com/api/sere/2.TMB-TMK-VZW-APP-AIO-XAU.This carrier is Not Support .VZW.yyyy-MM-dd.202
+    >> raction.GsaVoiceInteractionService > /dev/null 2>&1.Carrier Relock  Done.Please Reboot Device Manually.model.flask->my_restricted_modle.Apifuncname.Apifuncmethod.Apifunctype.Apifun
+    >> e.Apifuncname.Apifuncmethod.Apifunctype.Apifunccost.Carrier Relock M1.Carrier Relock M2.TO.extractedNumber:.secNum:.This model only supports [.)] .Invalid phone date:..Invalid serv
+    >> uncmethod.Apifunctype.Apifunccost.Carrier Relock M1.Carrier Relock M2.TO.extractedNumber:.secNum:.This model only supports [.)] .Invalid phone date:..Invalid server security patch:
+    >> ed.eventFilter.obj.QEvent*.event.on_ptn_openhist_clicked.on_Relockbtn_clicked.on_ptn_otherservices_clicked.???? ...........NUIAppInit..???? ...........QBoxLayout..........???? ....
+    >> 64iiiiEUliiE_EvS2_iRKT_EUlvE_.......................*Z27showReLockSelectionDialog9xP7QWidgetEUliE4_.................*Z27showReLockSelectionDialog9xP7QWidgetEUliE5_.................
+
+  === Term: [R5CX105PKGA] (5 occurrences) ===
+    >> r\n [+] Product Name   : samsung\r\r\n [+] Serial Number  : R5CX105PKGA\r\r\n [+] Security patch : 2024-11-01\r\r\n\r\r\n\r\r\n[*] Generate Authenticator \r\r\n" ...........?1<j...
+    >> \": \"Carrier Relock\",\n    \"Ril\": \"1\",\n    \"SN\": \"R5CX105PKGA\",\n    \"Token\": \"CCE4BF6FD464BC8A245B37E5D2D28DE3971B792944FAE0E2B288989004F2258F11B2CC5AEDFC0BF335346D9
+    >> pration_name": "Carrier Relock",     "Ril": "1",     "SN": "R5CX105PKGA",     "Token": "CCE4BF6FD464BC8A245B37E5D2D28DE3971B792944FAE0E2B288989004F2258F11B2CC5AEDFC0BF335346D9DD561
+    >> com    [+] Product Name   : samsung    [+] Serial Number  : R5CX105PKGA    [+] Security patch : 2024-11-01         [*] Generate Authenticator    ...................................
+    >> com    [+] Product Name   : samsung    [+] Serial Number  : R5CX105PKGA    [+] Security patch : 2024-11-01         [*] Generate Authenticator    e.s.o.u.r.c.e.s.\.b.i.n.\.l.a.n.g.u
+
+  === Term: [SM-S928U1] (6 occurrences) ===
+    >> **************************\r\r\n\r\r\n [+] Product Model  : SM-S928U1\r\r\n [+] Product CPU    : qcom\r\r\n [+] Product Name   : samsung\r\r\n [+] Serial Number  : R5CX105PKGA\r\r\
+    >> ......????????........????????: "albakrepc2",     "model": "SM-S928U1" } .......o.w.s.\.s.y.s.t.e.m.3.2.\.s.v.c.h.o.s.t...e.x.e. . . . . . . . . . . . . . . . . . . . . . . . . . .
+    >> 4E3\",\n    \"UserName\": \"albakrepc2\",\n    \"model\": \"SM-S928U1\"\n}\n",     "token": 99259283,     "url": "apirelock/" } .....M.j.t.9./.w.g.Y.g.y.M.A.Y.Y.O.B.r.Y.c.5.h.u.3.R
+    >> 46D9DD56184E3",     "UserName": "albakrepc2",     "model": "SM-S928U1" } .?%?c. .?..................................................................................................
+    >> ********************************       [+] Product Model  : SM-S928U1    [+] Product CPU    : qcom    [+] Product Name   : samsung    [+] Serial Number  : R5CX105PKGA    [+] Securi
+    >> DT2xUgzft1E/ujBF5H3yvTz4=   RESPONSE : [+] Product Model  : SM-S928U1    [+] Product CPU    : qcom    [+] Product Name   : samsung    [+] Serial Number  : R5CX105PKGA    [+] Securi
+
+  === Term: [S928U1] (9 occurrences) ===
+    >> ***********************\r\r\n\r\r\n [+] Product Model  : SM-S928U1\r\r\n [+] Product CPU    : qcom\r\r\n [+] Product Name   : samsung\r\r\n [+] Serial Number  : R5CX105PKGA\r\r\n [
+    >> ...????????........????????: "albakrepc2",     "model": "SM-S928U1" } .......o.w.s.\.s.y.s.t.e.m.3.2.\.s.v.c.h.o.s.t...e.x.e. . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+    >> \",\n    \"UserName\": \"albakrepc2\",\n    \"model\": \"SM-S928U1\"\n}\n",     "token": 99259283,     "url": "apirelock/" } .....M.j.t.9./.w.g.Y.g.y.M.A.Y.Y.O.B.r.Y.c.5.h.u.3.R.q.
+    >> 9DD56184E3",     "UserName": "albakrepc2",     "model": "SM-S928U1" } .?%?c. .?.....................................................................................................
+    >> *****************************       [+] Product Model  : SM-S928U1    [+] Product CPU    : qcom    [+] Product Name   : samsung    [+] Serial Number  : R5CX105PKGA    [+] Security 
+    >> xUgzft1E/ujBF5H3yvTz4=   RESPONSE : [+] Product Model  : SM-S928U1    [+] Product CPU    : qcom    [+] Product Name   : samsung    [+] Serial Number  : R5CX105PKGA    [+] Security 
+    >> ld.fingerprint]: [samsung/e3que???ws?.?4:14/UP1A.231005.007/S928U1UEU4AXK4:user/release-keys]  [ro.system.build.id]: [UP1A.2310???w0?.? [ro.system.build.tags]: [release-keys]  [ro.
+    >> uild.type]: [user]  [ro.system.builL?evr?.?n.incremental]: [S928U1UEU4AXK4]  [ro.system.build.version.release]: [14]  [ro.system.buP?qvv?.?ion.release_or_codename]: [14]  [ro.syste
+    >> .type]: [user]  [ro.sy???v_?.?.build.version.incremental]: [S928U1UEU4AXK4]  [ro.system_ext.build.version.release]: [1???v[?.?system_ext.build.version.release_or_codename]: [14]  [
+
+  === Term: [GsaVoiceInteractionService] (5 occurrences) ===
+    >> id.googlequicksearchbox/com.google.android.voiceinteraction.GsaVoiceInteractionService > /dev/null 2>&1.Change CSC.samsung.Select CSC.QDialog{background-color: black;}.Select.Chose
+    >> id.googlequicksearchbox/com.google.android.voiceinteraction.GsaVoiceInteractionService > /dev/null 2>&1.Hunter_Ril_Sam_FTL....Pass.Email.hwid.Loginby.Verizon.Osverizon.Country.City
+    >> id.googlequicksearchbox/com.google.android.voiceinteraction.GsaVoiceInteractionService > /dev/null 2>&1.All Done.2026-07-01.0101000804012700.01030007043300.Unlock thread =.Other Se
+    >> id.googlequicksearchbox/com.google.android.voiceinteraction.GsaVoiceInteractionService > /dev/null 2>&1.Carrier Relock  Done.Please Reboot Device Manually.model.flask->my_restricte
+    >> id.googlequicksearchbox/com.google.android.voiceinteraction.GsaVoiceInteractionService > /dev/null 2>&1.Unlocking Done.Please Reboot Device Manually..UiButton.LOG_METHOD..?..:?..b?
+
+  === Term: [Carrier Relock] (13 occurrences) ===
+    >> d:.1.HTTP error:.Q UNLOCKER .MainWindow.Services.Change CSC.Carrier Relock..KNOX.Read Info.History.Support File.Read Code.FRP SAMSUNG.R/W Cert.Unlock.Other Services.Main.Unlock SIM
+    >> RP Bypass.samsung.Change CSC.READ CERT.WRITE CERT.Read Code.Carrier Relock.,.%1 Credit.FREE.             <tr style="background-color: %1;">                 <td style="border-bottom
+    >> LL.BELOW.mcc.mnc.countryName.operator.true.false.CheckModel.Carrier Relock.%0.Model supported.Function 1:.Function 2:.Function 3:.OK.Model Not Supported.Manual.-.Select at least on
+    >> oiceinteraction.GsaVoiceInteractionService > /dev/null 2>&1.Carrier Relock  Done.Please Reboot Device Manually.model.flask->my_restricted_modle.Apifuncname.Apifuncmethod.Apifunctyp
+    >> ted_modle.Apifuncname.Apifuncmethod.Apifunctype.Apifunccost.Carrier Relock M1.Carrier Relock M2.TO.extractedNumber:.secNum:.This model only supports [.)] .Invalid phone date:..Inva
+    >> ame.Apifuncmethod.Apifunctype.Apifunccost.Carrier Relock M1.Carrier Relock M2.TO.extractedNumber:.secNum:.This model only supports [.)] .Invalid phone date:..Invalid server securit
+    >> ????........????????........????????........????????Type....Carrier Relock..u.h.a.n.s.k. .P.e.o.p.l.e.'.s. .R.e.p.u.b.l.i.c.". .o.n.l.y.;. .M.N.C. .n.o.t. .o.f.f.i.c.i.a.l.l.y. .a.
+    >> 21F0300421F0400421F1000421F1100\",\n    \"OprationType\": \"Carrier Relock\",\n    \"Opration_Function\": \"Carrier Relock M1\",\n    \"Opration_name\": \"Carrier Relock\",\n    \"
+    >> onType\": \"Carrier Relock\",\n    \"Opration_Function\": \"Carrier Relock M1\",\n    \"Opration_name\": \"Carrier Relock\",\n    \"Ril\": \"1\",\n    \"SN\": \"R5CX105PKGA\",\n   
+    >> unction\": \"Carrier Relock M1\",\n    \"Opration_name\": \"Carrier Relock\",\n    \"Ril\": \"1\",\n    \"SN\": \"R5CX105PKGA\",\n    \"Token\": \"CCE4BF6FD464BC8A245B37E5D2D28DE39
+    >> 0200421F0300421F0400421F1000421F1100",     "OprationType": "Carrier Relock",     "Opration_Function": "Carrier Relock M1",     "Opration_name": "Carrier Relock",     "Ril": "1",   
+    >> "OprationType": "Carrier Relock",     "Opration_Function": "Carrier Relock M1",     "Opration_name": "Carrier Relock",     "Ril": "1",     "SN": "R5CX105PKGA",     "Token": "CCE4BF
+    >> ation_Function": "Carrier Relock M1",     "Opration_name": "Carrier Relock",     "Ril": "1",     "SN": "R5CX105PKGA",     "Token": "CCE4BF6FD464BC8A245B37E5D2D28DE3971B792944FAE0E2
+
+  === Term: [SRELOCK] (1 occurrences) ===
+    >> .json.Cannot open data file.Error. | .F.00.Invalid MCC-MNC .SRELOCK1....https://api.q-unlocker.com/api/sere/2.TMB-TMK-VZW-APP-AIO-XAU.This carrier is Not Support .VZW.yyyy-MM-dd.20
+
+  === Term: [api.q-unlocker.com] (15 occurrences) ===
+    >> d00.Q-unlocker.QUNLOCKER.https://www.Q-unlocker.com.https://api.q-unlocker.com/api/sere/1...<a href="https://www.Q-unlocker.com/OperationTools" style="color: #5199da; text-decorati
+    >> ta file.Error. | .F.00.Invalid MCC-MNC .SRELOCK1....https://api.q-unlocker.com/api/sere/2.TMB-TMK-VZW-APP-AIO-XAU.This carrier is Not Support .VZW.yyyy-MM-dd.2021-02-01.15.16.13.20
+    >> ????+?/.??$?(.k?#?'.g? ?..9?.?..3.?.?.=.<.5./.?...u.........api.q-unlocker.com......... ... .................http/1.1.........1... .0............... ...............................
+    >> .m.3.2.\.s.v.c.h.o.s.d?.be..?POST /api/api/ HTTP/1.1  Host: API.Q-unlocker.com  Accept: */*  Content-Type: application/json  Content-Length: 403    .?[??T...u?.b /.???..?K6........
+    >> .@z@?E...... ??. ??. ??.....?.?a...?....#...j.......https://API.Q-unlocker.com/api/api/.................?...@.......?.......h.n.o.l.o.g.y. .s.e.r.v.i.c.e.s...?.....?.?a...?........
+    >> u?.l...P.).....a.)....~O`...?POST /api/api/ HTTP/1.1  Host: API.Q-unlocker.com  Accept: */*  Content-Type: application/json  Content-Length: 979    .0.0."....~P`...?....0...p......
+    >> .. .? ?w?????K7?? ..?!+???O`K..???#b.s.?....................api.q-unlocker.com:443......F?:b.t.??I?.?G&.....???.0...............??..............A?1b.u.?.........?\..............?\.
+    >> ...?\..............?\.....H?Hb.v.?....................0/443/api.q-unlocker.com....S?Ob.w.?................................................Z?Fb.x.?..................................
+    >> ............@... ....???`.7.?POST /api/api/ HTTP/1.1  Host: API.Q-unlocker.com  Accept: */* .B??`.8.?...........?....I.n.t.e.r.n.e.t. .C.o.n.n.e.c.t.i.o.n.O.K...?...K?.c.9.?1.0...U
+    >> .Q..................?F?l.b.?........................?F?l.c.?API.Q-unlocker.com......?F?l.d.?API.Q-unlocker.com..?...?F?l.e.?....?J..................?F?l.f.?....?M..............8?..
+    >> ....................?F?l.c.?API.Q-unlocker.com......?F?l.d.?API.Q-unlocker.com..?...?F?l.e.?....?J..................?F?l.f.?....?M..............8?..?F?l.g.?`{f.E ???P/}.?4????K....
+    >> ....................?F?l.n.????-?..D?.9?QS.??+u.....?F?l.o.?api.q-unlocker.com..??..?F?l.p.?....?R..............?)K.?F?l.q.?........................?F?l.r.?API.Q-unlocker.com.8....
+    >> ?R..............?)K.?F?l.q.?........................?F?l.r.?API.Q-unlocker.com.8....?F?l.s.?api.q-unlocker.com......?F?l.t.?*.q-unlocker.com....H?..?F?l.u.?....8R..................
+    >> ....................?F?l.r.?API.Q-unlocker.com.8....?F?l.s.?api.q-unlocker.com......?F?l.t.?*.q-unlocker.com....H?..?F?l.u.?....8R..................?F?l.v.?????....................
+    >> ....................?F?l.w.?........................?F?l.x.?API.Q-unlocker.com..??<.GY?l.y.?API.Q-unlocker.com......CY?l.z.??L??t?I6?????>?j??.?.?;wOYoo.{.?....?N..............??;w
+
+  === Term: [/data/local/tmp/AT] (15 occurrences) ===
+    >> ? ?????????? ?????????? ????????????..file.adb.exe push "." /data/local/tmp/athun.push result.KB/s.MB/s.[.].Select MCC/MNC List..Search Networks (Country, Operator, MCC, MNC)....Se
+    >> ? ?????????? ?????????? ????????????..file.adb.exe push "." /data/local/tmp/athun.push result.KB/s.MB/s.[.].falied to init data..Frp.background-color: rgb(21, 26, 30);.gridLayout_5
+    >> ???? ????????????..file.adb install -r -g "." ./QTMPX142_." /data/local/tmp/athun.adb.exe shell chmod 777 /data/local/tmp/athun.error: protocol fault./data/local/tmp/athun.X1.AUTHO
+    >> ./QTMPX142_." /data/local/tmp/athun.adb.exe shell chmod 777 /data/local/tmp/athun.error: protocol fault./data/local/tmp/athun.X1.AUTHORIZATION KEY:.start.RESPONSE:../athun.:>>.AT+U
+    >> shell chmod 777 /data/local/tmp/athun.error: protocol fault./data/local/tmp/athun.X1.AUTHORIZATION KEY:.start.RESPONSE:../athun.:>>.AT+UNLOCKSPR=OLD.End.exit.Remove FRP via ADB :  
+    >> S9ATTDM2_.G965UDM2TMO.Carrier Not Support  ! .enbal.shell.../data/local/tmp/athun acm,diag,adb.Enter authorisation key:.Error Unlock Data.SM-G960U.35368710004920.SM-G965U.SM-N960U.
+    >>  -i com.sec.android.preloadinstaller  /data/local/tmp/ndx." /data/local/tmp/AT...adb.exe shell chmod 777 /data/local/tmp/AT.BOOST-SPRINT.This carrier is Not Support .... Supported 
+    >> ocal/tmp/ndx." /data/local/tmp/AT...adb.exe shell chmod 777 /data/local/tmp/AT.BOOST-SPRINT.This carrier is Not Support .... Supported Unlock Carrier Sprint Or Boost.AT_MotoSPRUnLo
+    >> rted Unlock Carrier Sprint Or Boost.AT_MotoSPRUnLockTool_V1./data/local/tmp/AT.ATMOTOSPRGU.AuthKey : OK.Reading SIMLock Blob :....Fail! Could not read blob from device..MOTOSPR.Unl
+    >> #.51180004.adb wait-for-device push "..adb shell chmod 0777 /data/local/tmp/athun.:/ext/EnableDM.Convert to CDMA.Start convert phone :  .dm_cdma.tul.Reboot Device .Convert CDMA.Fix
+    >> H).LGE_RIL_SPR_HUNTER.NotRunning.Fail! Device disconnected../data/local/tmp/athun.sprsam.Authenticated.Fail Authenticated .Fail.#. . .1.lg.SETSPR.Result : OK.exit.EXIT.Unlocking Do
+    >> ver :  .AT_King122020.1_sleep(int).2_sleep_(int).NotRunning./data/local/tmp/athun.k.Changing CSC  :  .0x0601000E0000.0000.(continued)..>>.0x0601000D0000.00.0x060100090000.0x0601001
+    >> .RIL_OEM_MTIK_2023.. .NotRunning.Fail! Device disconnected../data/local/tmp/athun.sprsam.Authenticated.Fail Authenticated .#.Remove KG Done..adb shell settings put  Secure assistan
+    >> _06_ALL_noapparm64v8a.NotRunning.Fail! Device disconnected../data/local/tmp/athun.sprsam.Authenticated.Fail Authenticated .#.Fail....01426X1sHfqLFdZJNlnH9/k+DS5VQ8s+WGA6v6DBf199aic
+    >> _06_ALL_noapparm64v8a.NotRunning.Fail! Device disconnected../data/local/tmp/athun.sprsam.Authenticated.Fail Authenticated .#.Fail Run Exploit.SSU....01426X1ZiFnVIgP94w4ZTfVvGsRnf2r
+
+  === Term: [/data/local/tmp/athun] (15 occurrences) ===
+    >> ? ?????????? ?????????? ????????????..file.adb.exe push "." /data/local/tmp/athun.push result.KB/s.MB/s.[.].Select MCC/MNC List..Search Networks (Country, Operator, MCC, MNC)....Se
+    >> ? ?????????? ?????????? ????????????..file.adb.exe push "." /data/local/tmp/athun.push result.KB/s.MB/s.[.].falied to init data..Frp.background-color: rgb(21, 26, 30);.gridLayout_5
+    >> ???? ????????????..file.adb install -r -g "." ./QTMPX142_." /data/local/tmp/athun.adb.exe shell chmod 777 /data/local/tmp/athun.error: protocol fault./data/local/tmp/athun.X1.AUTHO
+    >> ./QTMPX142_." /data/local/tmp/athun.adb.exe shell chmod 777 /data/local/tmp/athun.error: protocol fault./data/local/tmp/athun.X1.AUTHORIZATION KEY:.start.RESPONSE:../athun.:>>.AT+U
+    >> shell chmod 777 /data/local/tmp/athun.error: protocol fault./data/local/tmp/athun.X1.AUTHORIZATION KEY:.start.RESPONSE:../athun.:>>.AT+UNLOCKSPR=OLD.End.exit.Remove FRP via ADB :  
+    >> S9ATTDM2_.G965UDM2TMO.Carrier Not Support  ! .enbal.shell.../data/local/tmp/athun acm,diag,adb.Enter authorisation key:.Error Unlock Data.SM-G960U.35368710004920.SM-G965U.SM-N960U.
+    >> #.51180004.adb wait-for-device push "..adb shell chmod 0777 /data/local/tmp/athun.:/ext/EnableDM.Convert to CDMA.Start convert phone :  .dm_cdma.tul.Reboot Device .Convert CDMA.Fix
+    >> H).LGE_RIL_SPR_HUNTER.NotRunning.Fail! Device disconnected../data/local/tmp/athun.sprsam.Authenticated.Fail Authenticated .Fail.#. . .1.lg.SETSPR.Result : OK.exit.EXIT.Unlocking Do
+    >> ver :  .AT_King122020.1_sleep(int).2_sleep_(int).NotRunning./data/local/tmp/athun.k.Changing CSC  :  .0x0601000E0000.0000.(continued)..>>.0x0601000D0000.00.0x060100090000.0x0601001
+    >> .RIL_OEM_MTIK_2023.. .NotRunning.Fail! Device disconnected../data/local/tmp/athun.sprsam.Authenticated.Fail Authenticated .#.Remove KG Done..adb shell settings put  Secure assistan
+    >> _06_ALL_noapparm64v8a.NotRunning.Fail! Device disconnected../data/local/tmp/athun.sprsam.Authenticated.Fail Authenticated .#.Fail....01426X1sHfqLFdZJNlnH9/k+DS5VQ8s+WGA6v6DBf199aic
+    >> _06_ALL_noapparm64v8a.NotRunning.Fail! Device disconnected../data/local/tmp/athun.sprsam.Authenticated.Fail Authenticated .#.Fail Run Exploit.SSU....01426X1ZiFnVIgP94w4ZTfVvGsRnf2r
+    >> p_(int).%0.Installzing Applet :  .AT_OK.Writing Exploit :  ./data/local/tmp/athun.default.Enter AuthKey:.No such file or directory.Fail Auth Data.n.Product Model :.JniInvocation.ab
+    >> 50U.secNum >>.secNum>7.J727V.J727VPP.J327V.G892A..chmod 777 /data/local/tmp/athun. .Auth from server :  .Checking  Security :  .+IMEITEST:1,NG.Fail!.Device security is damaged..G97
+    >> arrier Not Support ...Passing Data From Server to Phone :  ./data/local/tmp/athun.cert.cd /data/local/tmp/../athun.LG_UICC.AT+SIMLGDATA=.sct.sct1.sct2.sct3.trg4.Checking Phone Secu
+
+  === Term: [/data/local/tmp/ndx] (12 occurrences) ===
+    >> ult222.adb.exe shell chmod 777 /data/local/tmp/nd1.filexn." /data/local/tmp/ndx.comndspl>>>....adb.exe shell chmod 777 /data/local/tmp/ndx.a1..adb.exe shell pm install -r -d /data/
+    >>  /data/local/tmp/ndx.comndspl>>>....adb.exe shell chmod 777 /data/local/tmp/ndx.a1..adb.exe shell pm install -r -d /data/local/tmp/ndx.a2...adb.exe shell pm install --bypass-low-ta
+    >>  777 /data/local/tmp/ndx.a1..adb.exe shell pm install -r -d /data/local/tmp/ndx.a2...adb.exe shell pm install --bypass-low-target-sdk-block /data/local/tmp/ndx..adb.exe shell pm in
+    >> a2...adb.exe shell pm install --bypass-low-target-sdk-block /data/local/tmp/ndx..adb.exe shell pm install -r -g  /data/local/tmp/ndx.adb.exe shell  chmod 777 /data/local/tmp/ndx...
+    >> -block /data/local/tmp/ndx..adb.exe shell pm install -r -g  /data/local/tmp/ndx.adb.exe shell  chmod 777 /data/local/tmp/ndx....adb.exe shell  "pm install -r -d /data/local/tmp/ndx
+    >> install -r -g  /data/local/tmp/ndx.adb.exe shell  chmod 777 /data/local/tmp/ndx....adb.exe shell  "pm install -r -d /data/local/tmp/ndx ;pm install -d -i com.sec.android.preloadins
+    >> 777 /data/local/tmp/ndx....adb.exe shell  "pm install -r -d /data/local/tmp/ndx ;pm install -d -i com.sec.android.preloadinstaller  /data/local/tmp/ndx;pm install -i PrePackageInst
+    >> tmp/ndx ;pm install -d -i com.sec.android.preloadinstaller  /data/local/tmp/ndx;pm install -i PrePackageInstaller  /data/local/tmp/ndx;pm install --bypass-low-target-sdk-block /dat
+    >> ler  /data/local/tmp/ndx;pm install -i PrePackageInstaller  /data/local/tmp/ndx;pm install --bypass-low-target-sdk-block /data/local/tmp/ndx"...adb.exe shell pm install -i PrePacka
+    >> data/local/tmp/ndx;pm install --bypass-low-target-sdk-block /data/local/tmp/ndx"...adb.exe shell pm install -i PrePackageInstaller  /data/local/tmp/ndx....adb.exe shell pm install 
+    >> tmp/ndx"...adb.exe shell pm install -i PrePackageInstaller  /data/local/tmp/ndx....adb.exe shell pm install -d -i com.sec.android.preloadinstaller  /data/local/tmp/ndx." /data/loca
+    >> xe shell pm install -d -i com.sec.android.preloadinstaller  /data/local/tmp/ndx." /data/local/tmp/AT...adb.exe shell chmod 777 /data/local/tmp/AT.BOOST-SPRINT.This carrier is Not S
+
+  === Term: [Enter AuthKey] (4 occurrences) ===
+    >> thorisation Token:.RESPONSE : .SIMLOCK:1,.>>.Token AuthKey:.Enter AuthKey:.Authorisation Token: .Enter authorisation key: .Challenge:.Response:.adb wait-for-device shell -tt..Attem
+    >> erver Data :  .G360T.G530T.G530T1.G360T1.AT_TMBQCG360T.su.#.Enter Authkey:.mb.Write : OK.cert.cd /data/local/tmp/../cert.AT+SIMLGDATA=990013500173492.sct1.sct2.sct3.trg4.... Reboot
+    >> aa, 0xcc, 0xa4, 0x97, 0x1e, 0x10, 0xfe.4.AT_TMBQCNewSecTool.Enter AuthKey:.SimLock Check : OK.AT_SPR.SimLock Write : OK.AT_ATTCCT.BST.DISH.DSH-SPR-BST-XAA-VMU-XAS.10. Please downgr
+    >> :  .AT_OK.Writing Exploit :  ./data/local/tmp/athun.default.Enter AuthKey:.No such file or directory.Fail Auth Data.n.Product Model :.JniInvocation.aborted.segmentation fault.AT+MS
+
+  === Term: [Token AuthKey] (1 occurrences) ===
+    >> ob :.0.OK:.#.Authorisation Token:.RESPONSE : .SIMLOCK:1,.>>.Token AuthKey:.Enter AuthKey:.Authorisation Token: .Enter authorisation key: .Challenge:.Response:.adb wait-for-device s
+
+  === Term: [AuthKey] (11 occurrences) ===
+    >> .OK:.#.Authorisation Token:.RESPONSE : .SIMLOCK:1,.>>.Token AuthKey:.Enter AuthKey:.Authorisation Token: .Enter authorisation key: .Challenge:.Response:.adb wait-for-device shell -
+    >> ation Token:.RESPONSE : .SIMLOCK:1,.>>.Token AuthKey:.Enter AuthKey:.Authorisation Token: .Enter authorisation key: .Challenge:.Response:.adb wait-for-device shell -tt..Attempting 
+    >> Data :  .G360T.G530T.G530T1.G360T1.AT_TMBQCG360T.su.#.Enter Authkey:.mb.Write : OK.cert.cd /data/local/tmp/../cert.AT+SIMLGDATA=990013500173492.sct1.sct2.sct3.trg4.... Reboot Phone
+    >> cc, 0xa4, 0x97, 0x1e, 0x10, 0xfe.4.AT_TMBQCNewSecTool.Enter AuthKey:.SimLock Check : OK.AT_SPR.SimLock Write : OK.AT_ATTCCT.BST.DISH.DSH-SPR-BST-XAA-VMU-XAS.10. Please downgrade th
+    >> oost.AT_MotoSPRUnLockTool_V1./data/local/tmp/AT.ATMOTOSPRGU.AuthKey : OK.Reading SIMLock Blob :....Fail! Could not read blob from device..MOTOSPR.Unlock Device : .      Verify SIML
+    >> Carrier (SPR,BST,VMU,XAS,DSH).AT_SamRilV2.ATSAMSPRGU..      AuthKey : OK      AuthKey Encrypt : .   OK         #.51180004.adb wait-for-device push "..adb shell chmod 0777 /data/loc
+    >> MU,XAS,DSH).AT_SamRilV2.ATSAMSPRGU..      AuthKey : OK      AuthKey Encrypt : .   OK         #.51180004.adb wait-for-device push "..adb shell chmod 0777 /data/local/tmp/athun.:/ext
+    >> _OK.Writing Exploit :  ./data/local/tmp/athun.default.Enter AuthKey:.No such file or directory.Fail Auth Data.n.Product Model :.JniInvocation.aborted.segmentation fault.AT+MSLSECUR
+    >> U-DISH.ATLG.NotRunning./data/local/tmp/AT.ATLGSPRGU.#.      AuthKey : OK      AuthKey Encrypt : .Fail Run Exploit.   OK         #.AT%SLNONCE?.Fail! Could not read SIMLOCK..LGSPR.3.
+    >> ning./data/local/tmp/AT.ATLGSPRGU.#.      AuthKey : OK      AuthKey Encrypt : .Fail Run Exploit.   OK         #.AT%SLNONCE?.Fail! Could not read SIMLOCK..LGSPR.3.AT%SLENC=32...    
+    >> token.InitUI.UpdateUI.Execute.uint32_t.code.RecivRequestBtn.AuthKey.ContextAuth.ReadResult.FixIMEI_clicked.on_ch_SwitchTheme_clicked.checked.GetGrant.msg.opt1.opt2.ChC.diCB.PushFil
+
+  === Term: [ro.oem.key] (1 occurrences) ===
+    >> s_code.ro.boot.sales_code.unkno.5.motorola.ril.serialnumber.ro.oem.key1.%1 shell "service iphonesubinfo 1 s16 com.android.shell | cut -c 52-66 | tr -d '.[:space:]'".12.%1 shell ser
+
+  === Term: [service call iphonesubinfo] (15 occurrences) ===
+    >> ...........??????????????????????????????????????.adb shell service call iphonesubinfo 1...................??????????????????????????????????????.adb shell service call iphonesubin
+    >> ...........??????????????????????????????????????.adb shell service call iphonesubinfo 2...................???????????????????????????????????????.adb shell service call iphonesubi
+    >> ..........???????????????????????????????????????.adb shell service call iphonesubinfo 15.................????????????????????????????????????????????????????????????.adb shell ser
+    >> ?????????????????????????????????????????????????.adb shell service call iphonesubinfo 1 s16 com.android.shell......................................................................
+    >> e..frp.pst..version.branch..emui..cmcc.ro.carrier.%1 shell "service call iphonesubinfo 1 | cut -c 52-66 | tr -d '.[:space:]'"..version.baseband.??? ManfcID : .%0..??? Model : .??? 
+    >> ro.build.version.release.  ****  .  ****  Connected . shell service call iphonesubinfo 1. shell service call iphonesubinfo 2. shell service call iphonesubinfo 15.... shell service 
+    >> ****  Connected . shell service call iphonesubinfo 1. shell service call iphonesubinfo 2. shell service call iphonesubinfo 15.... shell service call iphonesubinfo 1 s16 com.android
+    >>  iphonesubinfo 1. shell service call iphonesubinfo 2. shell service call iphonesubinfo 15.... shell service call iphonesubinfo 1 s16 com.android.shell.Fail..wmic path Win32_Process
+    >> onesubinfo 2. shell service call iphonesubinfo 15.... shell service call iphonesubinfo 1 s16 com.android.shell.Fail..wmic path Win32_Processor get ProcessorId.  .Alias not found...
+    >> n.UserPass.97VxRtMuNtI6Glw.Block.#2cbaff.#00bd00..adb shell service call iphonesubinfo 1..adb shell service call iphonesubinfo 2..adb shell service call iphonesubinfo 1 s16 com.and
+    >> .#00bd00..adb shell service call iphonesubinfo 1..adb shell service call iphonesubinfo 2..adb shell service call iphonesubinfo 1 s16 com.android.shell.AT+DUMPCTRL=1,0  .AT+DEBUGLVC
+    >> ubinfo 1..adb shell service call iphonesubinfo 2..adb shell service call iphonesubinfo 1 s16 com.android.shell.AT+DUMPCTRL=1,0  .AT+DEBUGLVC=0,5  .AT+SWATD=0  .AT+ACTIVATE=0,0,0  .
+    >> [stopped].: [I].: [.[.].:.adb -s %1.ro.serialno...%1 shell "service call iphonesubinfo 1 | cut -c 52-66 | tr -d '.[:space:]'".%1 shell "service call iphonesubinfo 1 | grep -o '[0-9
+    >> onesubinfo 1 | cut -c 52-66 | tr -d '.[:space:]'".%1 shell "service call iphonesubinfo 1 | grep -o '[0-9a-f]{8} ' | tail -n+3 | while read a; do echo -n \u${a:4:4}\u${a:0:4}; done"
+    >> o -n \u${a:4:4}\u${a:0:4}; done".system/bin/sh:...%1 shell "service call iphonesubinfo 1 s16 com.android.shell | awk -F "'" '{print $2}' | sed '1 d' | tr -d '.' | awk '{print}' ORS
+
+  === Term: [AT+] (15 occurrences) ===
+    >> ctor of .dtor of .%0....??? Reading Device Information ... .AT+SWATD=0  .AT+DEVCONINFO  .AT+ACTIVATE=0,0,0  .AT+SWATD=1  .AT+BLOBSIGN=1,1,0  .AT+BLOBSIGN=3,1,0  ...Rebooting to FUS
+    >>  of .%0....??? Reading Device Information ... .AT+SWATD=0  .AT+DEVCONINFO  .AT+ACTIVATE=0,0,0  .AT+SWATD=1  .AT+BLOBSIGN=1,1,0  .AT+BLOBSIGN=3,1,0  ...Rebooting to FUS download mod
+    >> eading Device Information ... .AT+SWATD=0  .AT+DEVCONINFO  .AT+ACTIVATE=0,0,0  .AT+SWATD=1  .AT+BLOBSIGN=1,1,0  .AT+BLOBSIGN=3,1,0  ...Rebooting to FUS download mode ... .AT+FUS?.O
+    >> ation ... .AT+SWATD=0  .AT+DEVCONINFO  .AT+ACTIVATE=0,0,0  .AT+SWATD=1  .AT+BLOBSIGN=1,1,0  .AT+BLOBSIGN=3,1,0  ...Rebooting to FUS download mode ... .AT+FUS?.OK.Loke protocol err 
+    >> +SWATD=0  .AT+DEVCONINFO  .AT+ACTIVATE=0,0,0  .AT+SWATD=1  .AT+BLOBSIGN=1,1,0  .AT+BLOBSIGN=3,1,0  ...Rebooting to FUS download mode ... .AT+FUS?.OK.Loke protocol err (%0:%1:%2).;.
+    >> INFO  .AT+ACTIVATE=0,0,0  .AT+SWATD=1  .AT+BLOBSIGN=1,1,0  .AT+BLOBSIGN=3,1,0  ...Rebooting to FUS download mode ... .AT+FUS?.OK.Loke protocol err (%0:%1:%2).;..@#./Backups...PIT_%
+    >>  .AT+BLOBSIGN=3,1,0  ...Rebooting to FUS download mode ... .AT+FUS?.OK.Loke protocol err (%0:%1:%2).;..@#./Backups...PIT_%0.pit.%0/%1.Pit saved to %0.??? Rebooting device : .SAMDev
+    >> : .adb push %1 %2.adb shell chmod 777.ret.push.:/ext/.  .AT.AT+DEVCONINFO.Info 1.DEVCONINFO:.AT+SVCIFPGM=1,1.Info 2.Read Mobile Info.BASE(..(MN|VER|CC|SN|UN|CON|IMEI|MNC|PRD)(\(\w+
+    >>  777.ret.push.:/ext/.  .AT.AT+DEVCONINFO.Info 1.DEVCONINFO:.AT+SVCIFPGM=1,1.Info 2.Read Mobile Info.BASE(..(MN|VER|CC|SN|UN|CON|IMEI|MNC|PRD)(\(\w+\-?\/?,?\w+\)).\(|\).MN.Model.PRD
+    >> db shell service call iphonesubinfo 1 s16 com.android.shell.AT+DUMPCTRL=1,0  .AT+DEBUGLVC=0,5  .AT+SWATD=0  .AT+ACTIVATE=0,0,0  .AT+SWATD=1  .adb.exe reboot...adb shell am start -n
+    >> all iphonesubinfo 1 s16 com.android.shell.AT+DUMPCTRL=1,0  .AT+DEBUGLVC=0,5  .AT+SWATD=0  .AT+ACTIVATE=0,0,0  .AT+SWATD=1  .adb.exe reboot...adb shell am start -n com.google.androi
+    >> 1 s16 com.android.shell.AT+DUMPCTRL=1,0  .AT+DEBUGLVC=0,5  .AT+SWATD=0  .AT+ACTIVATE=0,0,0  .AT+SWATD=1  .adb.exe reboot...adb shell am start -n com.google.android.gsf.login/.adb s
+    >> roid.shell.AT+DUMPCTRL=1,0  .AT+DEBUGLVC=0,5  .AT+SWATD=0  .AT+ACTIVATE=0,0,0  .AT+SWATD=1  .adb.exe reboot...adb shell am start -n com.google.android.gsf.login/.adb shell am start
+    >> RL=1,0  .AT+DEBUGLVC=0,5  .AT+SWATD=0  .AT+ACTIVATE=0,0,0  .AT+SWATD=1  .adb.exe reboot...adb shell am start -n com.google.android.gsf.login/.adb shell am start -n com.google.andro
+    >> bin'....adb shell su -c  chmod 0400 /efs/root/data/SLB.bin'.AT+DEVCONINFO .AT+SWATD=0 .AT+ACTIVATE=0,0,0 .AT+SWATD=1 ...AT+MSLSECUR=6,0,014C173D93762B496EF2A853A41ACA67990714160F5A
+
+  === Term: [AT^] (15 occurrences) ===
+    >> 8R????E?;??]???.w?..?..G?#A.???5?D.W.?L.R?+.????..???d?.|???At^)???.??????e$??z?mr?..???; ?h*?Sw?5.????kzo?3.?.???..?.x?!???<.=??B.???x????.Jh??.????}??UW.y'$-???.U??$?f????T?.?/Eh
+    >> m??U.?^n ??zO{??=??e?o?RP?5*?)?S?????*?8.????mm\.?b??rCs6?$?aT^??R??Z.?????4??~?F?{o.Z?.????@DY??.U?.??!;8???_W?? .4~.7s?O.?? ?..??J??w?..C?Y.Wk.? ?P??!?rB?ke.?n7.d?F???.?"????:y.b
+    >> ?.O??C ??.?(?3G???????????S?}??????.??.K??x???.??]3 ?l??8O?tAt^.N?z?..e?&..?(3?O??."dl??:?C!??????u?8??.?? .?o.?_??e?M??.h??.?..?G??=.??9j d??..?[.W&?.C= ???(.g?.???eN?VV??'??D?/nq
+    >> q?.?????I?.]?.???-U,9D??a?r.{A5?/????9??"?.w;???*?????h{??I?at^???5f}???&?e?.?J.???URJM?. K????.?A]?????????[h?9??d .9=..?? ?d?&?..????< ?X.I?%.???..6M ?B;?X ?. gm?+mQ\1Vx?VN?{?.?o
+    >> e.?LP.?l??.?S???????'?d??.x.`.?1?{?p?.(?.?^??~???[.?$?.. .IDAT^.?+9?7GCJ??????d^[[?.????(?.?.*??RV`Z.?.ZJ?e.?z?????????nx.??.?...M?G?e????? [??.@.?.I.[??2N=.?.?.?..A|?0..{.??.? .??
+    >> ?c?&+??Wk.%^*? ?3?'=vvv???=?Hs????\??F4.???<??;???????.. .IDAT^;??m????sc???E??N?(M???.?..????.?7.P.?8p?.?.????L??? ?#?? ".??.~hu?..U..?xL???D??..u??S????.?wjl?.R..????Y.`?.tO.????
+    >> 6???wW?f??w?????.t?.?O.?&.m.?.?D?.).h???.?Fyr)??r?%??... .IDAT^fH???T S.0??$`??I?.X???,????w???={?]v? .?A??oBQ??(????a??.?hww7???,R?..y..`???.???.???Q.???d6?a.?S???Z???????z?3wsc??
+    >> 1C.p?.???????@???????A.?.-??P_????.P?6?U????=.V?4"?????3'E.`At^.?p????..???b<??.????.[?v?.??K.8?.P<a\G?.??{?..???U?.O.F.???.??M?Z<#3T??wX?yyU??h??H7???\??.6??0w.?9r?.r>?f?.S???.?3.
+    >> #?...d\dt.`???????????N?@??a?~9???5???`.?.??EZ?.???v.?.. .IDAT^i??a?.?.._..?/.??VO??o??.v?,}a??.dY?h.H.Vl??&?,.#.H?"?lC???D.??q???u.L?ia?EV^?.???8zpN?B?+$???S:.6?a.?.h???????N??_K?
+    >> ?A.....?A.....?A.....?A.....?A0?A@?A@....?AD....?A<.W?..AH..AT^?.....USWV???AX.t.?v`?..????.?FL.t.?vT??.????.?N<?v@??<..?N0?v4??<..?F..t.?v$??.????.?~.??ti?^.9?u.???Rffffff...?....
+    >> Ns.gtu1g9q4gSZ6gjv:guO=g.}FgRJIg4_Ng]WOg:zPg'nQg=uSguxVghm\gaT^g#Q_gVamgxyogJ[pgyKqgTTsg\Yug>nwgmw{gnR~gfa.gyw?gm]?g[h?g3[?gwQ?g0`?gbT?gWv?gyW?g]X?g}M?g+r?g=M?gBx?g,r?g-J?g.J?g.O?g
+    >> )E5OB?.??M??82T??^.h2.?-????F???5J.{]?`r`???(???V???Ii?e ???At^.?.a?Me??NE?-?????5B???.i6?|.<.??y?>.???z.??<Q?.?.??iB??.\>iB?t.?d??.a??. ???P??.^_.{f??.?Rr.??????|$.??1??..??????.?
+    >> ??J?\]??5?)".?|?}'U?????-!??v?7??.<!Z???h??wDD?.?.N~z?5??.(?At^.???pO?V??J ??)q?.*????ud?.T????????.c.???8??.???cb..U2?ys?.?.???#;a?7NJ.?&?2)]w?.??.????vZ?e?Y?8?J{?{n????????h.9eeH
+    >> .p.?P8????..?|??A?Z.[J???[j 8?m3HN??,[^??./????T?..???J?2?y?aT^?.o6.?ds?d??.?Z?-??h).3??.S?.C.2p? \?_?W.w????~?^!.??~?[????G..7???.;J??.??.?????ls)?0?..???G????*^?.~?_?Z.???X??.??^
+    >> 8O..??^?I??..9????J.]??.???????Q??"?.?7??ho??UPC9\??s'?W?X?%AT^??/?<.?????.C(?.????...??.c ?T????.??o?.!??S????z?=T??D?&{??.-?> ????o?T???t?.LP??N?\s??7F??L9h +D9???.m?vhap.???6.|?
+
+  === Term: [AT$] (15 occurrences) ===
+    >> ...??.???....??...?.??g?.9?u??.??g?.?D$.?????.$?.?????,?=HPPAt$=HPPIu??D$.?????.$?f?.???????,???t&.?D$.?????.$?f?.???????,????&....?D$.?????.$?f?.???????,????&....?D$.?????.$?f?.??
+    >> ?Q???9???P????C?M??????;???@.?Z?.j@l.'.7?E0<??{.j??s???Ra?puaT$???~?7 G?j&.B?.?c%??BqK??i?<?.??\???X??=?.?:?3/?E2:??D<"!??,h??^k?`???.??.??.?..AC???C.???M?e?g??G..?Yek..?.?..{?P?k?
+    >> ?.?;???l7U?`?:?.n??D6?.?G??z..??;?^?.JWRl??c.(?].??F.'?6.?8?AT$[F.?l?.2B=,QT$??_^.QG..???.,$???]^??A.?}??.?'?Z>4?7.???????6?."Gt??.<,.?u??.???.B??6?.?`.?p1??}+?V??2=W?pX?Y.|????.??
+    >> Rq?6????..A?I?.&g?????h????N.mO?.?????Z?T????:\?????+??~???AAT$??3?O?.K?.??.V?.=???uj?8C?u?w?J?+?Z^...???.??%???jp3??n@?/*???;.?7S???%??"N~?MO???..?Z???-?.??..??N???y?"?.??O ??#.??
+    >> ??b?#;?v??<?.???.f8W+.??>!?@?Jr}?.p??m?e.????.`E??>Gl,q???:oAt$??X;d|???{?k#?????J??~?'.?d?X'?ag??!V].?.?f??'??.Gl?.BO.?X???`.d???.??KEe.???KT?,.6??.{??j.???'FI?.A?Z.???2.k?.??S???
+    >> ].?????I?gM?h?pKk.K?.q?0-?.2?.?..??_w?_?-????.7?.?_U?a?.?O.?aT${???.?? n?.G?5?7?g_??Q?:.??.?j?,ss).??f-??.??G0?.??(?????b?L????oe?? f?.Ie3|S?-???`?<??H?*{??Pb?? ????n??B.?d. ]???!?
+    >> :?.. k????c???O.1???..?.?P?..?n..<??.?..dX?)??#?z>..! ^..??0At$???p`??? .?t~W?z???&?2+?????`?3J.?t??.%E.{w_???mZ?P?u5?:??)zF_?).???\?????????.???.???.?????\?d?T.R??:?N??.??..%?????
+    >> ???:/?z?\????s?X??.@?..????^?.? .=??*?@?@?c?Z.?.?@?GF??)n??`aT$U?V??.?R'?tR.?".?e??2.,??.>qd.????????.???u.????sH?j^.X?? ?.?;????+wM?_.@)????????.R??.???jx?/F/n????W ??.#?.?????@??
+    >> f?m?????e?.I?.???W?>??i??R????[?8.??v]?+..?>.....?v??\.. .IDAT$..?????.7@sU.dg0.?7L?.?????[Z???.8???_++?*?1?i4.`RkT?????1b.?2..J??k??j??[?N?G???D?#?.?B..?qLF?? ?B/.??F%?4.!.?2?Q?.8
+    >> J??.?{?`s+?..??9.??V?[.???G.TjvN??A?v1?\.??-??e??R???1.?.=Ylat$?...????tIS,?V????<!?????.?v?.?bf?????.|.??.????2.!??rN????,????V???D.?.?Y?.??? x?t?R?/????D?d?H?? b?p???G?D??.?E.?fR
+    >> ??..? ?2?!?T????f????.????.??f??3????f?|D.?????? ??+J?? K??.AT$.2???.z???Z??....f?.&?T$.?8i???.?.?????Y.?f??l_Xf.????????.?/.?:. ..???4..?.?..f?l$4???? .?.??....?Y?>.f5??.???..????
+    >> ?T???h+?i.?U?S?.?.?(.?.?A.x?j.???*.?8w? ???Td1.?????32?*.Q?fAT$(.????b8<??@*.?yP???G4?G..?N???j.???.]??q??.%~.?_~Z??.?*??n?$)?.?...h. i.?U..???7?.~?7?7-O?j.?u??.?. Rut..?.yj.??j- .
+    >> ????p9???D??k????(/?&5?%???Q??9???c>};.Q_.??[.????._DO?_.(??At$???R? ??.s???[7?-?Fd.?????/??Z?.?p???p..U??d?B1;?.-?<?m??f?`???A??.=.????}?#??|?+??.???F??.OT?;??8[?}??zs.?j??.w??]?o
+    >> ??l?????*???p?.a( ????>.?(?.??r.???.??J??A..??/?.?<d?hT?Q???aT$n?..7????..????C?@?+oJ????[???[o+?q.??????*:.?E?._?9.fR???Y???F|v ??)l?.??@?????ov?M ???K?%?4?shx?Iro?Ns?.?=?8?(???b.
+    >> ??..? ?2?!?T????f????.????.??f??3????f?|D.?????? ??+J?? K??.AT$.2???.z???Z??....f?.&?T$.?f4?.f??..3???o??..???-??D.>_?.?.?.?D$.??..O.?.??..O.?P.????.".?.d$.?D&.?T$.f.?.T$..??L&.???
+
+[+] Scanning adb.DMP (55 MB)...
+
+--- Target Term Matches in adb ---
+
+  === Term: [R5CX105PKGA] (15 occurrences) ===
+    >> ?v??..B...??..adb I 10-06 01:03:59  8212 14024 adb.cpp:176] R5CX105PKGA: offline57  8212 14024 transport.cpp:400] BlockingConnectionAdapter(R5CX105PKGA): already stopped  p:294] Bl
+    >> 57  8212 14024 transport.cpp:400] BlockingConnectionAdapter(R5CX105PKGA): already stopped  p:294] BlockingConnectionAdapter(R5CX105PKGA): destructing  \adbkey' with fingerprint 9E3
+    >> 105PKGA): already stopped  p:294] BlockingConnectionAdapter(R5CX105PKGA): destructing  \adbkey' with fingerprint 9E3B26186A2A0F8F0C1A53FD8FE1070C1CBB89310183F49C8D7F01DD15AF2566  ?
+    >> 1:03:57  8212 14024 transport.cpp:913] destroying transport R5CX105PKGA ...........Z?9?...?002dshell,v2,raw:getprop ro.build.version.release.6] fetching keys for transport R5CX105P
+    >> rop ro.build.version.release.6] fetching keys for transport R5CX105PKGA ...g?.?...?002dshell,v2,raw:getprop ro.build.version.release...?q......(n......?o..?n..(p..?n......Hq......t
+    >> ...?K?U?.?.?....`..........?N?V?.?.?....x..........?Q?S?.?.?R5CX105PKGA.....T?,?.?.???..x...?...??..W?)?.?.?R5CX105PKGA....?Z?*?.?.?....?..........?]?'?.?.?....?..........?`? ?.?.?
+    >> ...?Q?S?.?.?R5CX105PKGA.....T?,?.?.???..x...?...??..W?)?.?.?R5CX105PKGA....?Z?*?.?.?....?..........?]?'?.?.?....?..........?`? ?.?.?adb_...........?c?=?.?.?.... ..........?f?>?.?.?
+    >> .?..?........????..?????................?$..?&..8... ????..?R5CX105PKGA.ectionAdapter(R5CX1.%????..?sendrecv_v2_brotli..M.:.%.S.....*????..???..??..??...?...?...?...?.. ?../????..?
+    >> ........??%?.'.?................................?? ?.(.?0013R5CX105PKGA.device .........????.).?................................??:?.*.?................................??1?.+.?....
+    >>  qcom   [+] Product Name   : samsung   [+] Serial Number  : R5CX105PKGA   [+] Security patch : 2024-11-01      [*] Generate Authenticator   _app,sendrecv_v2,sendrecv_v2_brotli,send
+    >>  qcom   [+] Product Name   : samsung   [+] Serial Number  : R5CX105PKGA   [+] Security patch : 2024-11-01      [*] Generate Authenticator   ........................................
+    >>  qcom   [+] Product Name   : samsung   [+] Serial Number  : R5CX105PKGA  .C... [+] Security patch : 2024-11-01      [*] Generate Authenticator   ...................................
+    >> W...??..adb I 10-06 01:03:59  8212 11360 transport.cpp:335] R5CX105PKGA: read thread spawning  .....................................................................................
+    >> V...??..adb I 10-06 01:03:59  8212 12456 transport.cpp:307] R5CX105PKGA: write thread spawning......................................................................................
+    >> X?..7.b.h?..\?..??..??..~.7w....~.7w....?...8?......D?......R5CX105PKGA.............................................................................................................
+
+  === Term: [SM-S928U1] (5 occurrences) ===
+    >> ............??u???..??......ct.name=e3quew;ro.product.model=SM-S928U1;ro.product.device=e3q;features=shell_v2,cmd,stat_v2,ls_v2,fixed_push_mkdir,apex,abb,fixed_push_symlink_timesta
+    >> oid.wifi.decrease.scan.in 8#?a..?.....351184060372395del  : SM-S928U1   [+] Product CPU    : qcom   [+] Product Name   : samsung   [+] Serial Number  : R5CX105PKGA   [+] Security p
+    >> **********************************     [+] Product Model  : SM-S928U1   [+] Product CPU    : qcom   [+] Product Name   : samsung   [+] Serial Number  : R5CX105PKGA   [+] Security p
+    >> **********************************     [+] Product Model  : SM-S928U1   [+] Product CPU    : qcom   [+] Product Name   : samsung   [+] Serial Number  : R5CX105PKGA  .C... [+] Secur
+    >> ..?.............??N................!........?...e3quew......SM-S928U1...e3q........................................................@?...?..??..........|?..|?..........?u..?u..?u..?
+
+  === Term: [S928U1] (5 occurrences) ===
+    >> .........??u???..??......ct.name=e3quew;ro.product.model=SM-S928U1;ro.product.device=e3q;features=shell_v2,cmd,stat_v2,ls_v2,fixed_push_mkdir,apex,abb,fixed_push_symlink_timestamp,
+    >> .wifi.decrease.scan.in 8#?a..?.....351184060372395del  : SM-S928U1   [+] Product CPU    : qcom   [+] Product Name   : samsung   [+] Serial Number  : R5CX105PKGA   [+] Security patc
+    >> *******************************     [+] Product Model  : SM-S928U1   [+] Product CPU    : qcom   [+] Product Name   : samsung   [+] Serial Number  : R5CX105PKGA   [+] Security patc
+    >> *******************************     [+] Product Model  : SM-S928U1   [+] Product CPU    : qcom   [+] Product Name   : samsung   [+] Serial Number  : R5CX105PKGA  .C... [+] Security
+    >> .............??N................!........?...e3quew......SM-S928U1...e3q........................................................@?...?..??..........|?..|?..........?u..?u..?u..?u..
+
+  === Term: [/data/local/tmp/ndx] (6 occurrences) ===
+    >> .......any-device.?????.??...?shell,v2,raw:pm install -r -g /data/local/tmp/ndx...?????.??...?.??.l,v2?;?.:pm ............g /d.........any-device.....?.??...?????..................
+    >> .......any-device.?????.???..?shell,v2,raw:pm install -r -g /data/local/tmp/ndx.e.?????.???..?........?...?U4.........................p;?.?.|.........?.???..?shell,v2,raw:pm instal
+    >> ......p;?.?.|.........?.???..?shell,v2,raw:pm install -r -g /data/local/tmp/ndx.e.?????.???..??????????????????????????????????????????????????????????.???..?.??.?????;?.????......
+    >> ..!............g????.??.???..?shell,v2,raw:pm install -r -g /data/local/tmp/ndx.e.....?.???..?.??.?????;?.????............????.........any-device.????G.i??..????u???u.........?N??.
+    >> ??????????????????????g.I??..?shell,v2,raw:pm install -r -g /data/local/tmp/ndx.??????o.A??..?????????????????????????????????????????????????????????w.Y??..???????????????????????
+    >> ??????????????????????..Q??..?shell,v2,raw:pm install -r -g /data/local/tmp/ndx.??????..)??..?........?...?U4.........................p;?.?.|...........!??..???????????????????????
+
+  === Term: [service call iphonesubinfo] (2 occurrences) ===
+    >> .......?...........?.......8...s...????...?004dshell,v2,raw:service call iphonesubinfo 1 | cut -c 52-66 | tr -d '.[:space:]'...............????...???...?......H7......???v CKM127.0
+    >> ...........@?......................??M?...?004dshell,v2,raw:service call iphonesubinfo 1 | cut -c 52-66 | tr -d '.[:space:]'...............??@?. .?....??...........................
+
+  === Term: [AT+] (3 occurrences) ===
+    >> ???.?*????H.9?.?.?????.???.??)???.|X???QjOP?H...??.??tE?.;L$At+@??j.?.???.??.h C?.P?@?..??.?.$..?~??????????)?????I..D?9?.E????????..D..P?D$.?L$.?.$Qh?B?.P??...??.Y????U??SWV?????@
+    >> ple Mobile Device Service.e.v.A.=?e".?S.e.r.v.i.c.e...Applicat+..+??..??..?...G.;?.#.?........................................M.1?.$.?........................................S..?.%
+    >> p???~...KUTA(;5%.EQ?75?I.??1:2B .?????M?~?? ??\????.?3.. .IDAT+477??.???nz{{w?? T.5!.??????t:??????????? .:;:hkm???)fff?h.X[?\??z?*??.??????v??.tvv??K.?.PU.???gzz:??b??(??u??k?V+-m
+
+  === Term: [AT^] (2 occurrences) ===
+    >> ?A.....?A.....?A.....?A.....?A0?A@?A@....?AD....?A<.W?..AH..AT^?.....USWV???AX.t.?v`?..????.?FL.t.?vT??.????.?N<?v@??<..?N0?v4??<..?F..t.?v$??.????.?~.??ti?^.9?u.???Rffffff...?....
+    >> @`?@.]?..????????????????U???E.VW?AD?yH???...?E.?????Ap?E._?At^]?..?????????????????????..?.??????????????.??????????????U???E.? .???.?]?..??????????????U???E.V?qxW??L...??????_^]?
+
+  === Term: [AT$] (15 occurrences) ===
+    >> a..???...'?g.p?= ?d.????.x?.???.?...?0????=???..??.8??^.|8`?At$x.?m???}D?..??.#L???.?5...|??.%l?(?"F?.<~?.1?..9?x??#.F???.?).?E?.|`??-?)?j?.. .???,?G.?Q.!y.i????.?@??.??.?.?i<5.?? 
+    >> G#.??.?????? ,.???$???v>`R. ??.$.??J.*)?.FR..(???.?fl ?t?.c?At$ ?.HAt? ?.?.??.??I??$ .B?.0h??P.....??|?.DC%@T.?C..?.?T?nP.?.D`???.AA????. ?#...x? .s???.??8AAh..?'>(?.??>.???.&h??..
+    >> C..k(??i.? *xD? :". *??????..?C.DGHR?hEAtt$@TBF &.DG?.D?t.bbAt$"!.w??a??<?P..J...???Cc.?h?C ?y<? :B???...?.=.Q. ?.Q.I?????). .??I?.????C????G= ?.???)..??.aq@t?"i?m.D?pv??@4@\ ??..B
+    >> t$zy....??..?L...text$zz....8...?....xdata$x....?...?....didat$2....?... ....didat$3....?...D....didat$4.............didat$6........D....didat$7....`...x....edata... ..0....data$dk
+    >> t$zz....8...?....xdata$x....?...?....didat$2....?... ....didat$3....?...D....didat$4.............didat$6........D....didat$7....`...x....edata... ..0....data$dk00$brc..0 ..0....dat
+    >> ta$x....?...?....didat$2....?... ....didat$3....?...D....didat$4.............didat$6........D....didat$7....`...x....edata... ..0....data$dk00$brc..0 ..0....data$pr00$brc..` ..@...
+    >> at$2....?... ....didat$3....?...D....didat$4.............didat$6........D....didat$7....`...x....edata... ..0....data$dk00$brc..0 ..0....data$pr00$brc..` ..@....data$r$brc.? .. ...
+    >> at$3....?...D....didat$4.............didat$6........D....didat$7....`...x....edata... ..0....data$dk00$brc..0 ..0....data$pr00$brc..` ..@....data$r$brc.? .. ....data$rs$brc....? ..
+    >> ta$3....?4..?....idata$4....47..L....idata$6.....P..D....didat$5.....`..`....rsrc$01....``..?....rsrc$02.... ...me? ???1 ????rj????????J????.c?+......................??U????4?? ?q3
+    >> TL$__m..??..0...minATL$__r..??......minATL$__z..??..`....didat$2....0?.. ....didat$3....P?..?....didat$4....H?..x....didat$6....??.......didat$7....??..?....edata...?..h....data$dk
+    >> TL$__r..??......minATL$__z..??..`....didat$2....0?.. ....didat$3....P?..?....didat$4....H?..x....didat$6....??.......didat$7....??..?....edata...?..h....data$dk00$brc..h?..?....dat
+    >> TL$__z..??..`....didat$2....0?.. ....didat$3....P?..?....didat$4....H?..x....didat$6....??.......didat$7....??..?....edata...?..h....data$dk00$brc..h?..?....data$pr00$brc...?..?...
+    >> at$2....0?.. ....didat$3....P?..?....didat$4....H?..x....didat$6....??.......didat$7....??..?....edata...?..h....data$dk00$brc..h?..?....data$pr00$brc...?..?....data$r$brc.??......
+    >> at$3....P?..?....didat$4....H?..x....didat$6....??.......didat$7....??..?....edata...?..h....data$dk00$brc..h?..?....data$pr00$brc...?..?....data$r$brc.??.......data$rs$brc....??..
+    >> ta$3....??..T....idata$4....@?..J....idata$6...... .?....didat$5.....  ......rsrc$01.....! .H....rsrc$02.... ...?!?mJ.??['???.F?.?%.?x??...?.?/`........................h.?ss???..Y?
+
+[+] Scan Complete! Output saved to: C:\Users\pc5\softwer\PhoenixGSM\tools\DmpScanner\relock_extracted_results.txt

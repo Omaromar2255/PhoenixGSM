@@ -1,0 +1,157 @@
+# ====================================================================
+# PhoenixGSM & Forensic Tools - Git Ignore Rules (.gitignore)
+# ====================================================================
+
+# --------------------------------------------------------------------
+# 1. أرشيفات وملفات مضغوطة كبيرة (Archives & Large Compressed Files)
+# --------------------------------------------------------------------
+# تحذير: يرفض GitHub الملفات التي تتجاوز 100 ميغابايت (مثل PhoenixGSM.tar)
+*.7z
+*.tar
+*.gz
+*.zip
+*.rar
+*.bz2
+*.xz
+*.iso
+PhoenixGSM.7z
+PhoenixGSM.tar
+
+# --------------------------------------------------------------------
+# 2. مخرجات بناء دوت نت وسي شارب (.NET / C# Build Outputs)
+# --------------------------------------------------------------------
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+TestBuild/
+x64/
+x86/
+ARM/
+ARM64/
+
+# ملفات NuGet المؤقتة
+project.lock.json
+project.assets.json
+*.nuget.props
+*.nuget.targets
+
+# --------------------------------------------------------------------
+# 3. مخرجات بناء السي والدرايفر (C / C++ / KMDF Driver Build Outputs)
+# --------------------------------------------------------------------
+*.sys
+*.cat
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.tlog
+*.idb
+*.ipch
+*.pch
+*.res
+*.lastcodeanalysissucceeded
+Generated Files/
+Backup*/
+
+# --------------------------------------------------------------------
+# 4. سجلات التشغيل ومخرجات الفحص (Logs & Analysis Output Files)
+# --------------------------------------------------------------------
+*.log
+gui_debug.log
+Logs/
+TechnicianAudit/
+build_log.txt
+build_omni.txt
+dump_deep_results.txt
+omni_err.txt
+omni_out.txt
+test_output.txt
+tool_logs_out.txt
+query
+
+# --------------------------------------------------------------------
+# 5. ملفات تفريغ الذاكرة (Memory Dumps & Forensic Dumps)
+# --------------------------------------------------------------------
+*.dmp
+*.mdmp
+*.hdmp
+*.crash
+
+# --------------------------------------------------------------------
+# 6. نسخ احتياطية وملفات سجل النظام (Local Backups & Registry Exports)
+# --------------------------------------------------------------------
+backups/
+PhoenixGSM/backups/
+*.reg
+*.bak
+*.backup
+*.tmp
+*.temp
+*.swp
+
+# --------------------------------------------------------------------
+# 7. بيئات ومخلفات بايثون (Python Caches & Virtual Environments)
+# --------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# --------------------------------------------------------------------
+# 8. إعدادات بيئات التطوير والمحررات (IDEs & Editors)
+# --------------------------------------------------------------------
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.pidb
+*.booproj
+*.svclog
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.history/
+
+# JetBrains / Rider
+.idea/
+*.DotSettings*
+
+# --------------------------------------------------------------------
+# 9. شهادات التوقيع والمفاتيح السرية (Certificates & Secrets)
+# --------------------------------------------------------------------
+*.pfx
+*.p12
+*.key
+*.pem
+# ملاحظة: شهادة الاختبار المحلية للدرايفر
+# PhoenixTestCert.cer
+
+# --------------------------------------------------------------------
+# 10. ملفات نظام التشغيل (Operating System Files)
+# --------------------------------------------------------------------
+# Windows
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*

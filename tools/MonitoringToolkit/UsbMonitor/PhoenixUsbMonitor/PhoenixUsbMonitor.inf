@@ -1,0 +1,41 @@
+;
+; PhoenixGSM — USB Monitor Filter Driver INF
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = AndroidUsbDeviceClass
+ClassGuid   = {3F966BD9-FA04-4EC5-991C-D326973B5128}
+Provider    = %ManufacturerName%
+CatalogFile = PhoenixUsbMonitor.cat
+DriverVer   = 10/02/2026,1.0.0.0
+
+[DestinationDirs]
+DefaultDestDir = 12 ; %windir%\system32\drivers
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+PhoenixUsbMonitor.sys = 1,,
+
+[DefaultInstall.NTamd64]
+CopyFiles = Drivers_Dir
+
+[DefaultInstall.NTamd64.Services]
+AddService = PhoenixUsbMonitor,,PhoenixUsbMonitor_Service_Inst
+
+[Drivers_Dir]
+PhoenixUsbMonitor.sys
+
+[PhoenixUsbMonitor_Service_Inst]
+DisplayName    = %ServiceDescription%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\PhoenixUsbMonitor.sys
+
+[Strings]
+ManufacturerName   = "PhoenixGSM Team"
+DiskName           = "PhoenixGSM USB Monitor Installation Disk"
+ServiceDescription = "PhoenixGSM USB Monitor Filter Driver"
