@@ -7,16 +7,62 @@ namespace PhoenixGSM.OmniTrace.ModemMonitoring
         /// <summary>
         /// يحلل أوامر AT ويصنف مستوى الخطورة - Parses AT commands and categorizes risk levels
         /// </summary>
-        public ModemCommandEvent ParseAtCommand(string line, ModemRoute route = ModemRoute.UsbCdcAcm, string port = "")
+        public ModemCommandEvent? ParseAtCommand(string line, ModemRoute route = ModemRoute.UsbCdcAcm, string port = "")
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(line))
                 {
-                    return CreateEvent(route, line, ModemRiskCategory.InfoQuery, 0, "أمر فارغ - Empty Command", port);
+                    return null;
                 }
 
-                var upperLine = line.Trim().ToUpperInvariant();
+                string trimmed = line.Trim();
+
+                // Reject getprop fragments, hex streams, parcel results, and non-modem artifacts
+                if (trimmed.Contains("]: [") || trimmed == "]" || trimmed.Contains("0x0000") ||
+                    trimmed.Contains("Enforcing", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.Contains("Permissive", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.Contains("0x4948", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.Contains("0x4f4c", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.Contains("0x494d", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.Contains("Product Name", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.Contains("Product Model", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.Contains("Build  Number", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.Contains("Serial Number", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.Contains("restarting in USB mode", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.Contains("#OK", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.StartsWith("AuthKey", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.StartsWith("Token AuthKey", StringComparison.OrdinalIgnoreCase))
+                {
+                    return null;
+                }
+
+                // Reject long hex strings (>= 32 hex chars)
+                if (trimmed.Length >= 32 && trimmed.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+                {
+                    return null;
+                }
+
+                var upperLine = trimmed.ToUpperInvariant();
+
+                // Strict validation: must start with standard AT command or modem response prefix
+                bool isStandardAt = upperLine.StartsWith("AT+") || upperLine.StartsWith("AT*") || upperLine.StartsWith("AT#") ||
+                                    upperLine.StartsWith("AT$") || upperLine.StartsWith("AT%") || upperLine.StartsWith("AT^") ||
+                                    upperLine.StartsWith("ATE") || upperLine.StartsWith("ATI") || upperLine.StartsWith("ATD") ||
+                                    upperLine.StartsWith("ATA") || upperLine.StartsWith("ATH") || upperLine.StartsWith("ATO") ||
+                                    upperLine.StartsWith("ATZ") || upperLine.StartsWith("AT&") || upperLine.StartsWith("ATQ") ||
+                                    upperLine.StartsWith("ATV") || upperLine.StartsWith("ATX") || upperLine == "AT" ||
+                                    upperLine == "A/" || upperLine.StartsWith("^") ||
+                                    upperLine.StartsWith("+") || upperLine == "OK" || upperLine.StartsWith("ERROR") ||
+                                    upperLine.StartsWith("+CME ERROR:") || upperLine.StartsWith("+CMS ERROR:") || upperLine.StartsWith("+DEVCONINFO:") ||
+                                    upperLine.StartsWith("ANY-") || upperLine.StartsWith("SM-") || upperLine.StartsWith("MODEL:") || upperLine.StartsWith("IMEI:") ||
+                                    (trimmed.Length >= 14 && trimmed.Length <= 16 && trimmed.All(char.IsDigit));
+
+                if (!isStandardAt)
+                {
+                    return null;
+                }
+
                 ModemRiskCategory category = ModemRiskCategory.InfoQuery;
                 int riskLevel = 0;
                 string desc = "استعلام أو أمر قياسي - Standard Query/Command";
@@ -57,12 +103,12 @@ namespace PhoenixGSM.OmniTrace.ModemMonitoring
                     desc = "أمر خاص بالشركة المصنعة - Proprietary Vendor Command";
                 }
 
-                return CreateEvent(route, line, category, riskLevel, desc, port);
+                return CreateEvent(route, trimmed, category, riskLevel, desc, port);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 // Fail-open: لا تعطل النظام في حال حدوث خطأ - Do not crash the system on error
-                return CreateEvent(route, line, ModemRiskCategory.InfoQuery, 0, $"خطأ في التحليل - Parse error: {ex.Message}", port);
+                return null;
             }
         }
 

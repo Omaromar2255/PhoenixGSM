@@ -64,6 +64,18 @@ public sealed class InProcessExecutionSensor : IDisposable
         _dedupCache.Clear();
     }
 
+    private static readonly HashSet<string> IgnoredNoiseProcesses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "MicrosoftEdgeUpdate.exe", "GoogleUpdate.exe", "svchost.exe", "services.exe",
+        "chrome.exe", "msedge.exe", "firefox.exe", "explorer.exe", "conhost.exe",
+        "git.exe", "SearchHost.exe", "RuntimeBroker.exe", "taskhostw.exe", "WmiPrvSE.exe",
+        "attrib.exe",
+        "MicrosoftEdgeUpdate", "GoogleUpdate", "svchost", "services",
+        "chrome", "msedge", "firefox", "explorer", "conhost",
+        "git", "SearchHost", "RuntimeBroker", "taskhostw", "WmiPrvSE", "attrib",
+        "WMIC", "Unknown Caller"
+    };
+
     /// <summary>
     /// Ingests and attributes an in-process operation executed directly by a GSM tool.
     /// Emits both a RawCaptureEvent and a correlated LogicalCommandEvent (KnownProtocol.InProcess).
@@ -77,6 +89,26 @@ public sealed class InProcessExecutionSensor : IDisposable
         Dictionary<string, string>? details = null)
     {
         if (string.IsNullOrWhiteSpace(toolName)) toolName = "GSM_Tool.exe";
+        string cleanTool = System.IO.Path.GetFileName(toolName.Trim());
+        if (IgnoredNoiseProcesses.Contains(cleanTool) || IgnoredNoiseProcesses.Contains(System.IO.Path.GetFileNameWithoutExtension(cleanTool)))
+        {
+            return;
+        }
+
+        // Suppress dumb SUBPROCESS_EXECUTION events without actual command line
+        if (operationName.Equals("SUBPROCESS_EXECUTION", StringComparison.OrdinalIgnoreCase))
+        {
+            bool hasValidCmd = details != null &&
+                               details.TryGetValue("CommandLine", out var cLine) &&
+                               !string.IsNullOrWhiteSpace(cLine) &&
+                               !cLine.Trim().Equals(cleanTool, StringComparison.OrdinalIgnoreCase) &&
+                               !cLine.Trim().Equals("SUBPROCESS_EXECUTION", StringComparison.OrdinalIgnoreCase);
+            if (!hasValidCmd)
+            {
+                return;
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(operationName)) operationName = "InProcess_Operation";
         if (string.IsNullOrWhiteSpace(targetDevice)) targetDevice = "Host";
         payload ??= [];
@@ -85,7 +117,7 @@ public sealed class InProcessExecutionSensor : IDisposable
         string payloadHash = payload.Length > 0
             ? Convert.ToHexString(SHA256.HashData(payload))[..16]
             : "EMPTY";
-        string dedupKey = $"{toolName}:{pid}:{operationName}:{payloadHash}";
+        string dedupKey = $"{cleanTool}:{pid}:{operationName}:{payloadHash}";
         DateTime now = DateTime.UtcNow;
 
         if (_dedupCache.TryGetValue(dedupKey, out var exp) && now < exp)

@@ -89,7 +89,45 @@ public partial class MonitoringEngine
                                      rawAsciiPreview.StartsWith("DENT", StringComparison.Ordinal) ||
                                      rawAsciiPreview.StartsWith("LIST", StringComparison.Ordinal);
 
-                    bool isAdbStream = rawAsciiPreview.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
+                    string cleanLine = chunk.Length > 0 ? Encoding.ASCII.GetString(chunk).Trim('\r', '\n', '\t', '\0', ' ') : "";
+                    string cleanLineTrimmed = cleanLine.Trim();
+
+                    bool isLongHex = cleanLineTrimmed.Length >= 64 && cleanLineTrimmed.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
+
+                    bool isAdbRilIpc = isLongHex ||
+                                       rawAsciiPreview.StartsWith("1163000501", StringComparison.OrdinalIgnoreCase) ||
+                                       rawAsciiPreview.StartsWith("06090004", StringComparison.OrdinalIgnoreCase) ||
+                                       rawAsciiPreview.StartsWith("07170004", StringComparison.OrdinalIgnoreCase) ||
+                                       rawAsciiPreview.StartsWith("1163005F", StringComparison.OrdinalIgnoreCase) ||
+                                       rawAsciiPreview.StartsWith("116300", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.StartsWith("3E257A2C", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.StartsWith("AF6DBB85", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.StartsWith("62E83911", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.StartsWith("d8d8d8", StringComparison.OrdinalIgnoreCase) ||
+                                       (chunk.Length >= 4 && chunk[0] == 0x11 && chunk[1] == 0x63);
+
+                    bool isAdbStream = !isAdbRilIpc && (
+                                       rawAsciiPreview.Contains("]: [") ||
+                                       cleanLineTrimmed.Contains("]: [") ||
+                                       cleanLineTrimmed == "]" ||
+                                       cleanLineTrimmed.Contains("0x0000") ||
+                                       cleanLineTrimmed.Equals("Enforcing", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.Equals("Permissive", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.Contains("0x4948", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.Contains("0x4f4c", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.Contains("0x494d", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.Contains("Product Name", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.Contains("Product Model", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.Contains("Build  Number", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.Contains("Serial Number", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.Contains("AuthKey Encrypt", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.Contains("restarting in USB mode", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.Contains("device::ro.product.", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.Equals("OK\n\n\n#", StringComparison.Ordinal) ||
+                                       cleanLineTrimmed.Equals("#OK", StringComparison.Ordinal) ||
+                                       cleanLineTrimmed.Equals("OK", StringComparison.Ordinal) ||
+                                       cleanLineTrimmed.Equals("#", StringComparison.Ordinal) ||
+                                       rawAsciiPreview.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
                                        rawAsciiPreview.StartsWith("Result: Parcel(", StringComparison.OrdinalIgnoreCase) ||
                                        rawAsciiPreview.StartsWith("[DEVICE_PROVISIONED]", StringComparison.OrdinalIgnoreCase) ||
                                        rawAsciiPreview.StartsWith("while [ \"$(getprop", StringComparison.OrdinalIgnoreCase) ||
@@ -100,7 +138,6 @@ public partial class MonitoringEngine
                                        rawAsciiPreview.Contains("[sys.") ||
                                        rawAsciiPreview.Contains("[ril.") ||
                                        rawAsciiPreview.Contains("[gsm.") ||
-                                       (rawAsciiPreview.StartsWith("[") && rawAsciiPreview.Contains("]: [")) ||
                                        rawAsciiPreview.Contains("rm: ") ||
                                        rawAsciiPreview.Contains("Permission denied") ||
                                        rawAsciiPreview.Contains("Operation not permitted") ||
@@ -117,14 +154,8 @@ public partial class MonitoringEngine
                                        rawAsciiPreview.Contains("Enter AuthKey:", StringComparison.OrdinalIgnoreCase) ||
                                        rawAsciiPreview.Contains("AuthKey : OK", StringComparison.OrdinalIgnoreCase) ||
                                        rawAsciiPreview.Contains("AuthKey : FAIL", StringComparison.OrdinalIgnoreCase) ||
-                                       rawAsciiPreview.StartsWith("/data/local/tmp", StringComparison.OrdinalIgnoreCase);
-
-                    bool isAdbRilIpc = rawAsciiPreview.StartsWith("1163000501", StringComparison.OrdinalIgnoreCase) ||
-                                       rawAsciiPreview.StartsWith("06090004", StringComparison.OrdinalIgnoreCase) ||
-                                       rawAsciiPreview.StartsWith("07170004", StringComparison.OrdinalIgnoreCase) ||
-                                       rawAsciiPreview.StartsWith("1163005F", StringComparison.OrdinalIgnoreCase) ||
-                                       rawAsciiPreview.StartsWith("116300", StringComparison.OrdinalIgnoreCase) ||
-                                       (chunk.Length >= 4 && chunk[0] == 0x11 && chunk[1] == 0x63);
+                                       rawAsciiPreview.StartsWith("/data/local/tmp", StringComparison.OrdinalIgnoreCase)
+                    );
 
                     bool isUpperFilterPort = (pkt.TransferType == 4);
                     bool isNonAtUsbProtocol = isAdbHeader || isAdbStream || isAdbRilIpc || isAdbSync || isSahara || isFirehose || isFastboot;
@@ -133,16 +164,23 @@ public partial class MonitoringEngine
                         ? PhoenixGSM.OmniTrace.Detection.ProtocolDetector.EvaluateSerialAt(chunk, PhoenixGSM.OmniTrace.Models.SensorType.Serial, PhoenixGSM.OmniTrace.Models.TransportType.SERIAL) 
                         : 0.0;
                     bool isAsciiText = chunk.Length > 0 && chunk.All(b => b == 0 || b == 10 || b == 13 || (b >= 32 && b < 127));
-                    string cleanLine = chunk.Length > 0 ? Encoding.ASCII.GetString(chunk).Trim('\r', '\n', '\t', '\0', ' ') : "";
 
                     double mtkConf = chunk.Length > 0 ? PhoenixGSM.OmniTrace.Decoders.MtkProtocolDecoder.EvaluateMtk(chunk) : 0.0;
                     bool isMtk = mtkConf >= 0.70;
 
-                    bool isAt = !isMtk && !isNonAtUsbProtocol && (
-                        isUpperFilterPort || (
-                            atConf >= 0.70 ||
-                            (isAsciiText && atConf >= 0.30)
-                        )
+                    string cleanUpper = cleanLineTrimmed.ToUpperInvariant();
+                    bool isExplicitModemCmd = cleanUpper.StartsWith("AT+") || cleanUpper.StartsWith("AT*") ||
+                                              cleanUpper.StartsWith("AT#") || cleanUpper.StartsWith("ATE") ||
+                                              cleanUpper.StartsWith("ATI") || cleanUpper.StartsWith("ATD") ||
+                                              cleanUpper.StartsWith("ATA") || cleanUpper.StartsWith("ATZ") ||
+                                              cleanUpper.StartsWith("AT&") || cleanUpper == "AT" ||
+                                              cleanUpper.StartsWith("+DEVCONINFO:") || cleanUpper.StartsWith("+CME ERROR:") ||
+                                              cleanUpper.StartsWith("+CMS ERROR:") ||
+                                              (isUpperFilterPort && (cleanUpper.StartsWith("+") || cleanUpper == "OK" || cleanUpper.StartsWith("ERROR")));
+
+                    bool isAt = !isMtk && !isNonAtUsbProtocol && !isAdbStream && !isAdbRilIpc && (
+                        isExplicitModemCmd ||
+                        (isUpperFilterPort && atConf >= 0.70 && !cleanLineTrimmed.Contains("]: [") && cleanLineTrimmed != "]")
                     );
 
                     KernelDiagLog($"PKT {dir} EP={epHex} TT={pkt.TransferType} len={pkt.ActualLength} cap={chunk.Length} isMtk={isMtk}({mtkConf:F2}) isAt={isAt} isUF={isUpperFilterPort} atConf={atConf:F2} ascii={isAsciiText} adb={isAdbHeader} sahara={isSahara} fh={isFirehose} fb={isFastboot} | {Encoding.ASCII.GetString(chunk[..Math.Min(chunk.Length, 64)].Select(b => b >= 32 && b < 127 ? b : (byte)'.').ToArray())}");
@@ -333,8 +371,32 @@ public partial class MonitoringEngine
                         {
                             foreach (var frame in frames)
                             {
-                                string cmdDisplay = (!string.IsNullOrEmpty(frame.PayloadPreview) && (frame.Command == "OPEN" || frame.Command == "WRTE"))
-                                    ? $"{frame.Command} -> {frame.PayloadPreview}"
+                                // Suppress routine OKAY and CLSE events between ADB-STREAM packets
+                                if (frame.Command == "OKAY" || frame.Command == "CLSE")
+                                {
+                                    continue;
+                                }
+
+                                string payloadPreview = frame.PayloadPreview ?? "";
+
+                                // Check if OPEN or WRTE resulted in raw Hex string or mangled header
+                                if (frame.Command == "OPEN" || frame.Command == "WRTE")
+                                {
+                                    string pTrim = payloadPreview.Trim();
+                                    bool isHexByteDump = pTrim.Length >= 8 && pTrim.Contains(" ") &&
+                                                         pTrim.Split(' ').All(tok => tok.Length == 2 && Uri.IsHexDigit(tok[0]) && Uri.IsHexDigit(tok[1]));
+
+                                    bool isMangledHeader = pTrim.Contains("CLSE") || pTrim.Contains("OPEN") ||
+                                                           pTrim.StartsWith("OKAY") || pTrim.StartsWith("WRTE");
+
+                                    if (isHexByteDump || isMangledHeader)
+                                    {
+                                        continue;
+                                    }
+                                }
+
+                                string cmdDisplay = (!string.IsNullOrEmpty(payloadPreview) && (frame.Command == "OPEN" || frame.Command == "WRTE"))
+                                    ? $"{frame.Command} -> {payloadPreview}"
                                     : frame.Command;
 
                                 EmitEvent(new LiveEventItem
@@ -348,7 +410,7 @@ public partial class MonitoringEngine
                                     Command = cmdDisplay,
                                     Summary = frame.GetDetailSummary(),
                                     RawPayload = frame.Payload,
-                                    PayloadAscii = frame.PayloadPreview ?? "",
+                                    PayloadAscii = payloadPreview,
                                     PayloadHex = LiveEventItem.FormatHexDump(frame.Payload ?? Array.Empty<byte>()),
                                     AdditionalDetails = $"Arg0=0x{frame.Arg0:X8}, Arg1=0x{frame.Arg1:X8}, Length={frame.DataLength} B, Checksum=0x{frame.DataCheck:X8}"
                                 });
@@ -373,9 +435,24 @@ public partial class MonitoringEngine
                                 }
                                 double nonPrintableRatio = (double)nonPrintable / chunk.Length;
 
-                                if (rawAsciiPreview.StartsWith("SEND /", StringComparison.Ordinal) || rawAsciiPreview.StartsWith("SEND ", StringComparison.Ordinal))
+                                bool isRepeatedBinaryPattern = rawAsciiPreview.Contains("d8d8d8d8") ||
+                                                               rawAsciiPreview.Contains("FW22222") ||
+                                                               rawAsciiPreview.Contains("a4..?HR") ||
+                                                               rawAsciiPreview.Contains("I7..MS") ||
+                                                               rawAsciiPreview.Contains("..a4") ||
+                                                               rawAsciiPreview.Contains("..I7");
+
+                                if (rawAsciiPreview.StartsWith("SEND /", StringComparison.Ordinal) || rawAsciiPreview.StartsWith("SEND ", StringComparison.Ordinal) ||
+                                    rawAsciiPreview.Contains("SEND /data/local/tmp/"))
                                 {
-                                    _activeTransferFile = rawAsciiPreview.Split(new[] { '\0', ',', '\r', '\n' })[0].Trim();
+                                    string headerText = rawAsciiPreview.Split(new[] { '\0', '\r', '\n' })[0].Trim();
+                                    if (headerText.Contains("ELF"))
+                                    {
+                                        int elfIdx = headerText.IndexOf("ELF", StringComparison.Ordinal);
+                                        headerText = headerText[..elfIdx].TrimEnd(',', ' ') + " [ELF Binary Payload Stream...]";
+                                    }
+
+                                    _activeTransferFile = headerText;
                                     _activeTransferDir = dir;
                                     _activeTransferTotalBytes = chunk.Length;
                                     _activeTransferChunkCount = 1;
@@ -389,12 +466,12 @@ public partial class MonitoringEngine
                                         Direction = dir,
                                         EndpointOrTarget = $"EP {epHex}",
                                         Protocol = "ADB-SYNC",
-                                        Command = _activeTransferFile,
-                                        Summary = $"[ADB-SYNC] {dir} Transfer Started: {_activeTransferFile}",
+                                        Command = headerText,
+                                        Summary = $"[ADB-SYNC] {dir} Transfer Started: {headerText}",
                                         RawPayload = chunk,
-                                        PayloadAscii = _activeTransferFile,
+                                        PayloadAscii = headerText,
                                         PayloadHex = LiveEventItem.FormatHexDump(chunk[..Math.Min(chunk.Length, 64)]),
-                                        AdditionalDetails = $"Sync file push started: {_activeTransferFile}\nDirection: {dir}\nEndpoint: {epHex}"
+                                        AdditionalDetails = $"Sync file push started: {headerText}\nDirection: {dir}\nEndpoint: {epHex}"
                                     });
                                 }
                                 else if (rawAsciiPreview.StartsWith("RECV /", StringComparison.Ordinal) || rawAsciiPreview.StartsWith("RECV ", StringComparison.Ordinal))
@@ -448,7 +525,7 @@ public partial class MonitoringEngine
                                         _activeTransferFile = null;
                                     }
                                 }
-                                else if (nonPrintableRatio > 0.40)
+                                else if (isRepeatedBinaryPattern || nonPrintableRatio > 0.30 || !string.IsNullOrEmpty(_activeTransferFile))
                                 {
                                     // Suppress individual 1024B / 4096B line flooding for binary chunks (ELF, cp, data)
                                     if (!string.IsNullOrEmpty(_activeTransferFile))

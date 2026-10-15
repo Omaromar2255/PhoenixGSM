@@ -75,6 +75,25 @@ public sealed class SubProcessCommandSensor : IDisposable
         }
     }
 
+    private static readonly HashSet<string> IgnoredNoiseProcesses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "MicrosoftEdgeUpdate.exe", "GoogleUpdate.exe", "svchost.exe", "services.exe",
+        "chrome.exe", "msedge.exe", "firefox.exe", "explorer.exe", "conhost.exe",
+        "git.exe", "SearchHost.exe", "RuntimeBroker.exe", "taskhostw.exe", "WmiPrvSE.exe",
+        "attrib.exe",
+        "MicrosoftEdgeUpdate", "GoogleUpdate", "svchost", "services",
+        "chrome", "msedge", "firefox", "explorer", "conhost",
+        "git", "SearchHost", "RuntimeBroker", "taskhostw", "WmiPrvSE", "attrib",
+        "WMIC", "Unknown Caller"
+    };
+
+    private static bool IsNoiseProcess(string? nameOrPath)
+    {
+        if (string.IsNullOrWhiteSpace(nameOrPath)) return false;
+        string fileName = System.IO.Path.GetFileName(nameOrPath.Trim());
+        return IgnoredNoiseProcesses.Contains(fileName) || IgnoredNoiseProcesses.Contains(System.IO.Path.GetFileNameWithoutExtension(fileName));
+    }
+
     private void OnProcessStarted(Microsoft.Diagnostics.Tracing.Parsers.Kernel.ProcessTraceData e)
     {
         try
@@ -98,6 +117,21 @@ public sealed class SubProcessCommandSensor : IDisposable
                 callerName = parentProc.ProcessName;
             }
             catch { }
+
+            // Filter out blacklisted background noise processes
+            if (IsNoiseProcess(processName) || IsNoiseProcess(executablePath) || IsNoiseProcess(callerName))
+            {
+                return;
+            }
+
+            // Reject empty or bare executable commands
+            string trimmedCmd = cmdLine.Trim(' ', '"');
+            if (string.IsNullOrWhiteSpace(cmdLine) ||
+                trimmedCmd.Equals(processName, StringComparison.OrdinalIgnoreCase) ||
+                trimmedCmd.Equals(executablePath, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
 
             ReportSubProcessCommandEvent(processName, pid, executablePath, cmdLine, ppid, callerName);
             

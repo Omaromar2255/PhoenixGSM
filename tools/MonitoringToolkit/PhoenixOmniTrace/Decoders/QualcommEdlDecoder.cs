@@ -55,6 +55,60 @@ public static class QualcommEdlDecoder
         @"(\w+)\s*=\s*[""']([^""']*)[""']",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static bool ContainsAdbSignatures(ReadOnlySpan<byte> buf)
+    {
+        if (buf.Length < 4) return false;
+
+        // Check for ADB command words at offset 0
+        uint first4 = BitConverter.ToUInt32(buf[..4]);
+        if (first4 == 0x4E45504F || // OPEN
+            first4 == 0x45545257 || // WRTE
+            first4 == 0x59414B4F || // OKAY
+            first4 == 0x45534C43 || // CLSE
+            first4 == 0x4E584E43 || // CNXN
+            first4 == 0x434E5953 || // SYNC
+            first4 == 0x48545541)   // AUTH
+        {
+            return true;
+        }
+
+        // Check for ADB magic words and keywords across the buffer
+        for (int i = 0; i <= buf.Length - 4; i++)
+        {
+            byte b0 = buf[i];
+            byte b1 = buf[i + 1];
+            byte b2 = buf[i + 2];
+            byte b3 = buf[i + 3];
+
+            // ADB magic for WRTE: 0xBAABADA8 (little-endian: A8 AD AB BA) or (BA AB AD A8)
+            if ((b0 == 0xA8 && b1 == 0xAD && b2 == 0xAB && b3 == 0xBA) ||
+                (b0 == 0xBA && b1 == 0xAB && b2 == 0xAD && b3 == 0xA8))
+            {
+                return true;
+            }
+
+            // ADB magic for CLSE: 0xBCB3ACBA (little-endian: BA AC B3 BC) or (BC B3 AC BA)
+            if ((b0 == 0xBA && b1 == 0xAC && b2 == 0xB3 && b3 == 0xBC) ||
+                (b0 == 0xBC && b1 == 0xB3 && b2 == 0xAC && b3 == 0xBA))
+            {
+                return true;
+            }
+
+            // ADB command keywords in ASCII
+            if ((b0 == (byte)'O' && b1 == (byte)'P' && b2 == (byte)'E' && b3 == (byte)'N') ||
+                (b0 == (byte)'W' && b1 == (byte)'R' && b2 == (byte)'T' && b3 == (byte)'E') ||
+                (b0 == (byte)'O' && b1 == (byte)'K' && b2 == (byte)'A' && b3 == (byte)'Y') ||
+                (b0 == (byte)'C' && b1 == (byte)'L' && b2 == (byte)'S' && b3 == (byte)'E') ||
+                (b0 == (byte)'C' && b1 == (byte)'N' && b2 == (byte)'X' && b3 == (byte)'N') ||
+                (b0 == (byte)'S' && b1 == (byte)'Y' && b2 == (byte)'N' && b3 == (byte)'C'))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Evaluates if buffer matches Qualcomm Sahara binary protocol.
     /// </summary>
@@ -62,15 +116,31 @@ public static class QualcommEdlDecoder
     {
         if (buf.Length < 8) return 0.0;
 
+        // Strict ADB check: reject if containing ADB headers, magic numbers, or keywords
+        if (ContainsAdbSignatures(buf)) return 0.0;
+
         uint cmd = BitConverter.ToUInt32(buf[..4]);
         uint len = BitConverter.ToUInt32(buf[4..8]);
 
         if (SaharaCommands.ContainsKey(cmd))
         {
-            if (cmd == 0x01 && len == 48) return 0.99; // Sahara HELLO_REQ is 48 bytes
-            if (cmd == 0x02 && len == 48) return 0.99; // Sahara HELLO_RESP is 48 bytes
-            if (len >= 8 && len <= 1024) return 0.92;
-            return 0.80;
+            if (cmd == 0x01 && len == 48 && buf.Length >= 48) return 0.99; // Sahara HELLO_REQ is 48 bytes
+            if (cmd == 0x02 && len == 48 && buf.Length >= 48) return 0.99; // Sahara HELLO_RESP is 48 bytes
+
+            // For SAHARA_READ_DATA (cmdId == 0x03):
+            // Length MUST be exactly 20 bytes, len == 20, and read size in bytes 16..20 must be < 64MB.
+            // This strictly prevents misinterpreting ADB WRTE (LocalID=3) as a 3.1GB Sahara ReadData!
+            if (cmd == 0x03)
+            {
+                if (buf.Length != 20 || len != 20) return 0.0;
+                uint readSize = BitConverter.ToUInt32(buf.Slice(16, 4));
+                if (readSize == 0 || readSize > 64 * 1024 * 1024) return 0.0;
+                return 0.95;
+            }
+
+            if (len == buf.Length && len >= 8 && len <= 1024) return 0.92;
+            if (len >= 8 && len <= 1024 && buf.Length >= len) return 0.85;
+            return 0.0;
         }
 
         return 0.0;
@@ -119,7 +189,7 @@ public static class QualcommEdlDecoder
         return null;
     }
 
-    private static QualcommEdlDecodedPacket DecodeSaharaBinary(ReadOnlySpan<byte> buffer)
+    private static QualcommEdlDecodedPacket? DecodeSaharaBinary(ReadOnlySpan<byte> buffer)
     {
         uint cmd = BitConverter.ToUInt32(buffer[..4]);
         uint len = BitConverter.ToUInt32(buffer[4..8]);
@@ -148,11 +218,15 @@ public static class QualcommEdlDecoder
                 break;
 
             case 0x03: // READ_DATA
-                if (buffer.Length >= 20)
+                if (buffer.Length == 20 && len == 20)
                 {
                     uint imageId = BitConverter.ToUInt32(buffer.Slice(8, 4));
                     uint offset = BitConverter.ToUInt32(buffer.Slice(12, 4));
                     uint sLen = BitConverter.ToUInt32(buffer.Slice(16, 4));
+                    if (sLen > 64 * 1024 * 1024)
+                    {
+                        return null;
+                    }
                     packet.Summary = $"Device requesting loader chunk (ImageID={imageId}, Offset=0x{offset:X}, Size={sLen}B)";
                     packet.Details["ImageId"] = imageId.ToString();
                     packet.Details["ChunkOffset"] = $"0x{offset:X}";
@@ -160,7 +234,7 @@ public static class QualcommEdlDecoder
                 }
                 else
                 {
-                    packet.Summary = "Device requesting programmer image chunk from host";
+                    return null;
                 }
                 break;
 

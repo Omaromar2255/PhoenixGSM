@@ -339,12 +339,24 @@ public class AdbProtocolParser
     private static bool IsQualcommSahara(byte[] data, out string cmdName)
     {
         cmdName = "UNKNOWN";
-        if (data.Length < 8) return false;
+        if (data == null || data.Length < 8) return false;
+
+        // Check for ADB wire signatures or magic
+        if (ValidateHeader(data, 0, out _, out _, out _, out _, out _)) return false;
 
         uint cmdId = BitConverter.ToUInt32(data, 0);
         uint pktLen = BitConverter.ToUInt32(data, 4);
 
-        if (pktLen == data.Length || pktLen <= 1024)
+        // For Sahara READ_DATA (cmdId == 0x03):
+        // Must be exactly 20 bytes, pktLen == 20, and read size < 64MB
+        if (cmdId == 0x03)
+        {
+            if (data.Length != 20 || pktLen != 20) return false;
+            uint readSize = BitConverter.ToUInt32(data, 16);
+            if (readSize == 0 || readSize > 64 * 1024 * 1024) return false;
+        }
+
+        if (pktLen == data.Length || (pktLen >= 8 && pktLen <= 1024 && data.Length >= pktLen))
         {
             cmdName = cmdId switch
             {

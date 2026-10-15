@@ -209,7 +209,29 @@ public partial class MonitoringEngine : IDisposable
 
     private void HandleOmniCommand(PhoenixGSM.OmniTrace.Models.LogicalCommandEvent cmd)
     {
-        // Filter empty or duplicate WMIC hardware queries
+        // 1. Suppress dumb SUBPROCESS_EXECUTION without actual command
+        if (cmd.Command.Equals("SUBPROCESS_EXECUTION", StringComparison.OrdinalIgnoreCase))
+        {
+            bool hasValidCli = cmd.Details.TryGetValue("CommandLine", out var cli) &&
+                               !string.IsNullOrWhiteSpace(cli) &&
+                               !cli.Equals("SUBPROCESS_EXECUTION", StringComparison.OrdinalIgnoreCase);
+            if (!hasValidCli)
+            {
+                return;
+            }
+        }
+
+        // 2. Suppress background noise processes in InProcess/Process events
+        if (cmd.Protocol == PhoenixGSM.OmniTrace.Models.KnownProtocol.InProcess)
+        {
+            string caller = cmd.Details.TryGetValue("Caller", out var clr) ? clr : (cmd.Attribution?.ImageName ?? "");
+            if (ExcludedNoiseProcesses.Any(np => caller.Contains(np, StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+        }
+
+        // 3. Filter empty or duplicate WMIC hardware queries
         if (cmd.Details.TryGetValue("ProtocolName", out var protoName) && protoName == "WMIC")
         {
             cmd.Details.TryGetValue("CommandLine", out var wmicCli);
@@ -219,6 +241,18 @@ public partial class MonitoringEngine : IDisposable
 
         bool isStreamIn = cmd.Command.StartsWith("<<");
         bool isStreamOut = cmd.Command.StartsWith(">>");
+
+        // 4. Suppress SUB-STREAM events merging raw WRTE, CLSE, OKAY, OPEN, CNXN headers
+        if (isStreamOut || isStreamIn)
+        {
+            string cleanCmd = cmd.Command.TrimStart('<', '>', ' ');
+            if (cleanCmd.StartsWith("WRTE") || cleanCmd.StartsWith("CLSE") ||
+                cleanCmd.StartsWith("OKAY") || cleanCmd.StartsWith("OPEN") ||
+                cleanCmd.StartsWith("CNXN"))
+            {
+                return;
+            }
+        }
 
         string evidenceHashes = string.Join(", ", cmd.EvidenceHashes.Select(h => h.Length > 8 ? h[..8] : h));
 
@@ -740,7 +774,8 @@ public partial class MonitoringEngine : IDisposable
     private void HandleOmniRaw(PhoenixGSM.OmniTrace.Models.RawCaptureEvent raw)
     {
         if (raw.Sensor == PhoenixGSM.OmniTrace.Models.SensorType.VirtualProxy) return;
-        if (raw.Metadata != null && raw.Metadata.TryGetValue("Source", out var src) && src == "KernelDriver") return;
+        if (raw.Sensor == PhoenixGSM.OmniTrace.Models.SensorType.Serial) return; // Suppress duplicate SERIAL | Command: RAW #... events
+        if (raw.Metadata != null && raw.Metadata.TryGetValue("Source", out var src) && src.StartsWith("KernelDriver", StringComparison.OrdinalIgnoreCase)) return;
         if (raw.Sensor == PhoenixGSM.OmniTrace.Models.SensorType.USB) return;
         if (raw.Sensor == PhoenixGSM.OmniTrace.Models.SensorType.Network) return; // Handled with richer metadata via HandleNetworkUrlCaptured
         if (raw.Sensor == PhoenixGSM.OmniTrace.Models.SensorType.FileSystem) return; // Handled with richer metadata via HandleTempFileAtCaptured

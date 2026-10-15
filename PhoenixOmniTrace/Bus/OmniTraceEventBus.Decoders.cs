@@ -91,6 +91,14 @@ public sealed partial class OmniTraceEventBus
                         string outputText = ShellStreamReconstructor.CleanTerminalOutput(Encoding.UTF8.GetString(wp.Payload)).Trim();
                         if (!string.IsNullOrWhiteSpace(outputText) && outputText.Length >= 2)
                         {
+                            // Suppress raw ADB wire headers leaked into payload (WRTE, CLSE, OKAY, OPEN, CNXN)
+                            if (outputText.StartsWith("WRTE") || outputText.StartsWith("CLSE") ||
+                                outputText.StartsWith("OKAY") || outputText.StartsWith("CNXN") ||
+                                outputText.StartsWith("OPEN"))
+                            {
+                                continue;
+                            }
+
                             var cmd = Correlation.Correlate(
                                 $"<< {outputText}",
                                 KnownProtocol.ADB,
@@ -215,6 +223,51 @@ public sealed partial class OmniTraceEventBus
         {
             string cleanLine = rawLine.Trim();
             if (string.IsNullOrEmpty(cleanLine)) continue;
+
+            // Strict ADB Isolation Rule:
+            // Reject getprop fragments, hex streams, parcel results, and non-modem text
+            if (cleanLine.Contains("]: [") || cleanLine == "]" || cleanLine.Contains("0x0000") ||
+                cleanLine.Contains("Enforcing", StringComparison.OrdinalIgnoreCase) ||
+                cleanLine.Contains("Permissive", StringComparison.OrdinalIgnoreCase) ||
+                cleanLine.Contains("0x4948", StringComparison.OrdinalIgnoreCase) ||
+                cleanLine.Contains("0x4f4c", StringComparison.OrdinalIgnoreCase) ||
+                cleanLine.Contains("0x494d", StringComparison.OrdinalIgnoreCase) ||
+                cleanLine.Contains("Product Name", StringComparison.OrdinalIgnoreCase) ||
+                cleanLine.Contains("Product Model", StringComparison.OrdinalIgnoreCase) ||
+                cleanLine.Contains("Build  Number", StringComparison.OrdinalIgnoreCase) ||
+                cleanLine.Contains("Serial Number", StringComparison.OrdinalIgnoreCase) ||
+                cleanLine.Contains("restarting in USB mode", StringComparison.OrdinalIgnoreCase) ||
+                cleanLine.Contains("#OK", StringComparison.OrdinalIgnoreCase) ||
+                cleanLine.StartsWith("AuthKey", StringComparison.OrdinalIgnoreCase) ||
+                cleanLine.StartsWith("Token AuthKey", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // Reject long hex streams (e.g. >= 32 hex chars)
+            if (cleanLine.Length >= 32 && cleanLine.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+            {
+                continue;
+            }
+
+            // Must start with standard AT command or modem response prefix
+            string upper = cleanLine.ToUpperInvariant();
+            bool isModemAt = upper.StartsWith("AT+") || upper.StartsWith("AT*") || upper.StartsWith("AT#") ||
+                             upper.StartsWith("AT$") || upper.StartsWith("AT%") || upper.StartsWith("AT^") ||
+                             upper.StartsWith("ATE") || upper.StartsWith("ATI") || upper.StartsWith("ATD") ||
+                             upper.StartsWith("ATA") || upper.StartsWith("ATH") || upper.StartsWith("ATO") ||
+                             upper.StartsWith("ATZ") || upper.StartsWith("AT&") || upper.StartsWith("ATQ") ||
+                             upper.StartsWith("ATV") || upper.StartsWith("ATX") || upper == "AT" ||
+                             upper == "A/" || upper.StartsWith("^") ||
+                             upper.StartsWith("+") || upper == "OK" || upper.StartsWith("ERROR") ||
+                             upper.StartsWith("+CME ERROR:") || upper.StartsWith("+CMS ERROR:") || upper.StartsWith("+DEVCONINFO:") ||
+                             upper.StartsWith("ANY-") || upper.StartsWith("SM-") || upper.StartsWith("MODEL:") || upper.StartsWith("IMEI:") ||
+                             (cleanLine.Length >= 14 && cleanLine.Length <= 16 && cleanLine.All(char.IsDigit));
+
+            if (!isModemAt)
+            {
+                continue;
+            }
 
             Interlocked.Increment(ref _decodedEvents);
 

@@ -16,7 +16,14 @@ public partial class MonitoringEngine
 {
     private static readonly HashSet<string> ExcludedNoiseProcesses = new(StringComparer.OrdinalIgnoreCase)
     {
-        "chrome", "msedge", "firefox", "services", "svchost", "explorer", "SearchHost", "git", "conhost", "attrib"
+        "MicrosoftEdgeUpdate.exe", "GoogleUpdate.exe", "svchost.exe", "services.exe",
+        "chrome.exe", "msedge.exe", "firefox.exe", "explorer.exe", "conhost.exe",
+        "git.exe", "SearchHost.exe", "RuntimeBroker.exe", "taskhostw.exe", "WmiPrvSE.exe",
+        "attrib.exe",
+        "MicrosoftEdgeUpdate", "GoogleUpdate", "svchost", "services",
+        "chrome", "msedge", "firefox", "explorer", "conhost",
+        "git", "SearchHost", "RuntimeBroker", "taskhostw", "WmiPrvSE", "attrib",
+        "WMIC", "Unknown Caller"
     };
 
     private static readonly string[] KnownGsmTools =
@@ -138,6 +145,22 @@ public partial class MonitoringEngine
 
     private void HandleFallbackCommandCaptured(PhoenixGSM.OmniTrace.Commands.InterceptedToolCommand cmd)
     {
+        string pName = cmd.ParentProcessName ?? "";
+        string eName = Path.GetFileName(cmd.ExecutablePath ?? "");
+        if (ExcludedNoiseProcesses.Contains(pName) || ExcludedNoiseProcesses.Contains(eName) ||
+            ExcludedNoiseProcesses.Contains(Path.GetFileNameWithoutExtension(pName)) ||
+            ExcludedNoiseProcesses.Contains(Path.GetFileNameWithoutExtension(eName)))
+        {
+            return;
+        }
+
+        // Suppress dumb SUBPROCESS_EXECUTION without actual command
+        if (cmd.CommandAction == "SUBPROCESS_EXECUTION" || string.IsNullOrWhiteSpace(cmd.CommandLine) ||
+            cmd.CommandLine.Trim().Equals(eName, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
         if (cmd.ProtocolName == "WMIC" || cmd.SourceTag == "WMIC-QUERY")
         {
             if (ShouldFilterWmicQuery(cmd.CommandLine, cmd.CommandAction))
