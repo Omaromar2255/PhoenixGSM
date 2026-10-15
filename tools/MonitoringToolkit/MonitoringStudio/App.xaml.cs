@@ -18,7 +18,29 @@ public partial class App : Application
 
         DispatcherUnhandledException += (s, e) =>
         {
-            File.AppendAllText(LogFile, $"[Dispatcher Unhandled] {DateTime.Now}: {e.Exception}\n");
+            try
+            {
+                File.AppendAllText(LogFile, $"[Dispatcher Unhandled] {DateTime.Now}: {e.Exception}\n");
+            }
+            catch { }
+
+            // If MainWindow failed during initialization or is null, do not hang silently in RAM
+            if (MainWindow == null || !MainWindow.IsLoaded)
+            {
+                e.Handled = true;
+                try
+                {
+                    MessageBox.Show(
+                        $"فشل بدء تشغيل واجهة النظام (PhoenixGSM Studio):\n\n{e.Exception.Message}\n\nيرجى مراجعة سجل الأخطاء في:\n{LogFile}",
+                        "PhoenixGSM Studio - خطأ في بدء التشغيل",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                }
+                catch { }
+                Shutdown(-1);
+                return;
+            }
+
             e.Handled = true;
         };
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>

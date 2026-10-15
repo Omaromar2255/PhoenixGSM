@@ -602,7 +602,7 @@ public partial class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public string MonitoringButtonText => IsMonitoring ? "⏸ Pause Monitoring" : "▶ Start All Monitoring";
+    public string MonitoringButtonText => IsMonitoring ? "⏸ إيقاف مؤقت (Pause)" : "▶ بدء الالتقاط (Start)";
     public string MonitoringButtonColor => IsMonitoring ? "#E65100" : "#00B0FF";
 
     // Live Metrics
@@ -906,6 +906,7 @@ public partial class MainViewModel : INotifyPropertyChanged
 
         InitializeSystemStatus();
         InitializeTechnicianAuditLayer();
+        InitializeToolSourceInterceptionLayer();
         _engine.Start();
     }
 

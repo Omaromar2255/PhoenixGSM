@@ -49,6 +49,10 @@
 
                 <DataGrid.ContextMenu>
                     <ContextMenu>
+                        <MenuItem Header="🗑️ مسح وتنظيف السجلات (Clear All Logs)" 
+                                  InputGestureText="Ctrl+L"
+                                  Command="{Binding ClearLogsCommand}" />
+                        <Separator />
                         <MenuItem Header="التمرير التلقائي لآخر سطر (Auto-scroll to bottom)" 
                                   IsCheckable="True"
                                   IsChecked="{Binding AutoScroll, Mode=TwoWay}" />

@@ -17,6 +17,11 @@
         <vm:MainViewModel />
     </Window.DataContext>
 
+    <Window.InputBindings>
+        <KeyBinding Modifiers="Control" Key="L" Command="{Binding ClearLogsCommand}" />
+        <KeyBinding Modifiers="Control" Key="S" Command="{Binding ExportLogsCommand}" />
+    </Window.InputBindings>
+
     <Grid Margin="14,10,14,10">
         <Grid.RowDefinitions>
             <!-- 0: Header & Action Bar -->
@@ -61,7 +66,7 @@
                     <RadioButton IsChecked="{Binding IsTechnicianAuditViewActive, Mode=OneWay}"
                                  Command="{Binding SwitchToTechnicianAuditViewCommand}"
                                  GroupName="ViewTabs"
-                                 Style="{StaticResource TabRadioBtn}">
+                                 Style="{StaticResource TabRadioBtn}" Margin="0,0,6,0">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="🛡️ أوامر الفني لهاتف العميل (Technician ➔ Phone Audit)" FontWeight="Bold" Foreground="#00FFC2" VerticalAlignment="Center" />
                             <Border Background="#0C3325" BorderBrush="#00FF9D" BorderThickness="1" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center">
@@ -69,13 +74,33 @@
                             </Border>
                         </StackPanel>
                     </RadioButton>
+
+                    <!-- Tab 3: Dedicated Tool-Source Command Interception (MTP, MTK, Odin, Port) -->
+                    <RadioButton IsChecked="{Binding IsToolSourceInterceptionViewActive, Mode=OneWay}"
+                                 Command="{Binding SwitchToToolSourceViewCommand}"
+                                 GroupName="ViewTabs"
+                                 Style="{StaticResource TabRadioBtn}">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="⚡ أوامر الأدوات من المصدر (Tool-Source: MTP/MTK/Odin/Port)" FontWeight="Bold" Foreground="#00FFE5" VerticalAlignment="Center" />
+                            <Border Background="#002E2E" BorderBrush="#00FFE5" BorderThickness="1" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding ToolSourceTotalCount, StringFormat='{}{0} Cmds'}" FontWeight="Bold" FontSize="10.5" Foreground="#00FFE5" />
+                            </Border>
+                        </StackPanel>
+                    </RadioButton>
                 </StackPanel>
 
-                <!-- Pop-out Window Action -->
+                <!-- Pop-out Window & Quick Actions -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="📁 سجلات المصدر" 
+                            Command="{Binding OpenToolSourceLogFolderCommand}" 
+                            Style="{StaticResource ModernBtn}" Height="25" FontSize="10.5" Padding="8,2" Margin="0,0,6,0" />
                     <Button Content="🗗 فتح أوامر الفني بنافذة مستقلة" 
                             Command="{Binding OpenTechnicianAuditWindowCommand}" 
-                            Style="{StaticResource ModernBtn}" Height="25" FontSize="10.5" Padding="8,2" />
+                            Style="{StaticResource ModernBtn}" Height="25" FontSize="10.5" Padding="8,2" Margin="0,0,6,0" />
+                    <Button Content="🛡️ فتح رادار المصدر L24" 
+                            Command="{Binding OpenSourceSentinelWindowCommand}" 
+                            Style="{StaticResource CyanActionBtn}" Height="25" FontSize="10.5" Padding="8,2"
+                            ToolTip="فتح نافذة طبقة الاعتراض المستقلة من المصدر (L24 Source Sentinel)" />
                 </StackPanel>
             </Grid>
         </Border>
@@ -110,6 +135,9 @@
 
             <!-- DEDICATED SEPARATE TECHNICIAN COMMAND AUDIT VIEW -->
             <comp:TechnicianAuditView Visibility="{Binding IsTechnicianAuditViewActive, Converter={StaticResource BoolToVis}}" />
+
+            <!-- DEDICATED SEPARATE TOOL-SOURCE COMMAND INTERCEPTION VIEW (MTP / MTK / ODIN / PORT) -->
+            <comp:ToolSourceInterceptionView Visibility="{Binding IsToolSourceInterceptionViewActive, Converter={StaticResource BoolToVis}}" />
         </Grid>
 
         <!-- ROW 5: STATUS FOOTER BAR -->

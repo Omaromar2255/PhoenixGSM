@@ -21,7 +21,8 @@ public enum EventSourceCategory
     AppleIos,
     ArtifactVault,
     Cmd,
-    Shell
+    Shell,
+    ToolSource
 }
 
 public class LiveEventItem
@@ -59,6 +60,7 @@ public class LiveEventItem
         EventSourceCategory.InProcess => "#00363A",  // Deep Cyan/Teal
         EventSourceCategory.Cmd => "#212121",        // Dark Grey / CMD
         EventSourceCategory.Shell => "#1B2A10",      // Dark Olive / Shell
+        EventSourceCategory.ToolSource => "#003D3D", // Deep Teal / Tool Source
         _ => "#2B303C"
     };
 
@@ -78,6 +80,7 @@ public class LiveEventItem
         EventSourceCategory.InProcess => "#00E5FF",  // Bright Cyan / In-Process
         EventSourceCategory.Cmd => "#FFFFFF",        // White / CMD
         EventSourceCategory.Shell => "#A5D6A7",      // Light Green / Shell
+        EventSourceCategory.ToolSource => "#00FFE5", // Vivid Neon Teal / Cyan
         _ => "#A0AAB8"
     };
 

@@ -46,12 +46,14 @@ public partial class MonitoringEngine : IDisposable
 
     public event Action<LiveEventItem>? OnEventReceived;
     public event Action<PhoenixGSM.OmniTrace.TechnicianAudit.TechnicianAuditRecord>? OnTechnicianAuditCaptured;
+    public event Action<PhoenixGSM.OmniTrace.ToolSourceInterception.ToolSourceCommandRecord>? OnToolSourceCommandCaptured;
     public event Action<List<UsbDeviceInfo>>? OnTopologyChanged;
     public event Action<string[]>? OnComPortsChanged;
     public event Action<List<string>>? OnToolsChanged;
     public event Action<bool, string>? OnDriverStatusChanged;
 
     public PhoenixGSM.OmniTrace.TechnicianAudit.TechnicianPhoneCommandAuditLayer? TechnicianAuditLayer => _omniService?.TechnicianAuditLayer;
+    public PhoenixGSM.OmniTrace.ToolSourceInterception.ToolSourceInterceptionOrchestrator? ToolSourceOrchestrator => _omniService?.ToolSourceOrchestrator;
 
     public bool CaptureDeviceResponses
     {
@@ -88,6 +90,7 @@ public partial class MonitoringEngine : IDisposable
             _omniService.ArtifactSensor.OnArtifactCaptured += HandleArtifactCaptured;
             _omniService.ToolSessionSensor.OnToolSessionCaptured += HandleToolSessionCaptured;
             _omniService.TechnicianAuditLayer.OnCommandAudited += HandleTechnicianAudit;
+            _omniService.ToolSourceOrchestrator.OnCommandCaptured += HandleToolSourceCommandCaptured;
             _omniService.Start();
         }
         catch { }
@@ -141,6 +144,7 @@ public partial class MonitoringEngine : IDisposable
                 _omniService.NetworkSensor.OnUrlCaptured -= HandleNetworkUrlCaptured;
                 _omniService.ClipboardSensor.OnUrlCaptured -= HandleNetworkUrlCaptured;
                 _omniService.TechnicianAuditLayer.OnCommandAudited -= HandleTechnicianAudit;
+                _omniService.ToolSourceOrchestrator.OnCommandCaptured -= HandleToolSourceCommandCaptured;
                 _omniService.Stop();
                 _omniService.Dispose();
                 _omniService = null;
@@ -162,6 +166,27 @@ public partial class MonitoringEngine : IDisposable
         OnTechnicianAuditCaptured?.Invoke(record);
     }
 
+    private void HandleToolSourceCommandCaptured(PhoenixGSM.OmniTrace.ToolSourceInterception.ToolSourceCommandRecord record)
+    {
+        OnToolSourceCommandCaptured?.Invoke(record);
+
+        EmitEvent(new LiveEventItem
+        {
+            Timestamp = record.Timestamp,
+            Category = EventSourceCategory.ToolSource,
+            SourceTag = $"SRC-{record.ModeName}",
+            Direction = "HOST->DEV",
+            EndpointOrTarget = record.TargetEndpoint,
+            Protocol = record.ModeName,
+            Command = record.PureCommand,
+            Summary = $"[{record.ToolName}] {record.PureCommand} -> {record.TargetEndpoint} ({record.PayloadSize}B) [{record.InterceptMechanism}]",
+            RawPayload = record.RawPayload,
+            PayloadAscii = record.TechnicalDetails,
+            PayloadHex = record.PayloadHex,
+            AdditionalDetails = record.TechnicalDetails
+        });
+    }
+
     private void EmitEvent(LiveEventItem item)
     {
         // Granular Sensor Capture Filter
@@ -176,6 +201,7 @@ public partial class MonitoringEngine : IDisposable
         if (!IsMtpMonitoringEnabled && item.Category == EventSourceCategory.Mtp) return;
         if (!IsCmdMonitoringEnabled && item.Category == EventSourceCategory.Cmd) return;
         if (!IsShellMonitoringEnabled && item.Category == EventSourceCategory.Shell) return;
+        if (!IsToolSourceMonitoringEnabled && item.Category == EventSourceCategory.ToolSource) return;
 
         item.Id = Interlocked.Increment(ref _eventIdCounter);
         OnEventReceived?.Invoke(item);
@@ -499,6 +525,7 @@ public partial class MonitoringEngine : IDisposable
     public bool IsMtpMonitoringEnabled { get; set; } = true;
     public bool IsCmdMonitoringEnabled { get; set; } = true;
     public bool IsShellMonitoringEnabled { get; set; } = true;
+    public bool IsToolSourceMonitoringEnabled { get; set; } = true;
 
     private void HandleNetworkUrlCaptured(PhoenixGSM.OmniTrace.Sensors.CapturedUrlInfo urlInfo)
     {

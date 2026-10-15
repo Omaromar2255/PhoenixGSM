@@ -345,6 +345,7 @@ PhoenixOmniTrace/Sensors/
 | **إصلاح مشكلة في التقاط روابط الإنترنت** | حساس الشبكة | إذا كان الخطأ في ETW راجع `NetworkUrlSensor.Etw.cs`، وإذا كان في المقابس راجع `NetworkUrlSensor.TcpWatcher.cs` |
 | **تعديل أزرار أو تصميم لوحة التحكم الرسومية** | واجهة المراقبة | عدل التصميم في `MonitoringStudio\MainWindow.xaml`، والمنطق في `MainViewModel.Actions.cs` أو `MainViewModel.Events.cs` |
 | **حفظ أنواع ملفات إضافية أثناء `adb push`** | حساس ملفات الأدوات | راجع `AdbPushArtifactSensor.cs` و `SmartContentClassifier.cs` |
+| **إصلاح مشاكل تعليق تعريفات USB والأندرويد وعدم التعرف على الأجهزة** | أدوات الصيانة والإصلاح | شغّل `Repair_Usb_And_Drivers.bat` في جذر المشروع أو `tools\Repair-UsbAndAndroidDrivers.ps1` كمسؤول |
 | **تشغيل أو إضافة اختبارات مؤتمتة جديدة** | مشروع الاختبارات | أضف السيناريو في `PhoenixOmniTrace.Tests\Program.*Tests.cs` وناده في `Program.cs` |
 
 ---

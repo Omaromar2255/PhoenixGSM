@@ -17,4 +17,9 @@
     <PackageReference Include="System.Management" Version="10.0.12" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="L24_SourceSentinel\UI\**" />
+    <None Include="L24_SourceSentinel\UI\**" />
+  </ItemGroup>
+
 </Project>

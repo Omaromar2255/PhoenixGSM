@@ -4,136 +4,221 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              mc:Ignorable="d" 
-             d:DesignHeight="52" d:DesignWidth="1340">
+             d:DesignHeight="78" d:DesignWidth="1340">
     <Border Background="{StaticResource CardBgBrush}" 
             BorderBrush="{StaticResource BorderDarkBrush}" 
             BorderThickness="1" 
             CornerRadius="8" 
-            Padding="12,7">
+            Padding="12,8">
         <Grid>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <!-- Row 0: App Branding & Master Session Controls -->
+                <RowDefinition Height="Auto" />
+                <!-- Row 1: Sleek Divider -->
+                <RowDefinition Height="Auto" />
+                <!-- Row 2: Organized Functional Toolbar Clusters -->
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
 
-            <!-- App Branding -->
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="🦅" FontSize="24" VerticalAlignment="Center" Margin="0,0,10,0" />
-                <StackPanel VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="PhoenixGSM" FontSize="17" FontWeight="Bold" Foreground="#00E5FF" VerticalAlignment="Center" />
-                        <TextBlock Text=" Monitoring Studio" FontSize="17" FontWeight="SemiBold" Foreground="#FFFFFF" VerticalAlignment="Center" />
-                        <Border Background="#1C382F" BorderBrush="#00FF9D" BorderThickness="1" CornerRadius="4" Margin="10,0,0,0" Padding="6,1" VerticalAlignment="Center">
-                            <TextBlock Text="FORENSIC TELEMETRY" FontSize="9.5" FontWeight="Bold" Foreground="#00FF9D" />
-                        </Border>
+            <!-- ══════════════════════════════════════════════════════════════ -->
+            <!-- ROW 0: APP BRANDING (LEFT) & MASTER CONTROLS (RIGHT)           -->
+            <!-- ══════════════════════════════════════════════════════════════ -->
+            <Grid Grid.Row="0">
+                <Grid.ColumnDefinitions>
+                    <!-- Branding (Left) -->
+                    <ColumnDefinition Width="*" />
+                    <!-- Master Session Controls (Right) -->
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- App Branding -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="🦅" FontSize="24" VerticalAlignment="Center" Margin="0,0,10,0" />
+                    <StackPanel VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="PhoenixGSM" FontSize="17" FontWeight="Bold" Foreground="#00E5FF" VerticalAlignment="Center" />
+                            <TextBlock Text=" Monitoring Studio" FontSize="17" FontWeight="SemiBold" Foreground="#FFFFFF" VerticalAlignment="Center" />
+                            <Border Background="#1C382F" BorderBrush="#00FF9D" BorderThickness="1" CornerRadius="4" Margin="10,0,0,0" Padding="6,1" VerticalAlignment="Center">
+                                <TextBlock Text="FORENSIC TELEMETRY" FontSize="9.5" FontWeight="Bold" Foreground="#00FF9D" />
+                            </Border>
+                        </StackPanel>
+                        <TextBlock Text="Real-Time Multi-Layer GSM Forensic Interception (USB, ADB, Modem/COM, Tools &amp; Web)" 
+                                   FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Margin="0,2,0,0" />
                     </StackPanel>
-                    <TextBlock Text="Real-Time Autonomous Multi-Layer Interception (USB Driver, ADB, COM/Modem, Tools &amp; Web)" 
-                               FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Margin="0,2,0,0" />
                 </StackPanel>
-            </StackPanel>
 
-            <!-- Action Toolbar -->
-            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <Button Content="{Binding MonitoringButtonText}" 
-                        Command="{Binding ToggleMonitoringCommand}" 
-                        Style="{StaticResource AmberActionBtn}" 
-                        Height="28" FontSize="11.5" Padding="10,2" Margin="0,0,6,0" />
+                <!-- Master Session Primary Action Group -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <!-- 1. Start / Pause Capture Toggle -->
+                    <Button Content="{Binding MonitoringButtonText}" 
+                            Command="{Binding ToggleMonitoringCommand}" 
+                            Style="{StaticResource AmberActionBtn}" 
+                            Height="30" FontSize="11.5" Padding="12,3" Margin="0,0,6,0"
+                            ToolTip="بدء أو إيقاف عملية التقاط واعتراض البيانات الحية مؤقتاً (Toggle live interception)" />
 
-                <Button Command="{Binding ToggleFilterMonitoringCommand}" 
-                        Style="{StaticResource ModernBtn}" 
-                        Height="28" FontSize="11.5" Padding="10,2" Margin="0,0,6,0">
+                    <!-- 2. Clear Logs (تنظيف السجلات) - Prominently Displayed & Styled -->
+                    <Button Command="{Binding ClearLogsCommand}" 
+                            Height="30" FontSize="11.5" Padding="12,3" Margin="0,0,6,0"
+                            ToolTip="مسح وتنظيف جميع السجلات الحالية وبدء جلسة جديدة نظيفة (Ctrl+L) (Clear all recorded events)">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource RedActionBtn}">
+                                <Setter Property="Background" Value="#6A1422" />
+                                <Setter Property="BorderBrush" Value="#F43F5E" />
+                                <Setter Property="BorderThickness" Value="1.5" />
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#8C1D2A" />
+                                        <Setter Property="BorderBrush" Value="#FF6B81" />
+                                    </Trigger>
+                                    <Trigger Property="IsPressed" Value="True">
+                                        <Setter Property="Background" Value="#4C0D17" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="🗑️" FontSize="13" Margin="0,0,5,0" VerticalAlignment="Center" />
+                            <TextBlock Text="تنظيف السجلات | Clear" FontWeight="Bold" Foreground="#FFFFFF" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+
+                    <!-- 3. Auto-Scroll Toggle -->
+                    <Button Command="{Binding ToggleAutoScrollCommand}" 
+                            Height="30" FontSize="11" Padding="10,3"
+                            ToolTip="تشغيل أو إيقاف التمرير التلقائي لآخر سطر عند وصول سجلات جديدة">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource ModernBtn}">
+                                <Setter Property="Background" Value="#171C28" />
+                                <Setter Property="BorderBrush" Value="#2A3347" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding AutoScroll}" Value="True">
+                                        <Setter Property="Background" Value="#092B1E" />
+                                        <Setter Property="BorderBrush" Value="#00FF9D" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding AutoScroll}" Value="False">
+                                        <Setter Property="Background" Value="#332405" />
+                                        <Setter Property="BorderBrush" Value="#FFB800" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding AutoScrollIcon}" FontSize="11" Margin="0,0,5,0" VerticalAlignment="Center" />
+                            <TextBlock Text="التمرير: " VerticalAlignment="Center" Foreground="#FFFFFF" />
+                            <TextBlock Text="{Binding AutoScrollShortText}" FontWeight="Bold" Foreground="{Binding AutoScrollStatusColor}" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+
+            <!-- ══════════════════════════════════════════════════════════════ -->
+            <!-- ROW 1: SLEEK DIVIDER                                           -->
+            <!-- ══════════════════════════════════════════════════════════════ -->
+            <Rectangle Grid.Row="1" Fill="#1E2436" Height="1" Margin="0,6,0,6" />
+
+            <!-- ══════════════════════════════════════════════════════════════ -->
+            <!-- ROW 2: ORGANIZED FUNCTIONAL TOOLBAR CLUSTERS                   -->
+            <!-- ══════════════════════════════════════════════════════════════ -->
+            <WrapPanel Grid.Row="2" Orientation="Horizontal" VerticalAlignment="Center">
+
+                <!-- ── Cluster 1: Hardware & Device Interception (اعتراض العتاد والمنافذ) ── -->
+                <Border Background="#121622" BorderBrush="#232C40" BorderThickness="1" CornerRadius="6" Padding="6,3" Margin="0,0,8,4">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="🛡️ فلتر المودم والبورت: " VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding FilterMonitoringStatusText}" FontWeight="Bold" Foreground="{Binding FilterMonitoringStatusColor}" VerticalAlignment="Center" />
-                    </StackPanel>
-                </Button>
+                        <TextBlock Text="🔌 العتاد والاتصال:" FontSize="10.5" FontWeight="Bold" Foreground="#00E5FF" VerticalAlignment="Center" Margin="2,0,8,0" />
 
-                <!-- زر التقاط ردود الهاتف الواردة (اختياري) في الشريط العلوي الرئيسي -->
-                <Button Command="{Binding ToggleDeviceResponseCaptureCommand}" 
-                        Height="28" FontSize="11.5" Padding="10,2" Margin="0,0,6,0"
-                        ToolTip="{Binding DeviceResponseToggleTooltip}">
-                    <Button.Style>
-                        <Style TargetType="Button" BasedOn="{StaticResource ModernBtn}">
-                            <Setter Property="Background" Value="#151A24" />
-                            <Setter Property="BorderBrush" Value="#2A3347" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsCaptureDeviceResponsesEnabled}" Value="True">
-                                    <Setter Property="Background" Value="#092B1E" />
-                                    <Setter Property="BorderBrush" Value="#00FF9D" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Button.Style>
+                        <!-- فلتر المودم والبورت -->
+                        <Button Command="{Binding ToggleFilterMonitoringCommand}" 
+                                Style="{StaticResource ModernBtn}" 
+                                Height="26" FontSize="11" Padding="8,2" Margin="0,0,5,0"
+                                ToolTip="تفعيل أو إيقاف فلتر الكيرنل (UpperFilter) لاعتراض منافذ المودم والـ COM">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="🛡️ فلتر المودم: " VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding FilterMonitoringStatusText}" FontWeight="Bold" Foreground="{Binding FilterMonitoringStatusColor}" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+
+                        <!-- التقاط ردود الهاتف الواردة -->
+                        <Button Command="{Binding ToggleDeviceResponseCaptureCommand}" 
+                                Height="26" FontSize="11" Padding="8,2" Margin="0,0,5,0"
+                                ToolTip="{Binding DeviceResponseToggleTooltip}">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ModernBtn}">
+                                    <Setter Property="Background" Value="#171C28" />
+                                    <Setter Property="BorderBrush" Value="#2A3347" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsCaptureDeviceResponsesEnabled}" Value="True">
+                                            <Setter Property="Background" Value="#092B1E" />
+                                            <Setter Property="BorderBrush" Value="#00FF9D" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding DeviceResponseStatusIcon}" FontSize="10" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                <TextBlock Text="📲 رد الهاتف: " VerticalAlignment="Center" Foreground="#FFFFFF" />
+                                <TextBlock Text="{Binding DeviceResponseToggleStatusText}" FontWeight="Bold" Foreground="{Binding DeviceResponseToggleStatusColor}" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+
+                        <!-- فحص الهاتف المباشر عبر AT -->
+                        <Button Content="📲 فحص الهاتف | Query" 
+                                Command="{Binding QueryPhoneCommand}" 
+                                Style="{StaticResource GreenActionBtn}" 
+                                Height="26" FontSize="10.5" Padding="8,2" Margin="0,0,5,0"
+                                ToolTip="إرسال حزمة أوامر AT استكشافية مباشرة للهاتف عبر منفذ المودم لاكتشاف بياناته" />
+
+                        <!-- مدير فلاتر WinUSB -->
+                        <Button Content="⚙️ إدارة الفلاتر WinUSB" 
+                                Command="{Binding OpenFilterManagerCommand}" 
+                                Style="{StaticResource CyanActionBtn}" 
+                                Height="26" FontSize="10.5" Padding="8,2"
+                                ToolTip="فتح نافذة إدارة فلاتر WinUSB ومنافذ الـ COM" />
+                    </StackPanel>
+                </Border>
+
+                <!-- ── Cluster 2: Forensics & Data Export (التصدير والاستخراج الجنائي) ── -->
+                <Border Background="#121622" BorderBrush="#232C40" BorderThickness="1" CornerRadius="6" Padding="6,3" Margin="0,0,8,4">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding DeviceResponseStatusIcon}" FontSize="10" Margin="0,0,5,0" VerticalAlignment="Center" />
-                        <TextBlock Text="📲 رد الهاتف: " VerticalAlignment="Center" Foreground="#FFFFFF" />
-                        <TextBlock Text="{Binding DeviceResponseToggleStatusText}" FontWeight="Bold" Foreground="{Binding DeviceResponseToggleStatusColor}" VerticalAlignment="Center" />
+                        <TextBlock Text="💾 التصدير الجنائي:" FontSize="10.5" FontWeight="Bold" Foreground="#38BDF8" VerticalAlignment="Center" Margin="2,0,8,0" />
+
+                        <!-- تصدير السجلات الكاملة -->
+                        <Button Content="💾 تصدير السجلات (Logs)" 
+                                Command="{Binding ExportLogsCommand}" 
+                                Style="{StaticResource ModernBtn}" 
+                                Height="26" FontSize="10.5" Padding="8,2" Margin="0,0,5,0"
+                                ToolTip="تصدير السجلات الحالية كملف نصي TXT أو ملف JSON جنائي مفصل" />
+
+                        <!-- تصدير أوامر الهاتف الصافية فقط -->
+                        <Button Content="📱 أوامر الهاتف الصافية (Pure Cmds)" 
+                                Command="{Binding ExportPurePhoneCommandsCommand}" 
+                                Style="{StaticResource CyanActionBtn}" 
+                                Height="26" FontSize="10.5" Padding="8,2"
+                                ToolTip="استخراج الأوامر المرسلة للهاتف فقط كأوامر صافية بدون أي شوائب أخرى + نسخ تلقائي للحافظة (Clipboard)" />
                     </StackPanel>
-                </Button>
+                </Border>
 
-                <Button Content="🔌 WinUSB / Filter Manager" 
-                        Command="{Binding OpenFilterManagerCommand}" 
-                        Style="{StaticResource CyanActionBtn}" 
-                        Height="28" FontSize="11.5" Padding="10,2" Margin="0,0,6,0" />
-
-                <Button Content="📲 Query Phone Live" 
-                        Command="{Binding QueryPhoneCommand}" 
-                        Style="{StaticResource GreenActionBtn}" 
-                        Height="28" FontSize="11.5" Padding="10,2" Margin="0,0,6,0" />
-
-                <Button Content="💾 Export Logs" 
-                        Command="{Binding ExportLogsCommand}" 
-                        Style="{StaticResource ModernBtn}" 
-                        Height="28" FontSize="11.5" Padding="10,2" Margin="0,0,6,0" />
-
-                <Button Content="📱 Export Phone Cmds" 
-                        Command="{Binding ExportPurePhoneCommandsCommand}" 
-                        Style="{StaticResource CyanActionBtn}" 
-                        Height="28" FontSize="11.5" Padding="10,2" Margin="0,0,6,0" 
-                        ToolTip="تصدير الأوامر المرسلة للهاتف فقط كأوامر صافية بدون أي مخرجات أو شوائب أخرى" />
-
-                <Button Content="📊 AI Sequence Analysis" 
-                        Command="{Binding AnalyzeWithAiCommand}" 
-                        Style="{StaticResource PurpleActionBtn}" 
-                        Height="28" FontSize="11.5" Padding="10,2" Margin="0,0,6,0" />
-
-                <!-- زر التحكم في التمرير التلقائي للسجلات -->
-                <Button Command="{Binding ToggleAutoScrollCommand}" 
-                        Height="28" FontSize="11.5" Padding="10,2" Margin="0,0,6,0"
-                        ToolTip="تشغيل أو إيقاف التمرير التلقائي لآخر سطر عند وصول سجلات جديدة">
-                    <Button.Style>
-                        <Style TargetType="Button" BasedOn="{StaticResource ModernBtn}">
-                            <Setter Property="Background" Value="#171C28" />
-                            <Setter Property="BorderBrush" Value="#2A3347" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding AutoScroll}" Value="True">
-                                    <Setter Property="Background" Value="#092B1E" />
-                                    <Setter Property="BorderBrush" Value="#00FF9D" />
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding AutoScroll}" Value="False">
-                                    <Setter Property="Background" Value="#332405" />
-                                    <Setter Property="BorderBrush" Value="#FFB800" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Button.Style>
+                <!-- ── Cluster 3: Intelligence & Simulation (التحليل الذكي والمحاكاة) ── -->
+                <Border Background="#121622" BorderBrush="#232C40" BorderThickness="1" CornerRadius="6" Padding="6,3" Margin="0,0,0,4">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding AutoScrollIcon}" FontSize="11" Margin="0,0,5,0" VerticalAlignment="Center" />
-                        <TextBlock Text="📜 التمرير: " VerticalAlignment="Center" Foreground="#FFFFFF" />
-                        <TextBlock Text="{Binding AutoScrollShortText}" FontWeight="Bold" Foreground="{Binding AutoScrollStatusColor}" VerticalAlignment="Center" />
+                        <TextBlock Text="🧠 التحليل والاختبار:" FontSize="10.5" FontWeight="Bold" Foreground="#C084FC" VerticalAlignment="Center" Margin="2,0,8,0" />
+
+                        <!-- تحليل التسلسل بالذكاء الاصطناعي -->
+                        <Button Content="📊 تحليل AI (Sequence Analysis)" 
+                                Command="{Binding AnalyzeWithAiCommand}" 
+                                Style="{StaticResource PurpleActionBtn}" 
+                                Height="26" FontSize="10.5" Padding="8,2" Margin="0,0,5,0"
+                                ToolTip="تشغيل أداة CommandAnalyzer لتحليل تسلسل الأوامر وكشف البنية الجنائية" />
+
+                        <!-- محاكاة حركات البيانات -->
+                        <Button Content="⚡ محاكاة (Simulate)" 
+                                Command="{Binding SimulateTrafficCommand}" 
+                                Style="{StaticResource ModernBtn}" 
+                                Height="26" FontSize="10.5" Padding="8,2"
+                                ToolTip="توليد حزم وتدفق بيانات وهمي لاختبار الفلاتر وتفاعل الواجهة" />
                     </StackPanel>
-                </Button>
+                </Border>
 
-                <Button Content="⚡ Simulate Traffic" 
-                        Command="{Binding SimulateTrafficCommand}" 
-                        Style="{StaticResource ModernBtn}" 
-                        Height="28" FontSize="11.5" Padding="10,2" Margin="0,0,6,0" />
-
-                <Button Content="🗑️ Clear" 
-                        Command="{Binding ClearLogsCommand}" 
-                        Style="{StaticResource ModernBtn}" 
-                        Height="28" FontSize="11.5" Padding="10,2" />
-            </StackPanel>
+            </WrapPanel>
         </Grid>
     </Border>
 </UserControl>

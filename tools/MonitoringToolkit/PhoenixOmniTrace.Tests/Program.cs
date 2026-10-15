@@ -97,6 +97,17 @@ public static partial class Program
         RunTest("TEST 71: Technician Audit Layer Qualcomm EDL Firehose XML Response", Test71_TechnicianAuditQualcommEdlFirehoseResponse);
         RunTest("TEST 72: Technician Audit Layer Fastboot OKAY & FAIL Responses", Test72_TechnicianAuditFastbootResponseInterception);
         RunTest("TEST 73: Technician Audit Layer Bidirectional Disk Persistence (.jsonl & .log with >> & <<)", Test73_TechnicianAuditDiskStorePersistenceWithResponses);
+        RunTest("TEST 74: Tool-Source MTP Command Container & Payload Parsing", Test74_ToolSourceMtpCommandInterception);
+        RunTest("TEST 75: Tool-Source MediaTek BROM Handshake & DA FRP Parsing", Test75_ToolSourceMtkBromHandshakeAndCommandInterception);
+        RunTest("TEST 76: Tool-Source Samsung Odin Loke Protocol Flash & PIT Parsing", Test76_ToolSourceSamsungOdinLokeProtocolInterception);
+        RunTest("TEST 77: Tool-Source Serial Port AT Commands (Samsung FACTORST & MTK IMEI)", Test77_ToolSourceSerialPortAtCommandInterception);
+        RunTest("TEST 78: Tool-Source Qualcomm Diag HDLC Serial Framing Interception", Test78_ToolSourceQualcommDiagHdlcInterception);
+        RunTest("TEST 79: Tool-Source API Hook Engine Routing & Universal Fallback", Test79_ToolSourceApiHookEngineRoutingAndFallback);
+        RunTest("TEST 80: Tool-Source Orchestrator Multi-Mode Capture & Real-Time Persistence", Test80_ToolSourceOrchestratorDiscoveryAndPersistence);
+        RunTest("TEST 81: L24 Source Sentinel Classifiers & IOCTL Decoder", Test81_L24_SourceSentinel_Classifiers_And_Ioctl);
+        RunTest("TEST 82: L24 Source Sentinel Attribution & IPC Pipeline", Test82_L24_SourceSentinel_Attribution_And_IpcPipeline);
+        RunTest("TEST 83: L24 LiveHeap, DllAuditor & PortPoller Engines", Test83_L24_LiveHeap_DllAuditor_And_PortPoller);
+        RunTest("TEST 84: L24 Upgrade 5 (Smart Port Classifier, Deep ADB/Shell, MTK Protocols & Kernel Interceptor)", Test84_L24_Upgrade5_ComprehensiveInterception);
 
         Console.WriteLine();
         Console.ForegroundColor = ConsoleColor.Cyan;

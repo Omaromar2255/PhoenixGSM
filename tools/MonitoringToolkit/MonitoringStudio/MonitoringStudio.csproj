@@ -12,6 +12,9 @@
 
   <Target Name="CopyOutputAlias" AfterTargets="Build">
     <Copy SourceFiles="$(TargetDir)DevConfigStudio.exe" DestinationFiles="$(TargetDir)MonitoringStudio.exe" Condition="Exists('$(TargetDir)DevConfigStudio.exe')" />
+    <Copy SourceFiles="$(TargetDir)DevConfigStudio.dll" DestinationFiles="$(TargetDir)MonitoringStudio.dll" Condition="Exists('$(TargetDir)DevConfigStudio.dll')" />
+    <Copy SourceFiles="$(TargetDir)DevConfigStudio.runtimeconfig.json" DestinationFiles="$(TargetDir)MonitoringStudio.runtimeconfig.json" Condition="Exists('$(TargetDir)DevConfigStudio.runtimeconfig.json')" />
+    <Copy SourceFiles="$(TargetDir)DevConfigStudio.deps.json" DestinationFiles="$(TargetDir)MonitoringStudio.deps.json" Condition="Exists('$(TargetDir)DevConfigStudio.deps.json')" />
   </Target>
 
   <ItemGroup>
@@ -26,6 +29,11 @@
 
   <ItemGroup>
     <PackageReference Include="System.Management" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\PhoenixOmniTrace\L24_SourceSentinel\UI\**\*.cs" Link="L24_SourceSentinel\UI\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Page Include="..\PhoenixOmniTrace\L24_SourceSentinel\UI\**\*.xaml" Link="L24_SourceSentinel\UI\%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

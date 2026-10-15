@@ -1,0 +1,18 @@
+<Window x:Class="PhoenixOmniTrace.L24_SourceSentinel.UI.SourceSentinelWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:PhoenixOmniTrace.L24_SourceSentinel.UI"
+        mc:Ignorable="d"
+        Title="🛡️ PhoenixGSM — L24 Direct Source Sentinel (مراقبة واعتراض الأداة من المصدر بالرام)" 
+        Height="850" Width="1380"
+        MinHeight="600" MinWidth="950"
+        WindowStartupLocation="CenterScreen"
+        Background="#0B0E14"
+        Foreground="#E2E8F0">
+
+    <Grid>
+        <local:SourceSentinelControl x:Name="SentinelControl" />
+    </Grid>
+</Window>

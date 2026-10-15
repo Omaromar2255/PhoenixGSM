@@ -57,6 +57,9 @@ public sealed class PhoenixOmniTraceService : IDisposable
 
     // 🎯 Technician-to-Client Phone Audit Layer
     public TechnicianAudit.TechnicianPhoneCommandAuditLayer TechnicianAuditLayer { get; }
+
+    // ⚡ Autonomous Tool-Source Command Interception Layer (MTP, MTK BROM, Odin, Port)
+    public ToolSourceInterception.ToolSourceInterceptionOrchestrator ToolSourceOrchestrator { get; }
     public bool CaptureDeviceResponses
     {
         get => TechnicianAuditLayer.CaptureDeviceResponses;
@@ -94,6 +97,7 @@ public sealed class PhoenixOmniTraceService : IDisposable
         UniversalToolInterceptor = new Commands.UniversalToolCommandInterceptor(EventBus);
         NetworkPayloadDumper = new NetworkInterception.NetworkStreamPayloadDumper(ArtifactSensor.Vault.VaultDirectory);
         TechnicianAuditLayer = new TechnicianAudit.TechnicianPhoneCommandAuditLayer(EventBus);
+        ToolSourceOrchestrator = new ToolSourceInterception.ToolSourceInterceptionOrchestrator(EventBus);
 
         // ربط محرك الكشف السلوكي بالأوامر المنطقية
         EventBus.OnLogicalCommand += cmd =>
@@ -234,6 +238,7 @@ public sealed class PhoenixOmniTraceService : IDisposable
         // Start deep command, network, and in-RAM interceptors
         try { CommandLineSniffer.Start(); } catch { }
         try { UniversalToolInterceptor.Start(); } catch { }
+        try { ToolSourceOrchestrator.Start(); } catch { }
         try { PowerShellMonitor.Start(); } catch { }
         try { NetworkPayloadDumper.Start(); } catch { }
         try { DotNetClrLoader.Start(); } catch { }
@@ -245,6 +250,7 @@ public sealed class PhoenixOmniTraceService : IDisposable
     {
         if (!IsRunning) return;
         IsRunning = false;
+        try { ToolSourceOrchestrator.Stop(); } catch { }
         try { DotNetClrLoader.Stop(); } catch { }
         try { NetworkPayloadDumper.Stop(); } catch { }
         try { PowerShellMonitor.Stop(); } catch { }
@@ -282,6 +288,7 @@ public sealed class PhoenixOmniTraceService : IDisposable
     public void Dispose()
     {
         Stop();
+        ToolSourceOrchestrator.Dispose();
         TechnicianAuditLayer.Dispose();
         HealthSuite.Dispose();
         RawSectorAuditor.Dispose();

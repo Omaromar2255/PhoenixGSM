@@ -37,12 +37,17 @@ public partial class MainViewModel
             if (_isTechnicianAuditViewActive != value)
             {
                 _isTechnicianAuditViewActive = value;
+                if (value)
+                {
+                    _isToolSourceInterceptionViewActive = false;
+                    OnPropertyChanged(nameof(IsToolSourceInterceptionViewActive));
+                }
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(IsGeneralForensicViewActive));
             }
         }
     }
-    public bool IsGeneralForensicViewActive => !IsTechnicianAuditViewActive;
+    public bool IsGeneralForensicViewActive => !IsTechnicianAuditViewActive && !IsToolSourceInterceptionViewActive;
 
     private string _techAuditSearchText = "";
     public string TechAuditSearchText
@@ -245,8 +250,16 @@ public partial class MainViewModel
         FilteredTechnicianAuditRecords = CollectionViewSource.GetDefaultView(TechnicianAuditRecords);
         FilteredTechnicianAuditRecords.Filter = FilterTechnicianAuditPredicate;
 
-        SwitchToGeneralViewCommand = new RelayCommand(_ => IsTechnicianAuditViewActive = false);
-        SwitchToTechnicianAuditViewCommand = new RelayCommand(_ => IsTechnicianAuditViewActive = true);
+        SwitchToGeneralViewCommand = new RelayCommand(_ =>
+        {
+            IsTechnicianAuditViewActive = false;
+            IsToolSourceInterceptionViewActive = false;
+        });
+        SwitchToTechnicianAuditViewCommand = new RelayCommand(_ =>
+        {
+            IsToolSourceInterceptionViewActive = false;
+            IsTechnicianAuditViewActive = true;
+        });
         SelectTechAuditProtocolCommand = new RelayCommand(p => TechAuditSelectedProtocol = p?.ToString() ?? "ALL");
         SelectTechAuditDirectionCommand = new RelayCommand(d => TechAuditDirectionFilter = d?.ToString() ?? "ALL");
         ToggleDeviceResponseCaptureCommand = new RelayCommand(_ =>
