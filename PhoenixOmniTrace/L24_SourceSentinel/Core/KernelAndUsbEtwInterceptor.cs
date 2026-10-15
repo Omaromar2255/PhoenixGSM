@@ -26,6 +26,18 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
 
     public event Action<SourceTelemetryEvent>? OnKernelActivityDetected;
 
+    /// <summary>
+    /// خاصية منطقية تُشير إلى أن اتصال WinUSB أو عملية adb.exe الفرعية نشطة.
+    /// </summary>
+    public bool IsWinUsbOrChildAdbActive { get; set; }
+
+    /// <summary>
+    /// حدث يُطلق عند رصد عملية adb.exe فرعية أو اتصال WinUSB نشط،
+    /// لإخطار LiveHeapCommandHunter بالتحول إلى الوضع الهادئ المتوافق مع الفلتر.
+    /// المعاملات: (childPid, processName)
+    /// </summary>
+    public event Action<int, string>? OnChildAdbOrWinUsbDetected;
+
     public void StartMonitoring(int targetPid, string processName = "")
     {
         if (_isDisposed) return;
@@ -65,6 +77,13 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                     {
                         string parentName = _trackedPids.TryGetValue(parentPid, out var pn) ? pn : $"ParentPID_{parentPid}";
                         _trackedPids[childPid] = procName;
+
+                        // رصد adb.exe لتفعيل الوضع المتوافق مع الفلتر فوراً
+                        if (string.Equals(procName, "adb.exe", StringComparison.OrdinalIgnoreCase))
+                        {
+                            IsWinUsbOrChildAdbActive = true;
+                            OnChildAdbOrWinUsbDetected?.Invoke(childPid, procName);
+                        }
 
                         string cmdLine = GetProcessCommandLine(childPid);
                         string key = $"PROC:{childPid}:{cmdLine}";
@@ -165,6 +184,13 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                         string parentName = _trackedPids.TryGetValue(parentPid, out var pn) ? pn : $"ParentPID_{parentPid}";
                         _trackedPids[childPid] = procName;
 
+                        // رصد adb.exe لتفعيل الوضع المتوافق مع الفلتر فوراً
+                        if (string.Equals(procName, "adb.exe", StringComparison.OrdinalIgnoreCase))
+                        {
+                            IsWinUsbOrChildAdbActive = true;
+                            OnChildAdbOrWinUsbDetected?.Invoke(childPid, procName);
+                        }
+
                         string key = $"ETW_PROC:{childPid}:{cmdLine}";
                         if (_seenKernelEvents.TryAdd(key, true))
                         {
@@ -234,6 +260,14 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                      fileName.Contains("ssudmdm", StringComparison.OrdinalIgnoreCase) ||
                      fileName.Contains("QCUSB", StringComparison.OrdinalIgnoreCase))
             {
+                // رصد مسار WinUSB لتفعيل الوضع المتوافق
+                if (fileName.Contains("WinUSB", StringComparison.OrdinalIgnoreCase) ||
+                    fileName.Contains("AdbWinUsb", StringComparison.OrdinalIgnoreCase))
+                {
+                    IsWinUsbOrChildAdbActive = true;
+                    OnChildAdbOrWinUsbDetected?.Invoke(pid, "WinUSB");
+                }
+
                 string key = $"DEVIO:{pid}:{fileName}";
                 if (_seenKernelEvents.TryAdd(key, true))
                 {

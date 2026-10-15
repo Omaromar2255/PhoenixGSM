@@ -65,8 +65,28 @@ public sealed class SourceSentinelOrchestrator : IDisposable
         _portPoller.OnPortActivityDetected += HandleIncomingEvent;
         _kernelInterceptor.OnKernelActivityDetected += HandleIncomingEvent;
 
+        // ربط رصد WinUSB / adb.exe بوضع LiveHeapCommandHunter الهادئ
+        _kernelInterceptor.OnChildAdbOrWinUsbDetected += (childPid, procName) =>
+        {
+            _heapHunter.IsWinUsbOrChildAdbActive = true;
+            if (string.Equals(procName, "adb.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                _heapHunter.RegisterChildAdbProcess(childPid, procName);
+            }
+            OnLogMessage?.Invoke($"[L24 SourceSentinel] تفعيل الوضع الهادئ المتوافق مع WinUSB/ADB (الهدف: {procName}, PID: {childPid})");
+        };
+
         _ramWatcher.OnExternalModuleDiscovered += (pid, procName, dllPath) =>
         {
+            // رصد مكتبات WinUSB / AdbWinUsbApi المحملة في ذاكرة الأداة
+            string fileName = Path.GetFileName(dllPath);
+            if (fileName.Contains("winusb", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Contains("adbwinusb", StringComparison.OrdinalIgnoreCase))
+            {
+                _heapHunter.IsWinUsbOrChildAdbActive = true;
+                OnLogMessage?.Invoke($"[L24 SourceSentinel] رصد مكتبة {fileName} - تم تحويل Hunter إلى الوضع الهادئ المتوافق مع WinUSB");
+            }
+
             _dllAuditor.AuditLoadedModule(pid, procName, dllPath);
         };
     }

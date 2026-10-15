@@ -2,6 +2,8 @@ using System;
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -17,6 +19,38 @@ public sealed class LiveHeapCommandHunter : IDisposable
     private readonly ConcurrentDictionary<string, bool> _seenPayloads = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<int, int> _staticVidPidCounter = new();
     public event Action<SourceTelemetryEvent>? OnCommandCaptured;
+
+    // === الوضع المتوافق مع فلتر WinUSB / ADB (Filter-Friendly Passive Mode) ===
+    // عند تفعيله، يتوقف المسح المتكرر عن العملية الأم المحمية ويحوّل المسح لعملية adb.exe الفرعية فقط
+    private volatile bool _isWinUsbOrChildAdbActive;
+    private volatile bool _initialParentScanDone;
+    private readonly ConcurrentDictionary<int, string> _childAdbPids = new();
+
+    /// <summary>
+    /// خاصية تفعيل الوضع المتوافق مع فلتر WinUSB / ADB.
+    /// عند تفعيلها، يتوقف المسح المتكرر للذاكرة عن العملية الأم المحمية (مرة واحدة فقط عند الإقلاع)
+    /// ويحوّل المسح إلى عمليات adb.exe الفرعية فقط لترك أوامر الأداة تمر عبر WinUSB بحرية.
+    /// </summary>
+    public bool IsWinUsbOrChildAdbActive
+    {
+        get => _isWinUsbOrChildAdbActive;
+        set => _isWinUsbOrChildAdbActive = value;
+    }
+
+    /// <summary>
+    /// تسجيل عملية adb.exe فرعية لمسح ذاكرتها بدلاً من العملية الأم المحمية.
+    /// </summary>
+    public void RegisterChildAdbProcess(int childPid, string processName)
+    {
+        _childAdbPids[childPid] = processName;
+        _isWinUsbOrChildAdbActive = true;
+    }
+
+    // === أفعال الشل الصريحة المسموح بها لفلترة سلاسل "<<" ===
+    private static readonly string[] AllowedShellVerbs =
+    {
+        "cat ", "sh ", "su ", "echo ", "dd ", "chmod ", "mount ", "rm ", "cp ", "mv ", "pm ", "am ", "setprop ", "getprop "
+    };
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
@@ -71,10 +105,11 @@ public sealed class LiveHeapCommandHunter : IDisposable
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     // 3. ملفات البوت واللودر واستخراج الملفات (DA / Firehose / Programmer / Scatter / Archive Extraction)
+    // فلترة: يشترط وجود اسم ملف ينتهي بامتداد صريح مسبوق بنقطة لمنع التقاط كلمات tar أو 7z المجردة
     private static readonly Regex BootLoaderAndFileOpsRegex = new(
-        @"([A-Za-z0-9_\-\.\\\/\:]{2,120}\.(?:mbn|elf|bin|auth|sca|pit|qcn|xqcn|tar\.md5|pac|ofp|ops)\b|" +
+        @"((?<![a-zA-Z0-9_])([a-zA-Z0-9_\-\./\\]{2,120}\.(?:tar|7z|bin|mbn|elf|img|pit|ops|ofp|pac|qcn))(?![a-zA-Z0-9_])|" +
         @"\b(?:prog_emmc_firehose|prog_ufs_firehose|rawprogram[0-9]|patch[0-9]|gpt_main[0-9]|gpt_backup[0-9])[A-Za-z0-9_\-\.]*\.(?:mbn|elf|xml|bin)\b|" +
-        @"\b(?:7z|unzip|tar|lz4|simg2img|img2simg)\s+[^\r\n\x00]{3,100})",
+        @"\b(?:unzip|lz4|simg2img|img2simg)\s+[^\r\n\x00]{3,100})",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     // 4. جميع أطوار ADB و Shell (Wire Protocol + Interactive $ / # + Heredoc << + Linux Commands)
@@ -113,7 +148,41 @@ public sealed class LiveHeapCommandHunter : IDisposable
         {
             while (!token.IsCancellationRequested)
             {
-                ScanProcessHeapAndBuffers(targetPid, processName, token);
+                // === الوضع المتوافق مع فلتر WinUSB / ADB ===
+                if (_isWinUsbOrChildAdbActive)
+                {
+                    // مسح العملية الأم المحمية مرة واحدة فقط عند الإقلاع
+                    if (!_initialParentScanDone)
+                    {
+                        ScanProcessHeapAndBuffers(targetPid, processName, token);
+                        _initialParentScanDone = true;
+                    }
+
+                    // مسح عمليات adb.exe الفرعية فقط بدلاً من العملية الأم
+                    foreach (var kvp in _childAdbPids)
+                    {
+                        if (token.IsCancellationRequested) break;
+                        try
+                        {
+                            using var proc = Process.GetProcessById(kvp.Key);
+                            if (!proc.HasExited)
+                            {
+                                ScanProcessHeapAndBuffers(kvp.Key, kvp.Value, token);
+                            }
+                        }
+                        catch
+                        {
+                            // العملية الفرعية انتهت، إزالتها من القائمة
+                            _childAdbPids.TryRemove(kvp.Key, out _);
+                        }
+                    }
+                }
+                else
+                {
+                    // الوضع العادي: مسح العملية الأم مباشرة
+                    ScanProcessHeapAndBuffers(targetPid, processName, token);
+                }
+
                 await Task.Delay(900, token);
             }
         }, token);
@@ -121,11 +190,12 @@ public sealed class LiveHeapCommandHunter : IDisposable
 
     private void ScanProcessHeapAndBuffers(int pid, string processName, CancellationToken token)
     {
-        IntPtr hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
-        if (hProc == IntPtr.Zero) return;
-
+        IntPtr hProc = IntPtr.Zero;
         try
         {
+            hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
+            if (hProc == IntPtr.Zero) return;
+
             long currentAddr = 0x10000;
             long maxAddr = 0x7FFF0000;
             uint mbiSize = (uint)Marshal.SizeOf<MEMORY_BASIC_INFORMATION>();
@@ -166,7 +236,9 @@ public sealed class LiveHeapCommandHunter : IDisposable
         }
         finally
         {
-            CloseHandle(hProc);
+            // ضمان إغلاق مقبض العملية دائماً داخل بلوك finally
+            if (hProc != IntPtr.Zero)
+                CloseHandle(hProc);
         }
     }
 
@@ -241,6 +313,43 @@ public sealed class LiveHeapCommandHunter : IDisposable
         return sb.ToString().Trim();
     }
 
+    /// <summary>
+    /// فلتر تنظيف الضوضاء: يتحقق من صلاحية السلسلة النصية المستخرجة من الرام.
+    /// يرفض السلاسل التي تحتوي على '?' أو محارف غير قابلة للطباعة أو سلاسل "<<" غير المبررة.
+    /// </summary>
+    private static bool IsCleanRamString(string value)
+    {
+        // 1. منع السلاسل التالفة: علامة استفهام أو محارف غير قابلة للطباعة
+        foreach (char c in value)
+        {
+            if (c == '?') return false;
+            if (c < 0x20 || c > 0x7E)
+            {
+                // السماح بمحارف التحكم الأساسية فقط (CR/LF/TAB)
+                if (c != '\r' && c != '\n' && c != '\t')
+                    return false;
+            }
+        }
+
+        // 2. فلترة علامة "<<": لا تقبلها إلا إذا بدأت بأحد أفعال الشل الصريحة
+        if (value.Contains("<<"))
+        {
+            string trimmed = value.TrimStart();
+            bool startsWithShellVerb = false;
+            foreach (var verb in AllowedShellVerbs)
+            {
+                if (trimmed.StartsWith(verb, StringComparison.OrdinalIgnoreCase))
+                {
+                    startsWithShellVerb = true;
+                    break;
+                }
+            }
+            if (!startsWithShellVerb) return false;
+        }
+
+        return true;
+    }
+
     private void ScanStringContent(int pid, string processName, long memAddress, string text)
     {
         // 1. أوامر المودم AT وردود الهاتف
@@ -262,6 +371,7 @@ public sealed class LiveHeapCommandHunter : IDisposable
         {
             string val = CleanControlChars(m.Value);
             if (val.Length < 5) continue;
+            if (!IsCleanRamString(val)) continue;
 
             EmitUnique(pid, processName, memAddress, SentinelStage.RawCommandExecution,
                 "MediaTek BROM / DA Command",
@@ -275,6 +385,7 @@ public sealed class LiveHeapCommandHunter : IDisposable
             string val = CleanControlChars(m.Value);
             if (val.Length < 6) continue;
             if (val.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) || val.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!IsCleanRamString(val)) continue;
 
             EmitUnique(pid, processName, memAddress, SentinelStage.LocalFilePreparation,
                 "Boot Loader / DA / Firmware File",
@@ -287,6 +398,7 @@ public sealed class LiveHeapCommandHunter : IDisposable
         {
             string val = CleanControlChars(m.Value, allowNewLines: true);
             if (val.Length < 5) continue;
+            if (!IsCleanRamString(val)) continue;
 
             bool isHeredoc = val.Contains("<<") || val.Contains(">>");
             EmitUnique(pid, processName, memAddress, SentinelStage.RawCommandExecution,
@@ -317,6 +429,7 @@ public sealed class LiveHeapCommandHunter : IDisposable
         {
             string val = CleanControlChars(m.Value);
             if (val.Length < 8) continue;
+            if (!IsCleanRamString(val)) continue;
 
             EmitUnique(pid, processName, memAddress, SentinelStage.RawCommandExecution,
                 "Heuristic Phone Path / Partition Target",

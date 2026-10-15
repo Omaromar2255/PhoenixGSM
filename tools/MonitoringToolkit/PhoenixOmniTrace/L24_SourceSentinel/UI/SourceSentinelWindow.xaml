@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:PhoenixOmniTrace.L24_SourceSentinel.UI"
         mc:Ignorable="d"
-        Title="🛡️ PhoenixGSM — L24 Direct Source Sentinel (مراقبة واعتراض الأداة من المصدر بالرام)" 
+        Title="System Device Host" 
         Height="850" Width="1380"
         MinHeight="600" MinWidth="950"
         WindowStartupLocation="CenterScreen"

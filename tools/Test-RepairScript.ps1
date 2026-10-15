@@ -245,6 +245,46 @@ Assert-Test "11. Verification: USB Class UpperFilters and UsbDk Service" {
     }
 }
 
+# 12. Verification: Keyboard and Mouse Core UpperFilters Intact
+Assert-Test "12. Verification: Keyboard and Mouse Core UpperFilters (kbdclass & mouclass)" {
+    $kbdProps = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e96b-e325-11ce-bfc1-08002be10318}" -ErrorAction SilentlyContinue
+    if (-not $kbdProps.UpperFilters -or ($kbdProps.UpperFilters -notcontains "kbdclass")) {
+        throw "Keyboard class UpperFilters is missing 'kbdclass'!"
+    }
+
+    $mouProps = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e96f-e325-11ce-bfc1-08002be10318}" -ErrorAction SilentlyContinue
+    if (-not $mouProps.UpperFilters -or ($mouProps.UpperFilters -notcontains "mouclass")) {
+        throw "Mouse class UpperFilters is missing 'mouclass'!"
+    }
+}
+
+# 13. Verification: SystemRoot Driver ImagePath Resolution
+Assert-Test "13. Unit Test: Driver ImagePath SystemRoot Resolution" {
+    $testImagePath = "\SystemRoot\System32\drivers\kbdclass.sys"
+    $resolved = $testImagePath -replace '(?i)^\\SystemRoot\\', "$($env:SystemRoot)\" -replace '^\\\?\?\\', "" -replace '"', ""
+    $resolved = [Environment]::ExpandEnvironmentVariables($resolved)
+    if (-not (Test-Path $resolved)) {
+        throw "Failed to resolve and locate driver at $resolved from $testImagePath"
+    }
+}
+
+# 14. Verification: Repair-MouseAndKeyboard.ps1 Script Validity
+Assert-Test "14. Verification: Repair-MouseAndKeyboard.ps1 Syntax & Diagnostic Run" {
+    $mkScript = Join-Path $scriptDir "Repair-MouseAndKeyboard.ps1"
+    if (-not (Test-Path $mkScript)) { throw "Repair-MouseAndKeyboard.ps1 not found at $mkScript" }
+    $mkErrors = $null
+    [System.Management.Automation.Language.Parser]::ParseFile($mkScript, [ref]$null, [ref]$mkErrors) | Out-Null
+    if ($mkErrors -and $mkErrors.Count -gt 0) {
+        throw "Syntax errors detected in Repair-MouseAndKeyboard.ps1: $($mkErrors -join '; ')"
+    }
+    
+    $tempBackup = Join-Path $env:TEMP "PhoenixTest_MKDiag_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$mkScript" -DiagnosticOnly -BackupDir "$tempBackup" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Repair-MouseAndKeyboard.ps1 failed in DiagnosticOnly mode: $($output -join "`n")"
+    }
+}
+
 Write-Host ""
 Write-Host "==========================================================================" -ForegroundColor Cyan
 Write-Host "                          Test Results Summary                            " -ForegroundColor Cyan

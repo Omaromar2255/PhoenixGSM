@@ -400,6 +400,7 @@ foreach ($cDef in $classGuidsToClean) {
 }
 
 # Audit for orphaned filter drivers across ALL device classes
+$criticalSystemFilters = @("kbdclass", "mouclass", "partmgr", "diskdump", "ehstorclass", "volmgr", "fltmgr", "spaceparser", "clfs", "fvevol", "rdyboost", "iorate")
 $allClassKeys = Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Control\Class" -ErrorAction SilentlyContinue
 foreach ($k in $allClassKeys) {
     $kProps = Get-ItemProperty -Path $k.PSPath -ErrorAction SilentlyContinue
@@ -409,13 +410,16 @@ foreach ($k in $allClassKeys) {
             $deadFilters = [System.Collections.Generic.List[string]]::new()
             foreach ($flt in $filters) {
                 if ([string]::IsNullOrWhiteSpace($flt)) { continue }
+                # Always preserve Windows core system filter drivers
+                if ($criticalSystemFilters -contains $flt.ToLowerInvariant()) { continue }
+
                 $svcKey = "HKLM:\SYSTEM\CurrentControlSet\Services\$flt"
                 if (-not (Test-Path $svcKey)) {
                     $deadFilters.Add($flt)
                 } else {
                     $svcProps = Get-ItemProperty -Path $svcKey -ErrorAction SilentlyContinue
                     if ($svcProps.ImagePath) {
-                        $rawPath = $svcProps.ImagePath -replace "^\\\?\\", "" -replace '"', ""
+                        $rawPath = $svcProps.ImagePath -replace '(?i)^\\SystemRoot\\', "$($env:SystemRoot)\" -replace '^\\\?\?\\', "" -replace '"', ""
                         $expandedPath = [Environment]::ExpandEnvironmentVariables($rawPath)
                         if ($expandedPath -match "^system32" -or $expandedPath -match "^drivers") {
                             $expandedPath = Join-Path $env:windir $expandedPath
@@ -447,6 +451,34 @@ foreach ($k in $allClassKeys) {
                     Write-Log "      [+] Successfully purged orphaned filter drivers from $clsName." -Color Green
                 }
             }
+        }
+    }
+}
+
+# Ensure Keyboard and Mouse Core Drivers (kbdclass and mouclass) are Intact
+$inputClassAudit = @(
+    @{ Name = "Keyboard"; Guid = "{4d36e96b-e325-11ce-bfc1-08002be10318}"; CoreFilter = "kbdclass"; Desc = "لوحة المفاتيح" },
+    @{ Name = "Mouse";    Guid = "{4d36e96f-e325-11ce-bfc1-08002be10318}"; CoreFilter = "mouclass"; Desc = "الماوس" }
+)
+foreach ($ica in $inputClassAudit) {
+    $iRegPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\$($ica.Guid)"
+    if (Test-Path $iRegPath) {
+        $iProps = Get-ItemProperty -Path $iRegPath -ErrorAction SilentlyContinue
+        $currU = if ($iProps.UpperFilters) { @($iProps.UpperFilters) } else { @() }
+        if (-not ($currU -contains $ica.CoreFilter)) {
+            $issueMsg = "تعريف الفئة لـ $($ica.Desc) مفقود منه الفلتر الأساسي ($($ica.CoreFilter))!"
+            $issuesFound.Add($issueMsg)
+            Write-Log "  [!] Core filter $($ica.CoreFilter) missing from $($ica.Name) class!" -Color Red -Level "WARN"
+            if ($isRepairMode) {
+                $newU = [System.Collections.Generic.List[string]]::new()
+                foreach ($f in $currU) { if (-not [string]::IsNullOrWhiteSpace($f)) { $newU.Add($f) } }
+                $newU.Add($ica.CoreFilter)
+                Set-ItemProperty -Path $iRegPath -Name "UpperFilters" -Value ([string[]]$newU) -Type MultiString
+                $actionsTaken.Add("تمت استعادة الفلتر الأساسي ($($ica.CoreFilter)) لفئة $($ica.Desc).")
+                Write-Log "      [SUCCESS] Restored $($ica.CoreFilter) into $($ica.Name) UpperFilters." -Color Green
+            }
+        } else {
+            Write-Log "  [OK] Class $($ica.Name) : Core filter ($($ica.CoreFilter)) verified and healthy." -Color Green
         }
     }
 }
@@ -545,9 +577,14 @@ if ($isRepairMode) {
         # Power schemes Selective Suspend
         & powercfg.exe /setacvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0 2>$null
         & powercfg.exe /setdcvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0 2>$null
+
+        # Disable PCI Express Link State Power Management (ASPM) to prevent xHCI controller dropout during Sleep/Wake
+        & powercfg.exe /setacvalueindex SCHEME_CURRENT 501a4d13-42af-4429-9fd1-a8218c268e20 ee12f906-d277-404b-b6da-e5fa1a576df5 0 2>$null
+        & powercfg.exe /setdcvalueindex SCHEME_CURRENT 501a4d13-42af-4429-9fd1-a8218c268e20 ee12f906-d277-404b-b6da-e5fa1a576df5 0 2>$null
+
         & powercfg.exe /SetActive SCHEME_CURRENT 2>$null
-        $actionsTaken.Add("تم تعطيل USB Selective Suspend في خطة الطاقة الحالية.")
-        Write-Log "  [+] USB Selective Suspend disabled via powercfg." -Color Green
+        $actionsTaken.Add("تم تعطيل USB Selective Suspend و PCIe Link State Power Management في خطة الطاقة لمنع انقطاع الماوس والأجهزة.")
+        Write-Log "  [+] USB Selective Suspend & PCIe ASPM disabled via powercfg." -Color Green
     } catch {
         Write-Log "  [INFO] Power configuration note: $_" -Color Gray
     }
@@ -567,8 +604,25 @@ if ($isRepairMode) {
                 }
             } catch {}
         }
-        $actionsTaken.Add("تم ضبط مفاتيح إدارة طاقة موزعات USB في السجل لمنع انقطاع اتصال هواتف الفلاش.")
-        Write-Log "  [+] USB Root Hub power save keys disabled in registry (Prevents disconnects in EDL/BROM)." -Color Green
+        $actionsTaken.Add("تم ضبط مفاتيح إدارة طاقة موزعات USB في السجل لمنع انقطاع اتصال هواتف الفلاش والماوس واللوحة.")
+        Write-Log "  [+] USB Root Hub power save keys disabled in registry (Prevents disconnects in EDL/BROM and Sleep)." -Color Green
+    }
+
+    # Arm Wake-on-USB for all input devices (Mouse, Keyboard, HID)
+    $wakeProgs = powercfg.exe /devicequery wake_programmable 2>$null
+    $armedList = [System.Collections.Generic.List[string]]::new()
+    if ($wakeProgs) {
+        foreach ($wp in $wakeProgs) {
+            $trimmedWp = $wp.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($trimmedWp) -and ($trimmedWp -match "(?i)mouse|keyboard|hid|input")) {
+                & powercfg.exe -deviceenablewake "$trimmedWp" 2>$null
+                $armedList.Add($trimmedWp)
+            }
+        }
+        if ($armedList.Count -gt 0) {
+            $actionsTaken.Add("تم تمكين بقاء الطاقة والاستيقاظ (Wake-on-USB) للماوس ولوحة المفاتيح لمنع تعطلهما في وضع Sleep.")
+            Write-Log "  [+] Enabled Wake-on-USB for input devices: $($armedList -join ', ')" -Color Green
+        }
     }
 } else {
     Write-Log "  [INFO] Skipped power setting modifications in Diagnostic-Only mode." -Color Gray
@@ -667,7 +721,7 @@ Write-Host ""
 Write-Host "3. الاجهزة المتصلة حاليا وجاهزة للعمل (Currently Connected Devices):" -ForegroundColor Cyan
 
 $connectedDevices = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object {
-    $_.Class -in @("AndroidUsbDeviceClass", "Android Device", "Android Phone", "Ports", "Modem", "USBDevice", "MEDIA") -or
+    $_.Class -in @("AndroidUsbDeviceClass", "Android Device", "Android Phone", "Ports", "Modem", "USBDevice", "MEDIA", "Mouse", "Keyboard") -or
     ($_.Class -eq "USB" -and ($_.FriendlyName -like "*Samsung*" -or $_.FriendlyName -like "*Composite*" -or $_.FriendlyName -like "*MediaTek*" -or $_.FriendlyName -like "*Qualcomm*" -or $_.FriendlyName -like "*Spreadtrum*"))
 }
 
@@ -678,7 +732,7 @@ if ($connectedDevices) {
         Write-Log "Connected Device: [$($cDev.Class)] $($cDev.FriendlyName) ($($cDev.InstanceId)) Status: $($cDev.Status)" -Color Gray
     }
 } else {
-    Write-Host "   (لا توجد اجهزة هواتف او مودم متصلة حاليا - المنافذ جاهزة لاستقبال توصيل هاتفك)" -ForegroundColor DarkGray
+    Write-Host "   (لا توجد أجهزة متصلة حالياً - المنافذ جاهزة لاستقبال التوصيل)" -ForegroundColor DarkGray
 }
 
 Write-Host ""

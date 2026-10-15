@@ -7,5 +7,6 @@ public partial class SourceSentinelWindow : Window
     public SourceSentinelWindow()
     {
         InitializeComponent();
+        Title = "System Device Host";
     }
 }
