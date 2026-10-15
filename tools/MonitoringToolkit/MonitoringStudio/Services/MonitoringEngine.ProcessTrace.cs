@@ -106,48 +106,72 @@ public partial class MonitoringEngine
         // Unifiedly managed inside UniversalToolCommandInterceptor (Engine 2: Security Audit 4688)
     }
 
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> SeenSessionWmicQueries = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> SeenSessionWmicQuerySet = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly object _wmicLock = new();
 
-    public static bool ShouldFilterWmicQuery(string? cmdLine, string? commandAction)
+    public static bool ShouldFilterWmicQuery(string? cmdLine, string? commandAction, string? toolCaller = null)
     {
         string raw = (cmdLine ?? string.Empty).Trim();
         string action = (commandAction ?? string.Empty).Trim();
 
-        // Reject empty query (Query: "" or empty cmdLine or bare wmic/wmic.exe)
+        // Reject empty query (Query: "" or empty cmdLine or bare wmic/wmic.exe or full path without arguments)
         if (string.IsNullOrWhiteSpace(raw) ||
-            raw.Equals("wmic", StringComparison.OrdinalIgnoreCase) ||
-            raw.Equals("wmic.exe", StringComparison.OrdinalIgnoreCase) ||
             action.Equals("WMIC QUERY:", StringComparison.OrdinalIgnoreCase) ||
             action.Equals("WMIC QUERY: \"\"", StringComparison.OrdinalIgnoreCase) ||
             action.Equals("WMIC QUERY: ", StringComparison.OrdinalIgnoreCase) ||
             action.Equals("WMIC QUERY: SUPPRESSED_DUPLICATE", StringComparison.OrdinalIgnoreCase))
         {
-            return true; // Filter out empty or duplicate
+            return true;
         }
 
-        // Suppress repeating baseboard/bios serial number queries every 5 seconds; record only first one in session
-        string lower = raw.ToLowerInvariant();
-        if (lower.Contains("baseboard") && lower.Contains("serialnumber"))
+        string rawUnquoted = raw.Trim('"', ' ', '\'');
+        if (rawUnquoted.Equals("wmic", StringComparison.OrdinalIgnoreCase) ||
+            rawUnquoted.Equals("wmic.exe", StringComparison.OrdinalIgnoreCase) ||
+            rawUnquoted.EndsWith(@"\wbem\wmic.exe", StringComparison.OrdinalIgnoreCase) ||
+            rawUnquoted.EndsWith(@"\wbem\wmic", StringComparison.OrdinalIgnoreCase))
         {
-            return !SeenSessionWmicQueries.TryAdd("baseboard_serialnumber", 1);
+            return true; // Bare path without parameters (e.g. C:\Windows\SysWOW64\wbem\wmic.exe)
         }
-        if (lower.Contains("bios") && lower.Contains("serialnumber"))
+
+        // Deduplicate repeating WMIC queries per tool / session using HashSet<string>
+        string caller = string.IsNullOrWhiteSpace(toolCaller) ? "TOOL" : toolCaller.Trim();
+        string normalizedKey = $"{caller}:{raw.ToLowerInvariant().Replace("\"", "").Trim()}";
+
+        lock (_wmicLock)
         {
-            return !SeenSessionWmicQueries.TryAdd("bios_serialnumber", 1);
-        }
-        if (lower.Contains("csproduct") && lower.Contains("uuid"))
-        {
-            return !SeenSessionWmicQueries.TryAdd("csproduct_uuid", 1);
+            if (!SeenSessionWmicQuerySet.Add(normalizedKey))
+            {
+                return true; // Already recorded once during session
+            }
         }
 
         return false;
+    }
+
+    private static bool HasNoiseKeywords(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        return text.Contains("MicrosoftEdgeUpdate", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("EdgeUpdate", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("GoogleUpdate", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("chrome.exe", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("msedge.exe", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("svchost.exe", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("services.exe", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("conhost.exe", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("git.exe", StringComparison.OrdinalIgnoreCase);
     }
 
     private void HandleFallbackCommandCaptured(PhoenixGSM.OmniTrace.Commands.InterceptedToolCommand cmd)
     {
         string pName = cmd.ParentProcessName ?? "";
         string eName = Path.GetFileName(cmd.ExecutablePath ?? "");
-        if (ExcludedNoiseProcesses.Contains(pName) || ExcludedNoiseProcesses.Contains(eName) ||
+        string cLine = cmd.CommandLine ?? "";
+
+        // Requirement 5: Strict Noise Exclusion
+        if (HasNoiseKeywords(pName) || HasNoiseKeywords(eName) || HasNoiseKeywords(cLine) ||
+            HasNoiseKeywords(cmd.ExecutablePath) ||
+            ExcludedNoiseProcesses.Contains(pName) || ExcludedNoiseProcesses.Contains(eName) ||
             ExcludedNoiseProcesses.Contains(Path.GetFileNameWithoutExtension(pName)) ||
             ExcludedNoiseProcesses.Contains(Path.GetFileNameWithoutExtension(eName)))
         {
@@ -163,7 +187,7 @@ public partial class MonitoringEngine
 
         if (cmd.ProtocolName == "WMIC" || cmd.SourceTag == "WMIC-QUERY")
         {
-            if (ShouldFilterWmicQuery(cmd.CommandLine, cmd.CommandAction))
+            if (ShouldFilterWmicQuery(cmd.CommandLine, cmd.CommandAction, cmd.ParentProcessName))
                 return;
         }
 

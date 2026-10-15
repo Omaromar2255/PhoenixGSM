@@ -62,7 +62,9 @@ namespace PhoenixOmniTrace.L24_SourceSentinel.Core
 
         public static bool IsCleanAscii(string s)
         {
-            if (string.IsNullOrWhiteSpace(s) || s.Length < 4) return false;
+            if (string.IsNullOrWhiteSpace(s)) return false;
+            string trimmed = s.Trim();
+            if (trimmed.Length < 4 && !trimmed.StartsWith("<<")) return false;
             if (s.Contains('?')) return false;
             foreach (char c in s)
             {
@@ -146,10 +148,43 @@ namespace PhoenixOmniTrace.L24_SourceSentinel.Core
                     evt.TargetResource = hostLine;
                     evt.DecodedCommandText = $"خادم سحابي خاص بالأداة مكتشف في الذاكرة: {hostLine}";
                 }
-                else if (cat.Contains("Heredoc", StringComparison.OrdinalIgnoreCase) || rawStr.Contains("<<"))
+                else if (rawStr.Contains("<<") || cat.Contains("Heredoc", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!ValidHeredocShellRegex.IsMatch(rawStr))
-                        return false;
+                    string trimmedStr = rawStr.Trim();
+
+                    // السماح بالمحث التفاعلي والأوامر التفاعلية المباشرة بعد <<
+                    if (trimmedStr.StartsWith("<<"))
+                    {
+                        evt.CommandCategory = "ADB / Interactive Shell";
+                        evt.DecodedCommandText = $"أمر أو محث تفاعلي (Interactive Shell / AT): {rawStr}";
+                    }
+                    else if (ValidHeredocShellRegex.IsMatch(rawStr))
+                    {
+                        // صيغة شل نظامية (Heredoc)
+                    }
+                    else
+                    {
+                        // ارفض السلسلة فقط إذا كانت عشوائية قصيرة بلا معنى (أقل من 7 أحرف بدون أرقام أو أوامر مثل "P4<<m" أو "5jRU<<")
+                        bool hasCommandKeywords = trimmedStr.Contains("AT", StringComparison.OrdinalIgnoreCase) ||
+                                                  trimmedStr.Contains("usb", StringComparison.OrdinalIgnoreCase) ||
+                                                  trimmedStr.Contains("shell", StringComparison.OrdinalIgnoreCase) ||
+                                                  trimmedStr.Contains("data/local", StringComparison.OrdinalIgnoreCase);
+
+                        bool hasDigits = trimmedStr.Any(char.IsDigit);
+
+                        if (trimmedStr.Length < 7 && !hasCommandKeywords && !hasDigits)
+                        {
+                            return false;
+                        }
+
+                        if (trimmedStr.Length < 7 && !trimmedStr.Contains(" ") && !hasCommandKeywords)
+                        {
+                            return false;
+                        }
+
+                        evt.CommandCategory = "ADB / Interactive Shell";
+                        evt.DecodedCommandText = $"أمر تفاعلي عبر الشل: {rawStr}";
+                    }
                 }
                 else if (cat.Contains("Boot Loader", StringComparison.OrdinalIgnoreCase) ||
                          cat.Contains("Firmware File", StringComparison.OrdinalIgnoreCase))
@@ -207,7 +242,15 @@ namespace PhoenixOmniTrace.L24_SourceSentinel.Core
                 catch { }
             }
             int idx = decoded.IndexOf(':');
-            return idx >= 0 && idx + 1 < decoded.Length ? decoded[(idx + 1)..].Trim() : target;
+            if (idx >= 0 && idx + 1 < decoded.Length)
+            {
+                return decoded[(idx + 1)..].Trim();
+            }
+            if (!string.IsNullOrWhiteSpace(decoded))
+            {
+                return decoded.Trim();
+            }
+            return target.Trim();
         }
     }
 }

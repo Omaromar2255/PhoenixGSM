@@ -314,6 +314,13 @@ public sealed class UniversalToolCommandInterceptor : IDisposable
             catch { }
         }
 
+        // Requirement 5: Strict Noise Exclusion
+        if (HasNoiseKeywords(exeName) || HasNoiseKeywords(cleanExe) || HasNoiseKeywords(cmdLine) ||
+            HasNoiseKeywords(parentName) || HasNoiseKeywords(exePath) || HasNoiseKeywords(parentPathOverride))
+        {
+            return;
+        }
+
         string parentLower = parentName.ToLowerInvariant();
 
         // Check if parent is a known GSM tool
@@ -469,14 +476,19 @@ public sealed class UniversalToolCommandInterceptor : IDisposable
         // ══════════════════════════════════════════════════════════════════════
         // CASE 2: WMIC Queries (Hardware discovery before/during port wait)
         // ══════════════════════════════════════════════════════════════════════
-        if (cleanExe.Equals("wmic.exe", StringComparison.OrdinalIgnoreCase) || trimmedCmd.StartsWith("wmic", StringComparison.OrdinalIgnoreCase))
+        if (cleanExe.Equals("wmic.exe", StringComparison.OrdinalIgnoreCase) || trimmedCmd.StartsWith("wmic", StringComparison.OrdinalIgnoreCase) || trimmedCmd.Contains(@"wbem\wmic", StringComparison.OrdinalIgnoreCase))
         {
             item.Protocol = KnownProtocol.HostCommand;
             item.ProtocolName = "WMIC";
             item.SourceTag = "WMIC-QUERY";
 
             string wmicClass = ExtractWmicClass(trimmedCmd);
-            if (string.IsNullOrWhiteSpace(wmicClass) || trimmedCmd.Equals("wmic", StringComparison.OrdinalIgnoreCase) || trimmedCmd.Equals("wmic.exe", StringComparison.OrdinalIgnoreCase))
+            string rawUnquoted = trimmedCmd.Trim('"', ' ', '\'');
+            if (string.IsNullOrWhiteSpace(wmicClass) ||
+                rawUnquoted.Equals("wmic", StringComparison.OrdinalIgnoreCase) ||
+                rawUnquoted.Equals("wmic.exe", StringComparison.OrdinalIgnoreCase) ||
+                rawUnquoted.EndsWith(@"\wbem\wmic.exe", StringComparison.OrdinalIgnoreCase) ||
+                rawUnquoted.EndsWith(@"\wbem\wmic", StringComparison.OrdinalIgnoreCase))
             {
                 item.Category = "Cmd";
                 item.CommandAction = "WMIC QUERY: \"\"";
@@ -486,28 +498,15 @@ public sealed class UniversalToolCommandInterceptor : IDisposable
                 return item;
             }
 
-            string lower = trimmedCmd.ToLowerInvariant();
-            if (lower.Contains("baseboard") && lower.Contains("serialnumber"))
+            // Deduplicate repeating WMIC queries per tool / session
+            string wmicDedupeKey = $"{parentName}:{trimmedCmd.ToLowerInvariant().Replace("\"", "").Trim()}";
+            if (!_seenSessionWmicQueries.TryAdd(wmicDedupeKey, 1))
             {
-                if (!_seenSessionWmicQueries.TryAdd("baseboard_serialnumber", 1))
-                {
-                    item.Category = "Cmd";
-                    item.CommandAction = "WMIC QUERY: SUPPRESSED_DUPLICATE";
-                    item.TargetOrEndpoint = "WMI";
-                    item.FormattedSummary = $"[{parentName}] {trimmedCmd} (duplicate suppressed)";
-                    return item;
-                }
-            }
-            else if (lower.Contains("bios") && lower.Contains("serialnumber"))
-            {
-                if (!_seenSessionWmicQueries.TryAdd("bios_serialnumber", 1))
-                {
-                    item.Category = "Cmd";
-                    item.CommandAction = "WMIC QUERY: SUPPRESSED_DUPLICATE";
-                    item.TargetOrEndpoint = "WMI";
-                    item.FormattedSummary = $"[{parentName}] {trimmedCmd} (duplicate suppressed)";
-                    return item;
-                }
+                item.Category = "Cmd";
+                item.CommandAction = "WMIC QUERY: SUPPRESSED_DUPLICATE";
+                item.TargetOrEndpoint = "WMI";
+                item.FormattedSummary = $"[{parentName}] {trimmedCmd} (duplicate suppressed)";
+                return item;
             }
 
             if (trimmedCmd.Contains("Win32_PnPEntity", StringComparison.OrdinalIgnoreCase))
@@ -899,10 +898,27 @@ public sealed class UniversalToolCommandInterceptor : IDisposable
                t.Contains("class ports") || t.Contains("serialcomm") || t.Contains("getvar");
     }
 
+    public static bool HasNoiseKeywords(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        return text.Contains("MicrosoftEdgeUpdate", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("EdgeUpdate", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("GoogleUpdate", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("chrome.exe", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("msedge.exe", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("svchost.exe", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("services.exe", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("conhost.exe", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("git.exe", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsBenignNoiseProcess(string cleanExe, string cmdLine)
     {
         string l = cleanExe.ToLowerInvariant();
-        if (l == "svchost.exe" ||
+        if (l == "microsoftedgeupdate.exe" ||
+            l == "edgeupdate.exe" ||
+            l == "googleupdate.exe" ||
+            l == "svchost.exe" ||
             l == "taskhostw.exe" ||
             l == "searchhost.exe" ||
             l == "startmenuexperiencehost.exe" ||

@@ -117,6 +117,8 @@ public static class MtkProtocolDecoder
         [0xD8] = "DA_JUMP_EXEC"
     };
 
+    private static bool IsHandshakeSyncByte(byte b) => b is 0xA0 or 0x5F or 0x0A or 0xF5 or 0x50 or 0xAF or 0x05 or 0xFA;
+
     /// <summary>
     /// Evaluates if buffer matches MediaTek BROM / PreLoader framing.
     /// </summary>
@@ -124,38 +126,45 @@ public static class MtkProtocolDecoder
     {
         if (buf.Length == 0) return 0.0;
 
-        // 1. Handshake sync sequence
+        // 1. Full 4-byte Handshake sync sequence
         if (buf.Length >= 4)
         {
             if (buf[0] == 0xA0 && buf[1] == 0x0A && buf[2] == 0x50 && buf[3] == 0x05) return 0.99;
             if (buf[0] == 0x5F && buf[1] == 0xF5 && buf[2] == 0xAF && buf[3] == 0xFA) return 0.99;
         }
 
-        // 2. Single-byte handshake
+        // 2. Single-byte handshake MUST ONLY match when buf.Length == 1
         if (buf.Length == 1)
         {
             byte b = buf[0];
-            if (b is 0xA0 or 0x5F or 0xF5 or 0x50 or 0xAF or 0xFA) return 0.96;
-            if (BromCommands.ContainsKey(b) && b is not (0x0A or 0x05)) return 0.88;
+            if (IsHandshakeSyncByte(b)) return 0.96;
+            if (BromCommands.ContainsKey(b)) return 0.88;
+            return 0.0;
         }
 
-        // 3. BROM command opcode
-        byte op = buf[0];
-        if (BromCommands.ContainsKey(op) && op is not (0x0A or 0x05))
+        // Strict Rule: If buffer length > 1, single handshake sync bytes (especially 0x50 'P') are NEVER BROM handshakes
+        if (IsHandshakeSyncByte(buf[0]))
         {
-            if (op is 0xD0 or 0xD1 or 0xD2 or 0xD3 or 0xD4 or 0xDC) return 0.95;
-            return 0.85;
+            return 0.0;
         }
 
-        // Guard against printable ASCII strings (like "[ro.boot...", "10-14...", "AuthKey...", "shell...")
+        // Guard against printable ASCII strings (like "Product Name...", "[ro.boot...", "10-14...", "AuthKey...", "shell...")
         bool isAsciiString = buf.Length > 1 && 
-                             op is >= 0x20 and <= 0x7E && 
+                             buf[0] is >= 0x20 and <= 0x7E && 
                              buf[1] is >= 0x20 and <= 0x7E && 
                              (buf.Length < 3 || buf[2] is >= 0x20 and <= 0x7E);
 
         if (isAsciiString)
         {
             return 0.0;
+        }
+
+        // 3. Multi-byte BROM command opcode (0xD0..0xDF)
+        byte op = buf[0];
+        if (BromCommands.ContainsKey(op) && !IsHandshakeSyncByte(op))
+        {
+            if (op is 0xD0 or 0xD1 or 0xD2 or 0xD3 or 0xD4 or 0xDC) return 0.95;
+            return 0.85;
         }
 
         // 4. DA stage signatures
@@ -209,9 +218,55 @@ public static class MtkProtocolDecoder
             }
         }
 
+        // Single-byte handshake: MUST be buffer.Length == 1 only!
+        if (buffer.Length == 1)
+        {
+            byte b = buffer[0];
+            string name = BromCommands.TryGetValue(b, out var cmdName) ? cmdName : $"BROM_0x{b:X2}";
+            string summary = b switch
+            {
+                0xA0 => direction == PacketDirection.HOST_TO_DEVICE
+                    ? "BROM Handshake Sync Step 1 (Ping 0xA0)"
+                    : "BROM Handshake Sync Step 1 Echo",
+                0x5F => "Device acknowledged BROM Handshake Sync Step 1 (0x5F)",
+                0x0A => "BROM Handshake Sync Step 2 (0x0A)",
+                0xF5 => "Device acknowledged BROM Handshake Sync Step 2 (0xF5)",
+                0x50 => "BROM Handshake Sync Step 3 (0x50)",
+                0xAF => "Device acknowledged BROM Handshake Sync Step 3 (0xAF)",
+                0x05 => "BROM Handshake Sync Step 4 (0x05)",
+                0xFA => "Device acknowledged BROM Handshake Sync Step 4 (0xFA - Connected!)",
+                _ => $"BROM Handshake Byte 0x{b:X2} ({name})"
+            };
+
+            var pkt = new MtkDecodedPacket
+            {
+                Stage = "BROM",
+                OpCode = b,
+                CommandName = name,
+                Summary = summary
+            };
+            pkt.Details["OpCode"] = $"0x{b:X2}";
+            pkt.Details["Command"] = name;
+            return pkt;
+        }
+
+        // If buffer.Length > 1, reject if it starts with handshake sync byte or is ASCII
+        if (IsHandshakeSyncByte(buffer[0]))
+        {
+            return null;
+        }
+
+        bool isAscii = buffer.Length > 1 &&
+                       buffer[0] is >= 0x20 and <= 0x7E &&
+                       buffer[1] is >= 0x20 and <= 0x7E;
+        if (isAscii)
+        {
+            return null;
+        }
+
         byte op = buffer[0];
 
-        // 1. Check BROM Commands
+        // 1. Check BROM Commands (OpCodes 0xD0..0xDF)
         if (BromCommands.TryGetValue(op, out var bCmd))
         {
             var packet = new MtkDecodedPacket
@@ -223,40 +278,6 @@ public static class MtkProtocolDecoder
 
             switch (op)
             {
-                case 0xA0:
-                    packet.Summary = direction == PacketDirection.HOST_TO_DEVICE
-                        ? "BROM Handshake Sync Step 1 (Ping 0xA0)"
-                        : "BROM Handshake Sync Step 1 Echo";
-                    break;
-
-                case 0x5F:
-                    packet.Summary = "Device acknowledged BROM Handshake Sync Step 1 (0x5F)";
-                    break;
-
-                case 0x0A:
-                    packet.Summary = "BROM Handshake Sync Step 2 (0x0A)";
-                    break;
-
-                case 0xF5:
-                    packet.Summary = "Device acknowledged BROM Handshake Sync Step 2 (0xF5)";
-                    break;
-
-                case 0x50:
-                    packet.Summary = "BROM Handshake Sync Step 3 (0x50)";
-                    break;
-
-                case 0xAF:
-                    packet.Summary = "Device acknowledged BROM Handshake Sync Step 3 (0xAF)";
-                    break;
-
-                case 0x05:
-                    packet.Summary = "BROM Handshake Sync Step 4 (0x05)";
-                    break;
-
-                case 0xFA:
-                    packet.Summary = "Device acknowledged BROM Handshake Sync Step 4 (0xFA - Connected!)";
-                    break;
-
                 case 0xD4: // GET_HW_CODE
                     packet.Summary = direction == PacketDirection.HOST_TO_DEVICE
                         ? "Querying Target Chipset Hardware Code"

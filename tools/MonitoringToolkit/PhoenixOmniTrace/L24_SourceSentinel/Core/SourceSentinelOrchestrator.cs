@@ -23,6 +23,7 @@ public sealed class SourceSentinelOrchestrator : IDisposable
     private readonly DllFunctionTableAuditor _dllAuditor = new();
     private readonly ActiveComAndUsbPortPoller _portPoller = new();
     private readonly KernelAndUsbEtwInterceptor _kernelInterceptor = new();
+    private readonly WinUsbFilterAdbBridge _adbBridge;
 
     private readonly ConcurrentQueue<SourceTelemetryEvent> _sessionEvents = new();
     private readonly BlockingCollection<SourceTelemetryEvent> _diskLogQueue = new(new ConcurrentQueue<SourceTelemetryEvent>());
@@ -42,9 +43,11 @@ public sealed class SourceSentinelOrchestrator : IDisposable
     public string SessionLogPath => _sessionLogPath;
     public OriginAttributionEngine Attribution => _attributionEngine;
     public KernelAndUsbEtwInterceptor KernelInterceptor => _kernelInterceptor;
+    public WinUsbFilterAdbBridge AdbBridge => _adbBridge;
 
     public SourceSentinelOrchestrator(string? customLogDir = null)
     {
+        _adbBridge = new WinUsbFilterAdbBridge(HandleIncomingEvent);
         string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
         
         // مسار السجلات المستقل تماماً
@@ -285,6 +288,12 @@ public sealed class SourceSentinelOrchestrator : IDisposable
         }
     }
 
+    public void AttachToOmniTraceEventBus(PhoenixGSM.OmniTrace.Bus.OmniTraceEventBus bus)
+    {
+        _adbBridge.Attach(bus);
+        OnLogMessage?.Invoke("[L24 SourceSentinel] تم ربط ناقل OmniTraceEventBus بنجاح لاستقبال وتوجيه أوامر ADB التفاعلية إلى السجل");
+    }
+
     public void Dispose()
     {
         if (_isDisposed) return;
@@ -294,6 +303,7 @@ public sealed class SourceSentinelOrchestrator : IDisposable
         _cts.Cancel();
         _cts.Dispose();
 
+        _adbBridge.Dispose();
         _ipcServer.Dispose();
         _ramWatcher.Dispose();
         _radar.Dispose();

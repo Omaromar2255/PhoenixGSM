@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using PhoenixOmniTrace.L24_SourceSentinel.Core;
 using PhoenixOmniTrace.L24_SourceSentinel.Decoders;
 using PhoenixOmniTrace.L24_SourceSentinel.Models;
+using PhoenixGSM.OmniTrace.Commands;
+using PhoenixGSM.OmniTrace.Decoders;
 
 namespace PhoenixGSM.OmniTrace.Tests;
 
@@ -301,4 +303,156 @@ public static partial class Program
 
         return true;
     }
+
+    public static bool Test85_ZeroDropInteractiveShellAndMtkBromFix()
+    {
+        Console.WriteLine("\n--- Testing Test 85: Zero-Drop Interactive Shell, MTK-BROM Fix & Process Noise Gate ---");
+
+        // 1. MTK-BROM False Positive Fix
+        byte[] productNameBytes = Encoding.ASCII.GetBytes("Product Name  : samsung\r\n");
+        double pnScore = MtkProtocolDecoder.EvaluateMtk(productNameBytes);
+        if (pnScore > 0.0)
+        {
+            Console.WriteLine($"[FAIL] 'Product Name' was matched by MTK-BROM with confidence {pnScore}!");
+            return false;
+        }
+
+        byte[] tokenAuthBytes = Encoding.ASCII.GetBytes("Token AuthKey: 9A8B7C6D5E4F\r\n");
+        double tokenScore = MtkProtocolDecoder.EvaluateMtk(tokenAuthBytes);
+        if (tokenScore > 0.0)
+        {
+            Console.WriteLine($"[FAIL] 'Token AuthKey' was matched by MTK-BROM with confidence {tokenScore}!");
+            return false;
+        }
+
+        // Single byte 0x50 handshake must still match BROM_SYNC_STEP3
+        byte[] bromSync3 = [0x50];
+        double sync3Score = MtkProtocolDecoder.EvaluateMtk(bromSync3);
+        if (sync3Score < 0.5)
+        {
+            Console.WriteLine($"[FAIL] Single byte 0x50 was not matched by MTK-BROM handshake! Score: {sync3Score}");
+            return false;
+        }
+        Console.WriteLine("[PASS] MTK-BROM Decoder correctly differentiates single-byte handshake vs multi-byte ASCII strings.");
+
+        // 2. ForensicNoiseGate Interactive Shell & << Prompts
+        ForensicNoiseGate.ResetSession();
+
+        var evt1 = new SourceTelemetryEvent
+        {
+            HookedApiName = "WinUsbFilterAdbBridge",
+            CommandCategory = "ADB / Interactive Shell",
+            DecodedCommandText = "1163000501"
+        };
+        bool ok1 = ForensicNoiseGate.TryFilterAndNormalizeEvent(evt1);
+        if (!ok1 || !evt1.CommandCategory.Contains("Interactive"))
+        {
+            Console.WriteLine($"[FAIL] ForensicNoiseGate rejected '{evt1.DecodedCommandText}' or wrong category: {evt1.CommandCategory}");
+            return false;
+        }
+
+        var evt2 = new SourceTelemetryEvent
+        {
+            HookedApiName = "LiveRAM_UniversalInterceptor",
+            CommandCategory = "Shell Script / Heredoc Injection (<<)",
+            DecodedCommandText = "<< 1163000501"
+        };
+        bool ok2 = ForensicNoiseGate.TryFilterAndNormalizeEvent(evt2);
+        if (!ok2 || !evt2.DecodedCommandText.Contains("1163000501"))
+        {
+            Console.WriteLine($"[FAIL] ForensicNoiseGate rejected prompt command '{evt2.DecodedCommandText}'");
+            return false;
+        }
+
+        var evt3 = new SourceTelemetryEvent
+        {
+            HookedApiName = "LiveRAM_UniversalInterceptor",
+            CommandCategory = "Shell Script / Heredoc Injection (<<)",
+            DecodedCommandText = "<< AT+DEVCONINFO"
+        };
+        bool ok3 = ForensicNoiseGate.TryFilterAndNormalizeEvent(evt3);
+        if (!ok3)
+        {
+            Console.WriteLine($"[FAIL] ForensicNoiseGate rejected prompt command '{evt3.DecodedCommandText}'");
+            return false;
+        }
+
+        // Short corrupted noise must be rejected
+        var evtNoise1 = new SourceTelemetryEvent
+        {
+            HookedApiName = "LiveRAM_UniversalInterceptor",
+            CommandCategory = "Shell Script / Heredoc Injection (<<)",
+            DecodedCommandText = "P4<<m"
+        };
+        bool okNoise1 = ForensicNoiseGate.TryFilterAndNormalizeEvent(evtNoise1);
+        if (okNoise1)
+        {
+            Console.WriteLine($"[FAIL] ForensicNoiseGate allowed random noise '{evtNoise1.DecodedCommandText}'!");
+            return false;
+        }
+
+        var evtNoise2 = new SourceTelemetryEvent
+        {
+            HookedApiName = "LiveRAM_UniversalInterceptor",
+            CommandCategory = "Shell Script / Heredoc Injection (<<)",
+            DecodedCommandText = "5jRU<<"
+        };
+        bool okNoise2 = ForensicNoiseGate.TryFilterAndNormalizeEvent(evtNoise2);
+        if (okNoise2)
+        {
+            Console.WriteLine($"[FAIL] ForensicNoiseGate allowed random noise '{evtNoise2.DecodedCommandText}'!");
+            return false;
+        }
+        Console.WriteLine("[PASS] ForensicNoiseGate successfully allowed clean << commands and rejected corrupted noise.");
+
+        // 3. Process Noise Gate & WMIC Deduplication
+        bool isEdgeNoise = UniversalToolCommandInterceptor.HasNoiseKeywords(
+            @"C:\Program Files (x86)\Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe /c");
+        if (!isEdgeNoise)
+        {
+            Console.WriteLine("[FAIL] MicrosoftEdgeUpdate was not recognized as noise!");
+            return false;
+        }
+
+        bool isSvchostNoise = UniversalToolCommandInterceptor.HasNoiseKeywords(
+            @"C:\Windows\System32\svchost.exe -k netsvcs");
+        if (!isSvchostNoise)
+        {
+            Console.WriteLine("[FAIL] svchost.exe was not recognized as noise!");
+            return false;
+        }
+
+        bool isUnlockToolNoise = UniversalToolCommandInterceptor.HasNoiseKeywords(
+            @"C:\UnlockTool\UnlockTool.exe");
+        if (isUnlockToolNoise)
+        {
+            Console.WriteLine("[FAIL] UnlockTool.exe was mistakenly flagged as noise!");
+            return false;
+        }
+
+        // WMIC query deduplication across session
+        string wmicQuery = @"wmic.exe path Win32_PnPEntity get DeviceID";
+        var wmic1 = UniversalToolCommandInterceptor.AnalyzeCommand("wmic.exe", @"C:\Windows\System32\wbem\wmic.exe", wmicQuery, "UnlockTool.exe", 100, 200, "WMI", DateTime.UtcNow);
+        var wmic2 = UniversalToolCommandInterceptor.AnalyzeCommand("wmic.exe", @"C:\Windows\System32\wbem\wmic.exe", wmicQuery, "UnlockTool.exe", 100, 200, "WMI", DateTime.UtcNow);
+        if (wmic1.CommandAction.Contains("SUPPRESSED") || !wmic2.CommandAction.Contains("SUPPRESSED"))
+        {
+            Console.WriteLine($"[FAIL] WMIC query was not properly deduplicated across the session! Call 1: {wmic1.CommandAction}, Call 2: {wmic2.CommandAction}");
+            return false;
+        }
+        Console.WriteLine("[PASS] UniversalToolCommandInterceptor noise filtering and WMIC session deduplication verified.");
+
+        // 4. SourceSentinelOrchestrator AdbBridge Integration
+        string testLogDir = Path.Combine(Path.GetTempPath(), "PhoenixAdbBridgeTest_" + Guid.NewGuid().ToString("N"));
+        using var orchestrator = new SourceSentinelOrchestrator(testLogDir);
+        if (orchestrator.AdbBridge == null)
+        {
+            Console.WriteLine("[FAIL] SourceSentinelOrchestrator AdbBridge is null!");
+            return false;
+        }
+        Console.WriteLine("[PASS] SourceSentinelOrchestrator AdbBridge successfully initialized.");
+        try { Directory.Delete(testLogDir, true); } catch { }
+
+        return true;
+    }
 }
+

@@ -108,6 +108,7 @@ public static partial class Program
         RunTest("TEST 82: L24 Source Sentinel Attribution & IPC Pipeline", Test82_L24_SourceSentinel_Attribution_And_IpcPipeline);
         RunTest("TEST 83: L24 LiveHeap, DllAuditor & PortPoller Engines", Test83_L24_LiveHeap_DllAuditor_And_PortPoller);
         RunTest("TEST 84: L24 Upgrade 5 (Smart Port Classifier, Deep ADB/Shell, MTK Protocols & Kernel Interceptor)", Test84_L24_Upgrade5_ComprehensiveInterception);
+        RunTest("TEST 85: Zero-Drop Interactive Shell, MTK-BROM Fix & Process Noise Gate", Test85_ZeroDropInteractiveShellAndMtkBromFix);
 
         Console.WriteLine();
         Console.ForegroundColor = ConsoleColor.Cyan;
