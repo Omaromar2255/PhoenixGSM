@@ -14,6 +14,11 @@ namespace PhoenixGSM.MonitoringStudio.Services;
 
 public partial class MonitoringEngine
 {
+    private static readonly HashSet<string> ExcludedNoiseProcesses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "chrome", "msedge", "firefox", "services", "svchost", "explorer", "SearchHost", "git", "conhost", "attrib"
+    };
+
     private static readonly string[] KnownGsmTools =
     [
         "z3x", "octoplus", "chimera", "samfw", "odin", "3utools",
@@ -94,8 +99,51 @@ public partial class MonitoringEngine
         // Unifiedly managed inside UniversalToolCommandInterceptor (Engine 2: Security Audit 4688)
     }
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> SeenSessionWmicQueries = new(StringComparer.OrdinalIgnoreCase);
+
+    public static bool ShouldFilterWmicQuery(string? cmdLine, string? commandAction)
+    {
+        string raw = (cmdLine ?? string.Empty).Trim();
+        string action = (commandAction ?? string.Empty).Trim();
+
+        // Reject empty query (Query: "" or empty cmdLine or bare wmic/wmic.exe)
+        if (string.IsNullOrWhiteSpace(raw) ||
+            raw.Equals("wmic", StringComparison.OrdinalIgnoreCase) ||
+            raw.Equals("wmic.exe", StringComparison.OrdinalIgnoreCase) ||
+            action.Equals("WMIC QUERY:", StringComparison.OrdinalIgnoreCase) ||
+            action.Equals("WMIC QUERY: \"\"", StringComparison.OrdinalIgnoreCase) ||
+            action.Equals("WMIC QUERY: ", StringComparison.OrdinalIgnoreCase) ||
+            action.Equals("WMIC QUERY: SUPPRESSED_DUPLICATE", StringComparison.OrdinalIgnoreCase))
+        {
+            return true; // Filter out empty or duplicate
+        }
+
+        // Suppress repeating baseboard/bios serial number queries every 5 seconds; record only first one in session
+        string lower = raw.ToLowerInvariant();
+        if (lower.Contains("baseboard") && lower.Contains("serialnumber"))
+        {
+            return !SeenSessionWmicQueries.TryAdd("baseboard_serialnumber", 1);
+        }
+        if (lower.Contains("bios") && lower.Contains("serialnumber"))
+        {
+            return !SeenSessionWmicQueries.TryAdd("bios_serialnumber", 1);
+        }
+        if (lower.Contains("csproduct") && lower.Contains("uuid"))
+        {
+            return !SeenSessionWmicQueries.TryAdd("csproduct_uuid", 1);
+        }
+
+        return false;
+    }
+
     private void HandleFallbackCommandCaptured(PhoenixGSM.OmniTrace.Commands.InterceptedToolCommand cmd)
     {
+        if (cmd.ProtocolName == "WMIC" || cmd.SourceTag == "WMIC-QUERY")
+        {
+            if (ShouldFilterWmicQuery(cmd.CommandLine, cmd.CommandAction))
+                return;
+        }
+
         var category = Enum.TryParse<EventSourceCategory>(cmd.Category, true, out var cat) ? cat : EventSourceCategory.Process;
         byte[] payloadBytes = Encoding.UTF8.GetBytes(cmd.CommandLine);
 
@@ -161,9 +209,16 @@ public partial class MonitoringEngine
                     {
                         string nameLower = p.ProcessName.ToLower();
 
-                        // Filter out browser/CEF/crashpad helper child processes
-                        if (nameLower.Contains("browser") || nameLower.Contains("crashpad") || nameLower.Contains("renderer") || nameLower.Contains("cef"))
+                        // Strictly exclude non-servicing processes (chrome, msedge, firefox, services, svchost, explorer, SearchHost, git, conhost, attrib)
+                        if (ExcludedNoiseProcesses.Contains(p.ProcessName) ||
+                            ExcludedNoiseProcesses.Contains(Path.GetFileNameWithoutExtension(p.ProcessName)) ||
+                            nameLower.Contains("chrome") || nameLower.Contains("msedge") || nameLower.Contains("firefox") ||
+                            nameLower.Contains("services") || nameLower.Contains("svchost") || nameLower.Contains("explorer") ||
+                            nameLower.Contains("searchhost") || nameLower.Contains("git") || nameLower.Contains("conhost") ||
+                            nameLower.Contains("browser") || nameLower.Contains("crashpad") || nameLower.Contains("renderer") || nameLower.Contains("cef"))
+                        {
                             continue;
+                        }
 
                         var matchedTool = KnownGsmTools.FirstOrDefault(t => nameLower.Contains(t));
                         if (matchedTool != null)

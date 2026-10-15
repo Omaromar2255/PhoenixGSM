@@ -65,6 +65,21 @@ public sealed class ProtocolDetector
             candidates.Add(new ProtocolCandidate(KnownProtocol.ADB, smartSocketConfidence, $"ADB Smart Socket Framing (confidence={smartSocketConfidence:P0})"));
         }
 
+        // 2B. Check ADB Active Stream / RIL IPC / Sync Framing
+        string previewAscii = Encoding.ASCII.GetString(buffer[..Math.Min(buffer.Length, 256)]);
+        if (IsAdbRilIpc(buffer, previewAscii))
+        {
+            candidates.Add(new ProtocolCandidate(KnownProtocol.ADB, 0.98, "ADB RIL IPC Interactive Command (confidence=98%)"));
+        }
+        else if (IsAdbStreamOrAndroidSystemOutput(previewAscii))
+        {
+            candidates.Add(new ProtocolCandidate(KnownProtocol.ADB, 0.96, "ADB Stream / Android Shell Output (confidence=96%)"));
+        }
+        else if (IsAdbSyncPayload(buffer, previewAscii))
+        {
+            candidates.Add(new ProtocolCandidate(KnownProtocol.ADB, 0.95, "ADB Sync Protocol Framing (confidence=95%)"));
+        }
+
         // 3. Check Fastboot Protocol
         double fbConfidence = EvaluateFastboot(buffer, direction);
         if (fbConfidence > 0)
@@ -250,6 +265,12 @@ public sealed class ProtocolDetector
 
         string ascii = Encoding.ASCII.GetString(buf[..Math.Min(buf.Length, 64)]);
 
+        // Disqualify if this matches ADB sync, ADB stream, or ADB RIL-IPC
+        if (IsAdbStreamOrAndroidSystemOutput(ascii) || IsAdbSyncPayload(buf, ascii) || IsAdbRilIpc(buf, ascii))
+        {
+            return 0.0;
+        }
+
         if (direction == PacketDirection.HOST_TO_DEVICE)
         {
             foreach (var cmd in FastbootCommands)
@@ -262,16 +283,101 @@ public sealed class ProtocolDetector
         }
         else
         {
-            foreach (var resp in FastbootResponses)
+            // Do not classify generic OKAY/DATA/FAIL responses as Fastboot unless they match Fastboot structure
+            // and are NOT part of ADB sync (DATA, OKAY, STAT, DONE, FAIL)
+            if (ascii.StartsWith("DATA", StringComparison.Ordinal))
             {
-                if (ascii.StartsWith(resp, StringComparison.Ordinal))
-                {
+                // In Fastboot, DATA is followed by 8 hex digits, e.g. DATA00000800
+                if (ascii.Length >= 12 && Uri.IsHexDigit(ascii[4]) && Uri.IsHexDigit(ascii[5]))
                     return 0.95;
-                }
+                return 0.0; // In ADB sync, DATA is followed by binary 4-byte length
+            }
+
+            if (ascii.StartsWith("OKAY", StringComparison.Ordinal) ||
+                ascii.StartsWith("FAIL", StringComparison.Ordinal) ||
+                ascii.StartsWith("INFO", StringComparison.Ordinal))
+            {
+                // If it is 4 bytes exactly or followed by binary, it is ADB sync / binary token, not Fastboot ASCII
+                if (buf.Length == 4 || (buf.Length > 4 && buf[4] < 0x20 && buf[4] != 0))
+                    return 0.0;
+
+                return 0.80;
             }
         }
 
         return 0.0;
+    }
+
+    public static bool IsAdbSyncPayload(ReadOnlySpan<byte> buf, string ascii)
+    {
+        if (buf.Length < 4) return false;
+        if (ascii.StartsWith("DATA", StringComparison.Ordinal) ||
+            ascii.StartsWith("STAT", StringComparison.Ordinal) ||
+            ascii.StartsWith("SEND", StringComparison.Ordinal) ||
+            ascii.StartsWith("RECV", StringComparison.Ordinal) ||
+            ascii.StartsWith("DONE", StringComparison.Ordinal) ||
+            ascii.StartsWith("DENT", StringComparison.Ordinal) ||
+            ascii.StartsWith("LIST", StringComparison.Ordinal))
+        {
+            return true;
+        }
+        return false;
+    }
+
+    public static bool IsAdbStreamOrAndroidSystemOutput(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+
+        // Android property outputs: [ro., [init.svc., [persist., [dalvik., [sys., [ril., [gsm.
+        if (text.Contains("[ro.") || text.Contains("[init.svc.") || text.Contains("[persist.") ||
+            text.Contains("[dalvik.") || text.Contains("[sys.") || text.Contains("[ril.") || text.Contains("[gsm."))
+            return true;
+
+        if (text.StartsWith("[") && text.Contains("]: ["))
+            return true;
+
+        // Linux shell error messages & dd records
+        if (text.Contains("rm: ") || text.Contains("Permission denied") ||
+            text.Contains("Operation not permitted") || text.Contains("records in") || text.Contains("records out"))
+            return true;
+
+        // Android logcat outputs
+        if (text.Contains("E RILD") || text.Contains("D boot") || text.Contains("Result: Parcel(") ||
+            text.Contains(" D RIL") || text.Contains(" V RIL") || text.Contains(" I RIL") || text.Contains("OEM_HOOK_RAW"))
+            return true;
+
+        // Samsung AT Ril Command TOOL interface & AuthKey prompts
+        if (text.Contains("SAMSUNG AT Ril Command TOOL", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("Token AuthKey:", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("Enter AuthKey:", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("AuthKey : OK", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("AuthKey : FAIL", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
+    }
+
+    public static bool IsAdbRilIpc(ReadOnlySpan<byte> buf, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        string trimmed = text.Trim();
+
+        if (trimmed.StartsWith("1163000501", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("06090004", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("07170004", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("1163005F", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("116300", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("AuthKey", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (buf.Length >= 4 && buf[0] == 0x11 && buf[1] == 0x63)
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static double EvaluateQualcommFirehose(ReadOnlySpan<byte> buf)
@@ -325,6 +431,13 @@ public sealed class ProtocolDetector
     public static double EvaluateSerialAt(ReadOnlySpan<byte> buf, SensorType? sensor = null, TransportType transport = TransportType.UNKNOWN)
     {
         if (buf.Length == 0) return 0.0;
+
+        // Disqualify immediately if this matches ADB active stream, Android system output, or ADB RIL-IPC
+        string checkAscii = Encoding.ASCII.GetString(buf[..Math.Min(buf.Length, 2048)]);
+        if (IsAdbStreamOrAndroidSystemOutput(checkAscii) || IsAdbRilIpc(buf, checkAscii))
+        {
+            return 0.0;
+        }
 
         // Skip leading whitespace / CR / LF / null bytes
         int start = 0;

@@ -310,10 +310,20 @@ public class AdbProtocolParser
         }
         else
         {
-            return text.StartsWith("OKAY", StringComparison.Ordinal) ||
-                   text.StartsWith("FAIL", StringComparison.Ordinal) ||
-                   text.StartsWith("DATA", StringComparison.Ordinal) ||
-                   text.StartsWith("INFO", StringComparison.Ordinal);
+            // Do not classify ADB sync responses as Fastboot
+            if (text.StartsWith("DATA", StringComparison.Ordinal))
+            {
+                // In Fastboot, DATA is followed by 8 hex digits, e.g. DATA00000800
+                return text.Length >= 12 && Uri.IsHexDigit(text[4]) && Uri.IsHexDigit(text[5]);
+            }
+            if (text.StartsWith("OKAY", StringComparison.Ordinal) ||
+                text.StartsWith("FAIL", StringComparison.Ordinal) ||
+                text.StartsWith("INFO", StringComparison.Ordinal))
+            {
+                // Must be longer than 4 bytes and clean ASCII to avoid false match on 4-byte ADB tokens
+                return text.Length > 4 && text.All(c => c >= 0x20 && c <= 0x7E);
+            }
+            return false;
         }
     }
 

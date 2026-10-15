@@ -63,6 +63,7 @@ public sealed class UniversalToolCommandInterceptor : IDisposable
     ];
 
     private readonly OmniTraceEventBus? _bus;
+    private static readonly ConcurrentDictionary<string, byte> _seenSessionWmicQueries = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DateTime> _recentDeduplicationMap = new();
     private readonly HashSet<int> _activeToolPids = [];
     private readonly object _pidLock = new();
@@ -373,6 +374,12 @@ public sealed class UniversalToolCommandInterceptor : IDisposable
         // Perform deep domain analysis of the command
         var analyzed = AnalyzeCommand(cleanExe, exePath, cmdLine, parentName, parentPid, pid, engine, timestamp);
 
+        // Reject empty WMIC query or duplicate BIOS/Baseboard query
+        if (analyzed.CommandAction == "WMIC QUERY: \"\"" || analyzed.CommandAction == "WMIC QUERY: SUPPRESSED_DUPLICATE")
+        {
+            return;
+        }
+
         // Dispatch to internal subscribers
         OnCommandCaptured?.Invoke(analyzed);
 
@@ -468,6 +475,41 @@ public sealed class UniversalToolCommandInterceptor : IDisposable
             item.ProtocolName = "WMIC";
             item.SourceTag = "WMIC-QUERY";
 
+            string wmicClass = ExtractWmicClass(trimmedCmd);
+            if (string.IsNullOrWhiteSpace(wmicClass) || trimmedCmd.Equals("wmic", StringComparison.OrdinalIgnoreCase) || trimmedCmd.Equals("wmic.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                item.Category = "Cmd";
+                item.CommandAction = "WMIC QUERY: \"\"";
+                item.TargetOrEndpoint = "WMI";
+                item.FormattedSummary = $"[{parentName}] wmic (empty)";
+                item.TechnicalDetails = $"Empty WMI Query Execution\nCaller: {parentName} (PID {parentPid})";
+                return item;
+            }
+
+            string lower = trimmedCmd.ToLowerInvariant();
+            if (lower.Contains("baseboard") && lower.Contains("serialnumber"))
+            {
+                if (!_seenSessionWmicQueries.TryAdd("baseboard_serialnumber", 1))
+                {
+                    item.Category = "Cmd";
+                    item.CommandAction = "WMIC QUERY: SUPPRESSED_DUPLICATE";
+                    item.TargetOrEndpoint = "WMI";
+                    item.FormattedSummary = $"[{parentName}] {trimmedCmd} (duplicate suppressed)";
+                    return item;
+                }
+            }
+            else if (lower.Contains("bios") && lower.Contains("serialnumber"))
+            {
+                if (!_seenSessionWmicQueries.TryAdd("bios_serialnumber", 1))
+                {
+                    item.Category = "Cmd";
+                    item.CommandAction = "WMIC QUERY: SUPPRESSED_DUPLICATE";
+                    item.TargetOrEndpoint = "WMI";
+                    item.FormattedSummary = $"[{parentName}] {trimmedCmd} (duplicate suppressed)";
+                    return item;
+                }
+            }
+
             if (trimmedCmd.Contains("Win32_PnPEntity", StringComparison.OrdinalIgnoreCase))
             {
                 if (trimmedCmd.Contains("VID_0E8D", StringComparison.OrdinalIgnoreCase))
@@ -501,7 +543,7 @@ public sealed class UniversalToolCommandInterceptor : IDisposable
             else
             {
                 item.Category = "Cmd";
-                item.CommandAction = "WMIC QUERY: " + ExtractWmicClass(trimmedCmd);
+                item.CommandAction = "WMIC QUERY: " + wmicClass;
                 item.TargetOrEndpoint = "WMI";
             }
 
@@ -874,7 +916,15 @@ public sealed class UniversalToolCommandInterceptor : IDisposable
             l == "systemsettings.exe" ||
             l == "applicationframehost.exe" ||
             l == "smartscreen.exe" ||
-            l == "securityhealthservice.exe")
+            l == "securityhealthservice.exe" ||
+            l == "chrome.exe" ||
+            l == "msedge.exe" ||
+            l == "firefox.exe" ||
+            l == "services.exe" ||
+            l == "explorer.exe" ||
+            l == "git.exe" ||
+            l == "conhost.exe" ||
+            l == "attrib.exe")
         {
             return true;
         }

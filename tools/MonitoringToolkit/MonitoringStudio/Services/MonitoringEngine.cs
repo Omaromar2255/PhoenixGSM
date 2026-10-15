@@ -209,6 +209,14 @@ public partial class MonitoringEngine : IDisposable
 
     private void HandleOmniCommand(PhoenixGSM.OmniTrace.Models.LogicalCommandEvent cmd)
     {
+        // Filter empty or duplicate WMIC hardware queries
+        if (cmd.Details.TryGetValue("ProtocolName", out var protoName) && protoName == "WMIC")
+        {
+            cmd.Details.TryGetValue("CommandLine", out var wmicCli);
+            if (ShouldFilterWmicQuery(wmicCli, cmd.Command))
+                return;
+        }
+
         bool isStreamIn = cmd.Command.StartsWith("<<");
         bool isStreamOut = cmd.Command.StartsWith(">>");
 

@@ -166,9 +166,46 @@ public static class SmartContentClassifier
             }
         }
 
+        // Check binary RIL IPC (starts with 0x11, 0x63, ...)
+        if (data.Length >= 4 && data[0] == 0x11 && data[1] == 0x63)
+        {
+            result.Classification = "ADB_RIL_IPC";
+            result.MimeType = "application/x-ril-ipc";
+            result.Description = "Samsung RIL IPC Interactive Binary Frame (0x1163)";
+            return result;
+        }
+
         if (isAsciiText)
         {
             string ascii = Encoding.ASCII.GetString(data[..textCheckLen]);
+
+            // Check ADB RIL IPC
+            if (IsAdbRilIpc(data, ascii))
+            {
+                result.Classification = "ADB_RIL_IPC";
+                result.MimeType = "application/x-ril-ipc";
+                result.Description = "Samsung RIL IPC Interactive Modem Command / AuthKey";
+                return result;
+            }
+
+            // Check ADB Stream
+            if (IsAdbStreamPayload(ascii))
+            {
+                result.Classification = "ADB_STREAM";
+                result.MimeType = "text/x-adb-stream";
+                result.Description = "Active ADB Stream / Android Shell & System Output";
+                return result;
+            }
+
+            // Check ADB Sync
+            if (IsAdbSync(data, ascii))
+            {
+                result.Classification = "ADB_SYNC";
+                result.MimeType = "application/x-adb-sync";
+                result.Description = "ADB Sync Protocol Packet (File Transfer)";
+                return result;
+            }
+
             if (ascii.Contains("chmod ") || ascii.Contains("chown ") || ascii.Contains("insmod ") ||
                 ascii.Contains("setprop ") || ascii.Contains("export ") || ascii.Contains("/data/local/tmp"))
             {
@@ -190,5 +227,77 @@ public static class SmartContentClassifier
         result.MimeType = "application/octet-stream";
         result.Description = $"Binary Payload ({data.Length} bytes)";
         return result;
+    }
+
+    public static bool IsAdbStreamPayload(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+
+        // Android property outputs: [ro., [init.svc., [persist., [dalvik., [sys., [ril., [gsm.
+        if (text.Contains("[ro.") || text.Contains("[init.svc.") || text.Contains("[persist.") ||
+            text.Contains("[dalvik.") || text.Contains("[sys.") || text.Contains("[ril.") || text.Contains("[gsm."))
+            return true;
+
+        if (text.StartsWith("[") && text.Contains("]: ["))
+            return true;
+
+        // Linux shell error messages & dd records
+        if (text.Contains("rm: ") || text.Contains("Permission denied") ||
+            text.Contains("Operation not permitted") || text.Contains("records in") || text.Contains("records out"))
+            return true;
+
+        // Android logcat outputs
+        if (text.Contains("E RILD") || text.Contains("D boot") || text.Contains("Result: Parcel(") ||
+            text.Contains(" D RIL") || text.Contains(" V RIL") || text.Contains(" I RIL") || text.Contains("OEM_HOOK_RAW"))
+            return true;
+
+        // Samsung AT Ril Command TOOL interface & AuthKey prompts
+        if (text.Contains("SAMSUNG AT Ril Command TOOL", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("Token AuthKey:", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("Enter AuthKey:", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("AuthKey : OK", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("AuthKey : FAIL", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
+    }
+
+    public static bool IsAdbRilIpc(ReadOnlySpan<byte> buf, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        string trimmed = text.Trim();
+
+        if (trimmed.StartsWith("1163000501", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("06090004", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("07170004", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("1163005F", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("116300", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("AuthKey", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (buf.Length >= 4 && buf[0] == 0x11 && buf[1] == 0x63)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    public static bool IsAdbSync(ReadOnlySpan<byte> buf, string text)
+    {
+        if (buf.Length < 4) return false;
+        if (text.StartsWith("DATA", StringComparison.Ordinal) ||
+            text.StartsWith("STAT", StringComparison.Ordinal) ||
+            text.StartsWith("SEND", StringComparison.Ordinal) ||
+            text.StartsWith("RECV", StringComparison.Ordinal) ||
+            text.StartsWith("DONE", StringComparison.Ordinal) ||
+            text.StartsWith("DENT", StringComparison.Ordinal) ||
+            text.StartsWith("LIST", StringComparison.Ordinal))
+        {
+            return true;
+        }
+        return false;
     }
 }
