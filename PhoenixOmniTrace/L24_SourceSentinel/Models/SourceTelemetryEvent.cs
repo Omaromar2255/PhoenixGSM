@@ -27,13 +27,13 @@ public sealed class SourceTelemetryEvent
     public string CallerModuleOrigin { get; init; } = string.Empty;
     
     // الهدف الذي تتعامل معه الأداة (مثال: \\.\COM5 أو HKLM\HARDWARE\DEVICEMAP\SERIALCOMM أو C:\temp\da.bin)
-    public string TargetResource { get; init; } = string.Empty;
+    public string TargetResource { get; set; } = string.Empty;
     
     // التصنيف التلقائي للأمر (AT Command, MTK BROM Handshake, Port Scan, Shell Pipe, File Read)
-    public string CommandCategory { get; init; } = string.Empty;
+    public string CommandCategory { get; set; } = string.Empty;
     
     // النص الصريح للأمر أو الاستعلام
-    public string DecodedCommandText { get; init; } = string.Empty;
+    public string DecodedCommandText { get; set; } = string.Empty;
     
     // البايتات الخام بصيغة Hex للمراجعة الجنائية الدقيقة
     public string RawPayloadHex { get; init; } = string.Empty;

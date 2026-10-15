@@ -78,8 +78,10 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                         string parentName = _trackedPids.TryGetValue(parentPid, out var pn) ? pn : $"ParentPID_{parentPid}";
                         _trackedPids[childPid] = procName;
 
-                        // رصد adb.exe لتفعيل الوضع المتوافق مع الفلتر فوراً
-                        if (string.Equals(procName, "adb.exe", StringComparison.OrdinalIgnoreCase))
+                        // رصد adb.exe أو مشغلات الفلتر لتفعيل الوضع المتوافق مع الفلتر فوراً
+                        if (string.Equals(procName, "adb.exe", StringComparison.OrdinalIgnoreCase) ||
+                            procName.StartsWith("filter-", StringComparison.OrdinalIgnoreCase) ||
+                            procName.Equals("devcon.exe", StringComparison.OrdinalIgnoreCase))
                         {
                             IsWinUsbOrChildAdbActive = true;
                             OnChildAdbOrWinUsbDetected?.Invoke(childPid, procName);
@@ -118,7 +120,8 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
         string lower = procName.ToLowerInvariant();
         return lower is "adb.exe" or "fastboot.exe" or "7z.exe" or "7za.exe" or "unzip.exe" or "tar.exe"
             or "simg2img.exe" or "make_ext4fs.exe" or "python.exe" or "cmd.exe" or "powershell.exe"
-            or "conhost.exe" or "scrcpy.exe";
+            or "conhost.exe" or "scrcpy.exe" or "filter-x64.exe" or "filter-x86.exe" or "devcon.exe"
+            or "inf-wizard.exe";
     }
 
     private static string GetProcessCommandLine(int pid)
@@ -184,8 +187,10 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                         string parentName = _trackedPids.TryGetValue(parentPid, out var pn) ? pn : $"ParentPID_{parentPid}";
                         _trackedPids[childPid] = procName;
 
-                        // رصد adb.exe لتفعيل الوضع المتوافق مع الفلتر فوراً
-                        if (string.Equals(procName, "adb.exe", StringComparison.OrdinalIgnoreCase))
+                        // رصد adb.exe أو مشغلات الفلتر لتفعيل الوضع المتوافق مع الفلتر فوراً
+                        if (string.Equals(procName, "adb.exe", StringComparison.OrdinalIgnoreCase) ||
+                            procName.StartsWith("filter-", StringComparison.OrdinalIgnoreCase) ||
+                            procName.Equals("devcon.exe", StringComparison.OrdinalIgnoreCase))
                         {
                             IsWinUsbOrChildAdbActive = true;
                             OnChildAdbOrWinUsbDetected?.Invoke(childPid, procName);

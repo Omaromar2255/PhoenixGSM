@@ -12,27 +12,15 @@ public sealed class DllFunctionTableAuditor
     private readonly ConcurrentDictionary<string, bool> _auditedFiles = new(StringComparer.OrdinalIgnoreCase);
     public event Action<SourceTelemetryEvent>? OnDllCapabilitiesExtracted;
 
-    // قائمة استثناء مكتبات الواجهة والنظام القياسية لتنظيف JSON من الضوضاء
-    private static readonly HashSet<string> ExcludedNoiseModules = new(StringComparer.OrdinalIgnoreCase)
-    {
-        // Qt Framework
-        "Qt5Core.dll", "Qt5Gui.dll", "Qt5Widgets.dll", "Qt5Network.dll", "Qt5Svg.dll", "Qt5WinExtras.dll",
-        // MSVC Runtimes
-        "MSVCR100.dll", "MSVCP100.dll", "MSVCR120.dll", "MSVCP120.dll",
-        "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "ucrtbase.dll", "msvcrt.dll",
-        // MinGW / GCC Runtimes
-        "libstdc++-6.dll", "libgcc_s_dw2-1.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll",
-        // Windows Security / AMSI
-        "MpOav.dll", "amsi.dll", "wldp.dll"
-    };
+    // تفويض قائمة استثناء مكتبات الواجهة والنظام القياسية إلى بوابة التصفية المركزية ForensicNoiseGate
+    public static HashSet<string> ExcludedNoiseModules => ForensicNoiseGate.ExcludedNoiseModules;
 
     public void AuditLoadedModule(int pid, string processName, string dllPath)
     {
         if (string.IsNullOrWhiteSpace(dllPath) || !File.Exists(dllPath)) return;
 
-        // استبعاد مكتبات الضوضاء فوراً قبل أي قراءة للملف
-        string moduleFileName = Path.GetFileName(dllPath);
-        if (ExcludedNoiseModules.Contains(moduleFileName)) return;
+        // استبعاد مكتبات الضوضاء وملفات exe فوراً عبر بوابة التطهير المركزية
+        if (ForensicNoiseGate.ShouldExcludeModuleFromExportAudit(dllPath)) return;
 
         // فحص المكتبات غير القياسية فقط (أو مكتبات الاتصال بالهاتف)
         if (dllPath.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase)) return;

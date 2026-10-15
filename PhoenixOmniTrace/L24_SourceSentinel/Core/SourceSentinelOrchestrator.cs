@@ -108,6 +108,7 @@ public sealed class SourceSentinelOrchestrator : IDisposable
         if (IsActive || _isDisposed) return;
         IsActive = true;
 
+        ForensicNoiseGate.ResetSessionDeduplication();
         _ipcServer.Start();
         _radar.StartMonitoring();
         _diskLoggerTask = Task.Run(DiskLoggerLoop);
@@ -118,6 +119,9 @@ public sealed class SourceSentinelOrchestrator : IDisposable
     private void HandleIncomingEvent(SourceTelemetryEvent evt)
     {
         if (_isDisposed) return;
+
+        // بوابة التصفية الجنائية الموحدة وتطهير الضوضاء ومنع التكرار
+        if (!ForensicNoiseGate.TryFilterAndNormalizeEvent(evt)) return;
 
         // تسجيل الأصل وتحديث إحصائيات المحرك
         _attributionEngine.TrackEvent(evt);

@@ -387,6 +387,7 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
             NetworkEventsCount = 0;
             OnPropertyChanged(nameof(TotalEventsCount));
         }
+        ForensicNoiseGate.ResetSessionDeduplication();
         StatusMessage = "تم تنظيف قائمة الأحداث الحالية.";
     }
 
