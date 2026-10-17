@@ -770,7 +770,10 @@ public static class PhoneCommandClassifier
         if (string.IsNullOrWhiteSpace(text)) return null;
         string cleaned = text.Trim('\r', '\n', '\t', ' ', '\0', '.');
         if (string.IsNullOrWhiteSpace(cleaned)) return null;
-        if (cleaned.StartsWith("STAT...", StringComparison.Ordinal) || cleaned.StartsWith("vC=+", StringComparison.Ordinal))
+        if (cleaned.StartsWith("STAT...", StringComparison.Ordinal) ||
+            cleaned.StartsWith("vC=+", StringComparison.Ordinal) ||
+            cleaned.StartsWith("53 54 41 54", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.StartsWith("53544154", StringComparison.OrdinalIgnoreCase))
             return null;
 
         var lines = cleaned.Split(new[] { "\r\n", "\r", "\n", " | " }, StringSplitOptions.RemoveEmptyEntries)
@@ -787,8 +790,23 @@ public static class PhoneCommandClassifier
     private static bool IsTransportProtocolSymbol(string line)
     {
         string t = line.Trim('\r', '\n', '\t', ' ', '\0', '.');
-        return t.Equals("STAT", StringComparison.OrdinalIgnoreCase) ||
-               t.Equals("CLSE", StringComparison.OrdinalIgnoreCase) ||
-               t.Equals("WRTE", StringComparison.OrdinalIgnoreCase);
+        if (t.Equals("STAT", StringComparison.OrdinalIgnoreCase) ||
+            t.Equals("CLSE", StringComparison.OrdinalIgnoreCase) ||
+            t.Equals("WRTE", StringComparison.OrdinalIgnoreCase) ||
+            t.Equals("OKAY", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string hexClean = t.Replace(" ", "");
+        if (hexClean.StartsWith("53544154", StringComparison.OrdinalIgnoreCase) || // STAT
+            hexClean.StartsWith("434C5345", StringComparison.OrdinalIgnoreCase) || // CLSE
+            hexClean.StartsWith("57525445", StringComparison.OrdinalIgnoreCase) || // WRTE
+            hexClean.StartsWith("4F4B4159", StringComparison.OrdinalIgnoreCase))   // OKAY
+        {
+            return true;
+        }
+
+        return false;
     }
 }

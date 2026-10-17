@@ -293,6 +293,7 @@ public partial class MonitoringEngine
                                 _knownToolPids.Add(p.Id);
                                 _omniService?.UniversalToolInterceptor?.RegisterToolPid(p.Id);
                                 _fallbackToolInterceptor?.RegisterToolPid(p.Id);
+                                _smartFileArchiver.RegisterCandidateProcess(p.Id, p.ProcessName);
                                 string exePath = "";
                                 try { exePath = p.MainModule?.FileName ?? ""; } catch { }
 

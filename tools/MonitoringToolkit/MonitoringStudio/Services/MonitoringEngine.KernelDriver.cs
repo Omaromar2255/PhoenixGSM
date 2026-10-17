@@ -11,23 +11,13 @@ namespace PhoenixGSM.MonitoringStudio.Services;
 
 public partial class MonitoringEngine
 {
-    private static string? _activeTransferFile = null;
-    private static string _activeTransferDir = "";
-    private static long _activeTransferTotalBytes = 0;
-    private static int _activeTransferChunkCount = 0;
-    private static DateTime _activeTransferStartTime = DateTime.UtcNow;
-
     // Stateful Channel & Artifact Tracking
     private bool _isInsideFileSyncTransfer = false;
     private bool _isAdbSessionActive = false;
     private string _activeInteractiveShellCommand = string.Empty;
     private string _lastActiveAtBinaryCommand = string.Empty;
     private string _activeSocketBridgeChannel = string.Empty;
-
-    private static readonly object _transferLock = new();
-    private static readonly MemoryStream _activeUploadStream = new();
-    private static string _activeUploadFilePath = string.Empty;
-    private static string _activeUploadFileMode = string.Empty;
+    private readonly PhoenixGSM.OmniTrace.Sensors.SmartFilePushArchiver _smartFileArchiver = new();
 
     private readonly PhoenixGSM.OmniTrace.BinaryAnalysis.ElfBinaryInspector _elfInspector = new();
     private readonly PhoenixGSM.OmniTrace.BinaryAnalysis.ApkManifestInspector _apkInspector = new();
@@ -160,10 +150,19 @@ public partial class MonitoringEngine
                         {
                             _lastActiveAtBinaryCommand = sCmd;
                         }
+
+                        if (_smartFileArchiver.CheckShellCommandForInlineFileOrFlush(sCmd, 0, "adb.exe", out var shellRec) && shellRec != null)
+                        {
+                            EmitCapturedPushedFile(shellRec, epHex);
+                        }
                     }
                     else if (!isBinaryPayloadChunk && (cleanLineTrimmed.Contains("chmod ") || rawAsciiPreview.Contains("chmod ")))
                     {
                         _isInsideFileSyncTransfer = false;
+                        if (_smartFileArchiver.CheckShellCommandForInlineFileOrFlush(cleanLineTrimmed, 0, "adb.exe", out var chmodRec) && chmodRec != null)
+                        {
+                            EmitCapturedPushedFile(chmodRec, epHex);
+                        }
                     }
 
                     // Flush getprop aggregator if idle or another command is seen
@@ -695,6 +694,14 @@ public partial class MonitoringEngine
                     }
                     else
                     {
+                        if (dir == "OUT" && !isUpperFilterPort && !cleanLineTrimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (_smartFileArchiver.ProcessOutboundSyncOrBulkChunk(chunk, dir, epHex, pkt.ActualLength, out var completedPushRec) && completedPushRec != null)
+                            {
+                                EmitCapturedPushedFile(completedPushRec, epHex);
+                            }
+                        }
+
                         var frames = _adbParser.ProcessChunk(chunk, dir, "Android Phone", "", "", 1, epHex);
 
                         if (frames != null && frames.Count > 0)
@@ -705,6 +712,10 @@ public partial class MonitoringEngine
                                 if (frame.Command == "CLSE")
                                 {
                                     _isInsideFileSyncTransfer = false;
+                                    if (_smartFileArchiver.FlushIfActive(out var flushedRec) && flushedRec != null)
+                                    {
+                                        EmitCapturedPushedFile(flushedRec, epHex);
+                                    }
                                     continue;
                                 }
 
@@ -733,6 +744,11 @@ public partial class MonitoringEngine
                                             {
                                                 _lastActiveAtBinaryCommand = _activeInteractiveShellCommand;
                                             }
+
+                                            if (_smartFileArchiver.CheckShellCommandForInlineFileOrFlush(_activeInteractiveShellCommand, 0, "adb.exe", out var shellRec) && shellRec != null)
+                                            {
+                                                EmitCapturedPushedFile(shellRec, epHex);
+                                            }
                                         }
                                         else if (PhoenixGSM.OmniTrace.Decoders.AdbSmartSocketDecoder.IsSocketBridgeChannel(payloadPreview) ||
                                                  PhoenixGSM.OmniTrace.Decoders.AdbSmartSocketDecoder.IsModernAndroidService(payloadPreview))
@@ -740,6 +756,11 @@ public partial class MonitoringEngine
                                             _activeSocketBridgeChannel = payloadPreview.Trim();
                                         }
                                     }
+                                }
+
+                                if (frame.Command == "WRTE" && (_isInsideFileSyncTransfer || _smartFileArchiver.IsInsideTransfer))
+                                {
+                                    continue;
                                 }
 
                                 string pTrim = payloadPreview.Trim();
@@ -794,147 +815,13 @@ public partial class MonitoringEngine
                                                                rawAsciiPreview.Contains("..a4") ||
                                                                rawAsciiPreview.Contains("..I7");
 
-                                bool isSendChunk = false;
-                                // ADB SEND handling inside sync: channel
-                                if (rawAsciiPreview.StartsWith("SEND /", StringComparison.Ordinal) ||
-                                    rawAsciiPreview.StartsWith("SEND ", StringComparison.Ordinal) ||
-                                    rawAsciiPreview.Contains("SEND /data/local/tmp/") ||
-                                    cleanLineTrimmed.Contains(",33188DATA", StringComparison.Ordinal) ||
-                                    cleanLineTrimmed.Contains(",33261DATA", StringComparison.Ordinal))
+                                bool isFileTransferInProgress = _smartFileArchiver.IsInsideTransfer || _isInsideFileSyncTransfer;
+
+                                if (isFileTransferInProgress || isBinaryPayloadChunk || isRepeatedBinaryPattern || isAdbSyncToken)
                                 {
-                                    isSendChunk = true;
-                                    string headerText = rawAsciiPreview.Split(new[] { '\0', '\r', '\n' })[0].Trim();
-                                    string targetPath = "/data/local/tmp/AT";
-                                    string mode = "33188";
-                                    var m = System.Text.RegularExpressions.Regex.Match(headerText, @"(?:SEND\s+)?([^\s,]+),(\d+)");
-                                    if (m.Success)
-                                    {
-                                        targetPath = m.Groups[1].Value.Trim();
-                                        mode = m.Groups[2].Value.Trim();
-                                    }
-                                    else if (headerText.Contains("/data/local/tmp/"))
-                                    {
-                                        int pIdx = headerText.IndexOf("/data/local/tmp/", StringComparison.Ordinal);
-                                        targetPath = headerText[pIdx..].Split(',')[0].Trim();
-                                    }
-
-                                    lock (_transferLock)
-                                    {
-                                        _activeUploadStream.SetLength(0);
-                                        _activeUploadFilePath = targetPath;
-                                        _activeUploadFileMode = mode;
-                                        _activeTransferFile = targetPath;
-                                        _isInsideFileSyncTransfer = true;
-                                        _activeTransferDir = dir;
-                                        _activeTransferTotalBytes = 0;
-                                        _activeTransferChunkCount = 0;
-                                        _activeTransferStartTime = DateTime.UtcNow;
-
-                                        int dataHeaderIdx = -1;
-                                        for (int i = 0; i < chunk.Length - 4; i++)
-                                        {
-                                            if (chunk[i] == 'D' && chunk[i + 1] == 'A' && chunk[i + 2] == 'T' && chunk[i + 3] == 'A')
-                                            {
-                                                dataHeaderIdx = i + 8;
-                                                break;
-                                            }
-                                        }
-                                        if (dataHeaderIdx >= 0 && dataHeaderIdx < chunk.Length)
-                                        {
-                                            _activeUploadStream.Write(chunk, dataHeaderIdx, chunk.Length - dataHeaderIdx);
-                                            _activeTransferTotalBytes += (chunk.Length - dataHeaderIdx);
-                                        }
-                                    }
+                                    // Suppress individual binary / sync chunks during file upload
                                 }
-
-                                if (rawAsciiPreview.StartsWith("DONE", StringComparison.Ordinal) ||
-                                    rawAsciiPreview.StartsWith("OKAY", StringComparison.Ordinal) ||
-                                    rawAsciiPreview.StartsWith("CLSE", StringComparison.Ordinal) ||
-                                    rawAsciiPreview.Contains("DONE") ||
-                                    (chunk.Length >= 4 && chunk[0] == 0x44 && chunk[1] == 0x4F && chunk[2] == 0x4E && chunk[3] == 0x45))
-                                {
-                                    _isInsideFileSyncTransfer = false;
-                                    lock (_transferLock)
-                                    {
-                                        if (!string.IsNullOrEmpty(_activeTransferFile) && _activeUploadStream.Length > 0)
-                                        {
-                                            byte[] fileBytes = _activeUploadStream.ToArray();
-                                            string fname = Path.GetFileName(_activeUploadFilePath);
-                                            if (string.IsNullOrWhiteSpace(fname)) fname = "AT";
-
-                                            string artifactsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "CapturedArtifacts");
-                                            string savePath = Path.Combine(artifactsDir, fname);
-                                            try
-                                            {
-                                                Directory.CreateDirectory(artifactsDir);
-                                                File.WriteAllBytes(savePath, fileBytes);
-                                            }
-                                            catch { }
-
-                                            string inspectionReport;
-                                            if (fileBytes.Length >= 4 && fileBytes[0] == 0x7F && fileBytes[1] == 0x45 && fileBytes[2] == 0x4C && fileBytes[3] == 0x46)
-                                            {
-                                                var elfRes = _elfInspector.InspectElf(fileBytes);
-                                                inspectionReport = !string.IsNullOrEmpty(elfRes.ForensicClassification)
-                                                    ? elfRes.ForensicClassification
-                                                    : $"ELF {elfRes.Architecture} (Symbols: {elfRes.DangerousSymbolsFound.Length})";
-                                            }
-                                            else if (fileBytes.Length >= 4 && fileBytes[0] == 0x50 && fileBytes[1] == 0x4B)
-                                            {
-                                                var apkRes = _apkInspector.InspectApk(fileBytes);
-                                                inspectionReport = !string.IsNullOrEmpty(apkRes.ForensicDescription)
-                                                    ? apkRes.ForensicDescription
-                                                    : "ZIP/APK Archive";
-                                            }
-                                            else
-                                            {
-                                                var elfRes = _elfInspector.InspectElf(fileBytes);
-                                                inspectionReport = elfRes.IsValidElf ? elfRes.ForensicClassification : $"Binary Payload ({fileBytes.Length:N0} B)";
-                                            }
-
-                                            string singleSummary = $"[ADB-SYNC] Transfer Completed: {_activeUploadFilePath} ({fileBytes.Length:N0} bytes) | Forensic: {inspectionReport} | Saved: CapturedArtifacts/{fname}";
-
-                                            EmitEvent(new LiveEventItem
-                                            {
-                                                Timestamp = DateTime.UtcNow,
-                                                Category = EventSourceCategory.UsbDriver,
-                                                SourceTag = "ADB-SYNC",
-                                                Direction = dir,
-                                                EndpointOrTarget = $"EP {epHex}",
-                                                Protocol = "ADB-SYNC",
-                                                Command = $"PUSH {_activeUploadFilePath}",
-                                                Summary = singleSummary,
-                                                RawPayload = fileBytes.Take(128).ToArray(),
-                                                PayloadAscii = singleSummary,
-                                                PayloadHex = LiveEventItem.FormatHexDump(fileBytes.Take(64).ToArray()),
-                                                AdditionalDetails = $"Target Path: {_activeUploadFilePath}\nMode: {_activeUploadFileMode}\nTotal Bytes: {fileBytes.Length:N0}\nForensic Classification: {inspectionReport}\nLocal Artifact: {savePath}"
-                                            });
-
-                                            _activeTransferFile = null;
-                                            _activeUploadStream.SetLength(0);
-                                            _activeUploadFilePath = string.Empty;
-                                        }
-                                    }
-                                }
-                                else if (!isSendChunk && (isRepeatedBinaryPattern || isBinaryPayloadChunk || isAdbSyncToken || _isInsideFileSyncTransfer || !string.IsNullOrEmpty(_activeTransferFile)))
-                                {
-                                    // Suppress individual 1024B / 4096B binary chunks during file upload
-                                    lock (_transferLock)
-                                    {
-                                        int chunkOffset = 0;
-                                        if (chunk.Length >= 8 && chunk[0] == 'D' && chunk[1] == 'A' && chunk[2] == 'T' && chunk[3] == 'A')
-                                        {
-                                            chunkOffset = 8;
-                                        }
-                                        if (chunk.Length > chunkOffset)
-                                        {
-                                            _activeUploadStream.Write(chunk, chunkOffset, chunk.Length - chunkOffset);
-                                        }
-                                        _activeTransferTotalBytes += chunk.Length;
-                                        _activeTransferChunkCount++;
-                                    }
-                                }
-                                else if (!isSendChunk)
+                                else
                                 {
                                     if (chunk.Length <= 5 && (cleanLineTrimmed == "." || cleanLineTrimmed == "[1]." || cleanLineTrimmed == "" || cleanLineTrimmed == "[1]" || cleanLineTrimmed == ".."))
                                     {
@@ -964,7 +851,7 @@ public partial class MonitoringEngine
                             }
                         }
 
-                        if (chunk.Length > 0 && _omniService != null && !isBinaryPayloadChunk && !_isInsideFileSyncTransfer && !(_isAdbSessionActive && !isUpperFilterPort))
+                        if (chunk.Length > 0 && _omniService != null && !isBinaryPayloadChunk && !_isInsideFileSyncTransfer && !_smartFileArchiver.IsInsideTransfer && !(_isAdbSessionActive && !isUpperFilterPort))
                         {
                             try
                             {
@@ -1177,6 +1064,74 @@ public partial class MonitoringEngine
         });
 
         return defaultModem ?? allPorts.FirstOrDefault() ?? "MODEM_PORT";
+    }
+
+    private void EmitCapturedPushedFile(PhoenixGSM.OmniTrace.Sensors.CapturedPushedFileRecord rec, string epHex)
+    {
+        if (rec == null) return;
+
+        string fname = rec.FileName;
+        string targetPath = rec.TargetDevicePath;
+        long size = rec.FileSizeBytes;
+        string vector = rec.CaptureVector;
+        string classification = rec.FileClassification;
+
+        string summary = $"[ADB-PUSH] Completed: {targetPath} ({size:N0} bytes) | Classification: {classification} | Vector: {vector} | Saved: {rec.LocalSavedPath}";
+        if (!string.IsNullOrEmpty(rec.AutoExtSavedPath))
+        {
+            summary += $" | AutoExt: {rec.AutoExtFileName}";
+        }
+        if (!string.IsNullOrEmpty(rec.ExtractedZipDirectory))
+        {
+            summary += $" | Extracted: Extracted_{Path.GetFileNameWithoutExtension(fname)}";
+        }
+        if (!string.IsNullOrEmpty(rec.AnalysisReportPath))
+        {
+            summary += $" | Analysis: {Path.GetFileName(rec.AnalysisReportPath)}";
+        }
+
+        EmitEvent(new LiveEventItem
+        {
+            Timestamp = rec.Timestamp,
+            Category = EventSourceCategory.UsbDriver,
+            SourceTag = "ADB-SYNC",
+            Direction = "OUT",
+            EndpointOrTarget = $"EP {epHex}",
+            Protocol = "ADB-SYNC",
+            Command = $"PUSH {targetPath}",
+            Summary = summary,
+            RawPayload = rec.FileBytes.Take(128).ToArray(),
+            PayloadAscii = summary,
+            PayloadHex = LiveEventItem.FormatHexDump(rec.FileBytes.Take(64).ToArray()),
+            AdditionalDetails = $"Target Path: {targetPath}\nMode: {rec.FilePermissionMode}\nTotal Bytes: {size:N0}\nClassification: {classification}\nVector: {vector}\nSHA256: {rec.Sha256}\nMD5: {rec.Md5}\nSaved: {rec.LocalSavedPath}" +
+                (!string.IsNullOrEmpty(rec.AutoExtSavedPath) ? $"\nAuto-Ext Saved: {rec.AutoExtSavedPath}" : "") +
+                (!string.IsNullOrEmpty(rec.ExtractedZipDirectory) ? $"\nExtracted Zip: {rec.ExtractedZipDirectory}" : "") +
+                (!string.IsNullOrEmpty(rec.AnalysisReportPath) ? $"\nAnalysis Report: {rec.AnalysisReportPath}" : "")
+        });
+
+        if (_omniService?.ArtifactSensor?.Vault != null)
+        {
+            try
+            {
+                _omniService.ArtifactSensor.Vault.StoreArtifact(
+                    content: rec.FileBytes,
+                    fileName: fname,
+                    targetDevicePath: targetPath,
+                    processName: !string.IsNullOrEmpty(rec.ProcessName) ? rec.ProcessName : "adb.exe",
+                    pid: rec.ProcessId,
+                    sourceVector: vector,
+                    localSourcePath: rec.LocalSavedPath,
+                    deviceSerial: "",
+                    extraAttrs: new Dictionary<string, string>
+                    {
+                        ["Classification"] = classification,
+                        ["Sha256"] = rec.Sha256,
+                        ["Md5"] = rec.Md5,
+                        ["Mode"] = rec.FilePermissionMode
+                    });
+            }
+            catch { }
+        }
     }
     #endregion
 }

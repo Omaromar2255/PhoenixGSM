@@ -109,6 +109,7 @@ public static partial class Program
         RunTest("TEST 83: L24 LiveHeap, DllAuditor & PortPoller Engines", Test83_L24_LiveHeap_DllAuditor_And_PortPoller);
         RunTest("TEST 84: L24 Upgrade 5 (Smart Port Classifier, Deep ADB/Shell, MTK Protocols & Kernel Interceptor)", Test84_L24_Upgrade5_ComprehensiveInterception);
         RunTest("TEST 85: Zero-Drop Interactive Shell, MTK-BROM Fix & Process Noise Gate", Test85_ZeroDropInteractiveShellAndMtkBromFix);
+        RunTest("TEST 86: Smart File Push Archiver Multi-Vector Recovery & Auto-Extension", Test86_SmartFilePushArchiverMultiVector);
 
         Console.WriteLine();
         Console.ForegroundColor = ConsoleColor.Cyan;

@@ -466,5 +466,92 @@ public static partial class Program
         return ms.ToArray();
     }
 
+    /// <summary>
+    /// TEST 86: Smart File Push Archiver Multi-Vector Recovery.
+    /// Verifies wire stream reassembly with split headers, DATA/DONE stripping,
+    /// auto-extension naming, zip auto-extraction, and inline base64 decoding.
+    /// </summary>
+    public static bool Test86_SmartFilePushArchiverMultiVector()
+    {
+        var archiver = new SmartFilePushArchiver();
+
+        // 1. Test Split SEND Header across two packets with mode 33206 (e.g. R2.zip)
+        // Packet 1: Partial SEND command
+        byte[] p1 = Encoding.ASCII.GetBytes("SEND ");
+        bool res1 = archiver.ProcessOutboundSyncOrBulkChunk(p1, "OUT", "0x01", (uint)p1.Length, out var rec1);
+        if (res1 || rec1 != null) return false;
+
+        // Packet 2: Path, mode 33206, DATA header with synthetic zip payload and DONE trailer
+        using var zipMs = new MemoryStream();
+        using (var za = new System.IO.Compression.ZipArchive(zipMs, System.IO.Compression.ZipArchiveMode.Create, true))
+        {
+            var entry = za.CreateEntry("payload.sh");
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write("#!/system/bin/sh\necho pwned\n");
+        }
+        byte[] zipPayload = zipMs.ToArray();
+
+        using var p2Ms = new MemoryStream();
+        p2Ms.Write(Encoding.ASCII.GetBytes("/data/local/tmp/R2.zip,33206"));
+        p2Ms.Write(Encoding.ASCII.GetBytes("DATA"));
+        p2Ms.Write(BitConverter.GetBytes((uint)zipPayload.Length));
+        p2Ms.Write(zipPayload);
+        p2Ms.Write(Encoding.ASCII.GetBytes("DONE"));
+        p2Ms.Write(BitConverter.GetBytes(1700000000u)); // mtime
+        byte[] p2 = p2Ms.ToArray();
+
+        bool res2 = archiver.ProcessOutboundSyncOrBulkChunk(p2, "OUT", "0x01", (uint)p2.Length, out var rec2);
+        if (!res2 || rec2 == null) return false;
+        if (rec2.FileName != "R2.zip" || rec2.FileSizeBytes != zipPayload.Length) return false;
+        if (!File.Exists(rec2.LocalSavedPath)) return false;
+        if (string.IsNullOrEmpty(rec2.ExtractedZipDirectory) || !Directory.Exists(rec2.ExtractedZipDirectory)) return false;
+        string extractedFile = Path.Combine(rec2.ExtractedZipDirectory, "payload.sh");
+        if (!File.Exists(extractedFile)) return false;
+
+        // 2. Test Auto-Extension on Extensionless APK (/data/local/tmp/SRV4)
+        byte[] apkPayload = CreateSyntheticApkPayload();
+        using var apkMs = new MemoryStream();
+        apkMs.Write(Encoding.ASCII.GetBytes("SEND /data/local/tmp/SRV4,33188"));
+        apkMs.Write(Encoding.ASCII.GetBytes("DATA"));
+        apkMs.Write(BitConverter.GetBytes((uint)apkPayload.Length));
+        apkMs.Write(apkPayload);
+        apkMs.Write(Encoding.ASCII.GetBytes("DONE"));
+        apkMs.Write(BitConverter.GetBytes(1700000000u));
+        byte[] apkPacket = apkMs.ToArray();
+
+        bool resApk = archiver.ProcessOutboundSyncOrBulkChunk(apkPacket, "OUT", "0x01", (uint)apkPacket.Length, out var recApk);
+        if (!resApk || recApk == null) return false;
+        if (recApk.AutoExtFileName != "SRV4.apk" || !File.Exists(recApk.AutoExtSavedPath)) return false;
+
+        // 3. Test Auto-Flush on Shell command (e.g. chmod before DONE arrives)
+        using var flushMs = new MemoryStream();
+        flushMs.Write(Encoding.ASCII.GetBytes("SEND /data/local/tmp/AT,33188"));
+        flushMs.Write(Encoding.ASCII.GetBytes("DATA"));
+        byte[] elfPayload = CreateSyntheticElf32ArmBinary();
+        flushMs.Write(BitConverter.GetBytes((uint)elfPayload.Length));
+        flushMs.Write(elfPayload);
+        byte[] flushPacket = flushMs.ToArray();
+
+        archiver.ProcessOutboundSyncOrBulkChunk(flushPacket, "OUT", "0x01", (uint)flushPacket.Length, out _);
+        if (!archiver.IsInsideTransfer) return false;
+
+        // Simulating immediate chmod command
+        bool chmodFlush = archiver.CheckShellCommandForInlineFileOrFlush(
+            "shell:chmod 777 /data/local/tmp/AT", 1234, "SamFW.exe", out var recChmod);
+        if (!chmodFlush || recChmod == null) return false;
+        if (recChmod.FileName != "AT" || recChmod.AutoExtFileName != "AT.elf") return false;
+        if (archiver.IsInsideTransfer) return false;
+
+        // 4. Test Inline Base64 File Push (echo '...' | base64 -d > /data/local/tmp/script.sh)
+        string testScript = "#!/bin/sh\nid\n";
+        string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(testScript));
+        string b64Cmd = $"echo '{b64}' | base64 -d > /data/local/tmp/script.sh";
+        bool b64Ok = archiver.CheckShellCommandForInlineFileOrFlush(b64Cmd, 5678, "adb.exe", out var recB64);
+        if (!b64Ok || recB64 == null) return false;
+        if (recB64.TargetDevicePath != "/data/local/tmp/script.sh" || recB64.CaptureVector != "Base64 Inline Stream") return false;
+
+        return true;
+    }
+
     #endregion
 }
