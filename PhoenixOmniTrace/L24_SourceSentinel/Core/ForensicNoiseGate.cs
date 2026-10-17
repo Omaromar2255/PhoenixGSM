@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -27,7 +28,7 @@ namespace PhoenixOmniTrace.L24_SourceSentinel.Core
 
         private static readonly HashSet<string> IgnoredChildProcesses = new(StringComparer.OrdinalIgnoreCase)
         {
-            "conhost.exe", "attrib.exe", "git.exe", "chrome.exe", "services.exe", "svchost.exe"
+            "conhost.exe", "attrib.exe", "git.exe", "chrome.exe", "services.exe", "svchost.exe", "searchprotocolhost.exe", "searchindexer.exe"
         };
 
         private static readonly Regex ValidHeredocShellRegex = new(
@@ -35,7 +36,7 @@ namespace PhoenixOmniTrace.L24_SourceSentinel.Core
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static readonly Regex ValidAdbWireProtocolRegex = new(
-            @"^(?:host:(?:version|kill|devices(?:-l)?|track-devices(?:-l)?|transport(?:-usb|-local|-any|-id)?|serial:|tport:|features|host-features|pair|connect|disconnect|start-server|reconnect-offline|attach|detach)|shell:(?:[^\r\n]{2,})|sync:|framebuffer:|remount:|reboot:|reverse:|tcp:|localabstract:|localfilesystem:|dev:|jdwp:)",
+            @"^(?:host:(?:version|kill|devices(?:-l)?|track-devices(?:-l)?|transport(?:-usb|-local|-any|-id)?|serial:|tport:|features|host-features|pair|connect|disconnect|start-server|reconnect-offline|attach|detach)|shell:(?:[^\r\n]{1,})|sync:|framebuffer:|remount:|reboot:|reverse:|usb:|tcp:|localabstract:|localfilesystem:|dev:|jdwp:|abb:|abb_exec:)",
             RegexOptions.Compiled);
 
         private static readonly Regex ValidFirmwareArtifactRegex = new(
@@ -46,7 +47,7 @@ namespace PhoenixOmniTrace.L24_SourceSentinel.Core
             @"\s{2,}-\s+(?:run remote shell|list all forward|remove all forward|reboots the device|push files that are newer)",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-        private static readonly ConcurrentDictionary<string, byte> SeenFingerprints = new();
+        private static readonly ConcurrentDictionary<string, DateTime> SeenFingerprints = new();
 
         public static void ResetSession() => SeenFingerprints.Clear();
 
@@ -64,8 +65,8 @@ namespace PhoenixOmniTrace.L24_SourceSentinel.Core
         {
             if (string.IsNullOrWhiteSpace(s)) return false;
             string trimmed = s.Trim();
-            if (trimmed.Length < 4 && !trimmed.StartsWith("<<")) return false;
-            if (s.Contains('?')) return false;
+            if (trimmed.Length < 2 && !trimmed.StartsWith("<<")) return false;
+            if (s.Contains('?') && !trimmed.EndsWith("=?") && !trimmed.EndsWith("?")) return false;
             foreach (char c in s)
             {
                 if (c == '\r' || c == '\n' || c == '\t') continue;
@@ -105,11 +106,11 @@ namespace PhoenixOmniTrace.L24_SourceSentinel.Core
                     return false;
             }
 
-            // 3. فلترة العمليات الفرعية الصامتة (conhost.exe / git.exe / WMIC.exe بدون معاملات)
+            // 3. فلترة العمليات الفرعية الصامتة
             if (cat.Equals("Child Process Execution", StringComparison.OrdinalIgnoreCase))
             {
                 string cleanTarget = target.Trim();
-                string firstToken = Path.GetFileName(cleanTarget.Split(' ')[0].Trim());
+                string firstToken = Path.GetFileName(cleanTarget.Split(' ')[0].Trim('"'));
 
                 if (IgnoredChildProcesses.Contains(firstToken) || cleanTarget.Contains("conhost.exe", StringComparison.OrdinalIgnoreCase))
                     return false;
@@ -122,106 +123,125 @@ namespace PhoenixOmniTrace.L24_SourceSentinel.Core
             // 4. فلترة وتصحيح مخرجات الرام (LiveRAM_UniversalInterceptor)
             if (api.Equals("LiveRAM_UniversalInterceptor", StringComparison.OrdinalIgnoreCase))
             {
-                string rawStr = ExtractRawString(evt.RawPayloadHex, target, decoded);
-
-                if (!IsCleanAscii(rawStr))
-                    return false;
-
-                if (StaticHelpLineRegex.IsMatch(rawStr) ||
-                    rawStr.StartsWith("sync: only push files", StringComparison.OrdinalIgnoreCase) ||
-                    rawStr.StartsWith("LZ4 ", StringComparison.OrdinalIgnoreCase) ||
-                    rawStr.Equals("TAR file", StringComparison.OrdinalIgnoreCase) ||
-                    rawStr.Equals("shell:\n shell", StringComparison.OrdinalIgnoreCase) ||
-                    rawStr.Contains("terminated with a semicolon", StringComparison.OrdinalIgnoreCase))
+                // السماح الفوري بالحزم الثنائية المصنفة مسبقاً (مثل MTK XFlash / MTK BROM Handshake)
+                if (cat.Contains("MTK", StringComparison.OrdinalIgnoreCase) ||
+                    cat.Contains("MediaTek", StringComparison.OrdinalIgnoreCase))
                 {
-                    return false;
+                    // تمرير أوامر MTK بدون حجب
                 }
-
-                // تصحيح ترويسات HTTP "Host: ..." (مثل Host: key-tool-api.herokuapp.com)
-                if (rawStr.StartsWith("Host:", StringComparison.Ordinal))
+                else
                 {
-                    string hostLine = rawStr.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
-                    // تجاهل النسخ المبتورة إذا كانت أقل من 12 حرفاً
-                    if (hostLine.Length < 12) return false;
+                    string rawStr = ExtractRawString(evt.RawPayloadHex, target, decoded);
 
-                    evt.CommandCategory = "Network / C2 Server Endpoint";
-                    evt.TargetResource = hostLine;
-                    evt.DecodedCommandText = $"خادم سحابي خاص بالأداة مكتشف في الذاكرة: {hostLine}";
-                }
-                else if (rawStr.Contains("<<") || cat.Contains("Heredoc", StringComparison.OrdinalIgnoreCase))
-                {
-                    string trimmedStr = rawStr.Trim();
+                    if (!IsCleanAscii(rawStr))
+                        return false;
 
-                    // السماح بالمحث التفاعلي والأوامر التفاعلية المباشرة بعد <<
-                    if (trimmedStr.StartsWith("<<"))
+                    if (StaticHelpLineRegex.IsMatch(rawStr) ||
+                        rawStr.StartsWith("sync: only push files", StringComparison.OrdinalIgnoreCase) ||
+                        rawStr.StartsWith("LZ4 ", StringComparison.OrdinalIgnoreCase) ||
+                        rawStr.Equals("TAR file", StringComparison.OrdinalIgnoreCase) ||
+                        rawStr.Equals("shell:\n shell", StringComparison.OrdinalIgnoreCase) ||
+                        rawStr.Contains("terminated with a semicolon", StringComparison.OrdinalIgnoreCase))
                     {
-                        evt.CommandCategory = "ADB / Interactive Shell";
-                        evt.DecodedCommandText = $"أمر أو محث تفاعلي (Interactive Shell / AT): {rawStr}";
+                        return false;
                     }
-                    else if (ValidHeredocShellRegex.IsMatch(rawStr))
+
+                    if (rawStr.StartsWith("Host:", StringComparison.Ordinal))
                     {
-                        // صيغة شل نظامية (Heredoc)
+                        string hostLine = rawStr.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
+                        if (hostLine.Length < 12) return false;
+
+                        evt.CommandCategory = "Network / C2 Server Endpoint";
+                        evt.TargetResource = hostLine;
+                        evt.DecodedCommandText = $"خادم سحابي خاص بالأداة مكتشف في الذاكرة: {hostLine}";
                     }
-                    else
+                    else if (rawStr.Contains("<<") || cat.Contains("Heredoc", StringComparison.OrdinalIgnoreCase))
                     {
-                        // ارفض السلسلة فقط إذا كانت عشوائية قصيرة بلا معنى (أقل من 7 أحرف بدون أرقام أو أوامر مثل "P4<<m" أو "5jRU<<")
-                        bool hasCommandKeywords = trimmedStr.Contains("AT", StringComparison.OrdinalIgnoreCase) ||
-                                                  trimmedStr.Contains("usb", StringComparison.OrdinalIgnoreCase) ||
-                                                  trimmedStr.Contains("shell", StringComparison.OrdinalIgnoreCase) ||
-                                                  trimmedStr.Contains("data/local", StringComparison.OrdinalIgnoreCase);
+                        string trimmedStr = rawStr.Trim();
 
-                        bool hasDigits = trimmedStr.Any(char.IsDigit);
+                        if (trimmedStr.StartsWith("<<"))
+                        {
+                            evt.CommandCategory = "ADB / Interactive Shell";
+                            evt.DecodedCommandText = $"أمر أو محث تفاعلي (Interactive Shell / AT): {rawStr}";
+                        }
+                        else if (ValidHeredocShellRegex.IsMatch(rawStr))
+                        {
+                            // صيغة شل نظامية (Heredoc)
+                        }
+                        else
+                        {
+                            bool hasCommandKeywords = trimmedStr.Contains("AT", StringComparison.OrdinalIgnoreCase) ||
+                                                      trimmedStr.Contains("usb", StringComparison.OrdinalIgnoreCase) ||
+                                                      trimmedStr.Contains("shell", StringComparison.OrdinalIgnoreCase) ||
+                                                      trimmedStr.Contains("data/local", StringComparison.OrdinalIgnoreCase);
 
-                        if (trimmedStr.Length < 7 && !hasCommandKeywords && !hasDigits)
+                            bool hasDigits = trimmedStr.Any(char.IsDigit);
+
+                            if (trimmedStr.Length < 7 && !hasCommandKeywords && !hasDigits)
+                            {
+                                return false;
+                            }
+
+                            if (trimmedStr.Length < 7 && !trimmedStr.Contains(" ") && !hasCommandKeywords)
+                            {
+                                return false;
+                            }
+
+                            evt.CommandCategory = "ADB / Interactive Shell";
+                            evt.DecodedCommandText = $"أمر تفاعلي عبر الشل: {rawStr}";
+                        }
+                    }
+                    else if (cat.Contains("Boot Loader", StringComparison.OrdinalIgnoreCase) ||
+                             cat.Contains("Firmware File", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!ValidFirmwareArtifactRegex.IsMatch(rawStr))
+                            return false;
+                    }
+                    else if (cat.Contains("ADB / Interactive Shell", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (rawStr.Equals("chown user file", StringComparison.OrdinalIgnoreCase) ||
+                            rawStr.Equals("getProperties", StringComparison.OrdinalIgnoreCase))
                         {
                             return false;
                         }
 
-                        if (trimmedStr.Length < 7 && !trimmedStr.Contains(" ") && !hasCommandKeywords)
+                        if ((rawStr.StartsWith("host:", StringComparison.OrdinalIgnoreCase) ||
+                             rawStr.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
+                             rawStr.StartsWith("sync:", StringComparison.OrdinalIgnoreCase)) &&
+                            !ValidAdbWireProtocolRegex.IsMatch(rawStr))
                         {
                             return false;
                         }
-
-                        evt.CommandCategory = "ADB / Interactive Shell";
-                        evt.DecodedCommandText = $"أمر تفاعلي عبر الشل: {rawStr}";
                     }
-                }
-                else if (cat.Contains("Boot Loader", StringComparison.OrdinalIgnoreCase) ||
-                         cat.Contains("Firmware File", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (!ValidFirmwareArtifactRegex.IsMatch(rawStr))
-                        return false;
-                }
-                else if (cat.Contains("ADB / Interactive Shell", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (rawStr.Equals("chown user file", StringComparison.OrdinalIgnoreCase) ||
-                        rawStr.Equals("getProperties", StringComparison.OrdinalIgnoreCase))
+                    else if (cat.Equals("Modem AT Command", StringComparison.OrdinalIgnoreCase))
                     {
-                        return false;
-                    }
-
-                    if ((rawStr.StartsWith("host:", StringComparison.OrdinalIgnoreCase) ||
-                         rawStr.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
-                         rawStr.StartsWith("sync:", StringComparison.OrdinalIgnoreCase)) &&
-                        !ValidAdbWireProtocolRegex.IsMatch(rawStr))
-                    {
-                        return false;
-                    }
-                }
-                else if (cat.Equals("Modem AT Command", StringComparison.OrdinalIgnoreCase))
-                {
-                    // استبعاد البادئات المبتورة مثل "AT+ACT" عندما يكون الأمر الكامل "AT+ACTIVATE=0,0,0" موجوداً
-                    if (rawStr.Equals("AT+ACT", StringComparison.OrdinalIgnoreCase) ||
-                        rawStr.EndsWith(",", StringComparison.Ordinal))
-                    {
-                        return false;
+                        if (rawStr.Equals("AT+ACT", StringComparison.OrdinalIgnoreCase) ||
+                            rawStr.EndsWith(",", StringComparison.Ordinal))
+                        {
+                            return false;
+                        }
                     }
                 }
             }
 
-            // 5. منع التكرار الدلالي عبر الجلسة بالكامل
+            // 5. منع التكرار: بالنسبة لأحداث الرام والمكتبات نطبق منع تكرار كامل للجلسة،
+            // أما بالنسبة للأوامر الحية القادمة من الجسور (ADB/MTK/Modem Bridge) فنسمح بتكرار الأمر إذا مر عليه أكثر من 1.2 ثانية
             string fp = ComputeFingerprint(evt);
-            return SeenFingerprints.TryAdd(fp, 1);
+            DateTime now = DateTime.UtcNow;
+            bool isLiveBridge = api.Contains("Bridge", StringComparison.OrdinalIgnoreCase) ||
+                                api.Equals("NtWriteFile", StringComparison.OrdinalIgnoreCase) ||
+                                api.Equals("NtDeviceIoControlFile", StringComparison.OrdinalIgnoreCase);
+
+            if (SeenFingerprints.TryGetValue(fp, out var prevTime))
+            {
+                if (!isLiveBridge)
+                    return false;
+                if ((now - prevTime).TotalSeconds < 1.2)
+                    return false;
+            }
+
+            SeenFingerprints[fp] = now;
+            return true;
         }
 
         private static string ComputeFingerprint(SourceTelemetryEvent evt)

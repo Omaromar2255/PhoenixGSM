@@ -52,6 +52,7 @@ public partial class MonitoringEngine : IDisposable
     public event Action<List<string>>? OnToolsChanged;
     public event Action<bool, string>? OnDriverStatusChanged;
 
+    public PhoenixGSM.OmniTrace.Service.PhoenixOmniTraceService? OmniService => _omniService;
     public PhoenixGSM.OmniTrace.TechnicianAudit.TechnicianPhoneCommandAuditLayer? TechnicianAuditLayer => _omniService?.TechnicianAuditLayer;
     public PhoenixGSM.OmniTrace.ToolSourceInterception.ToolSourceInterceptionOrchestrator? ToolSourceOrchestrator => _omniService?.ToolSourceOrchestrator;
 
@@ -209,6 +210,12 @@ public partial class MonitoringEngine : IDisposable
 
     private void HandleOmniCommand(PhoenixGSM.OmniTrace.Models.LogicalCommandEvent cmd)
     {
+        // 0. Prevent duplicate UI emission for commands already emitted directly by KernelDriver
+        if (cmd.Details.TryGetValue("EmittedByKernelDriver", out var emittedByKd) && emittedByKd == "true")
+        {
+            return;
+        }
+
         // 1. Suppress dumb SUBPROCESS_EXECUTION without actual command
         if (cmd.Command.Equals("SUBPROCESS_EXECUTION", StringComparison.OrdinalIgnoreCase))
         {
@@ -319,7 +326,6 @@ public partial class MonitoringEngine : IDisposable
         if (!string.IsNullOrEmpty(cmd.Service) && 
             (cmd.Service.Contains("/data/local/tmp") || cmd.Service.Contains("athun") || cmd.Service.Contains("trd") || cmd.Service.Contains("su") || cmd.Service.Contains("chmod")))
         {
-            // Direct attribution to the targeted ELF binary / shell command
             endpointOrTarget = cmd.Service.StartsWith("shell:", StringComparison.OrdinalIgnoreCase)
                 ? cmd.Service["shell:".Length..].Trim()
                 : (cmd.Service.StartsWith("exec:", StringComparison.OrdinalIgnoreCase)
@@ -441,7 +447,6 @@ public partial class MonitoringEngine : IDisposable
             ? Encoding.UTF8.GetBytes(rawCmd)
             : Encoding.UTF8.GetBytes(cmd.Command);
 
-        // Check for URLs inside command-line executions
         if (cmd.Details.TryGetValue("CommandLine", out var cliText) && !string.IsNullOrWhiteSpace(cliText))
         {
             string exePath = cmd.Details.TryGetValue("ExecutablePath", out var ep) ? ep : "";
@@ -449,7 +454,6 @@ public partial class MonitoringEngine : IDisposable
             CheckAndEmitUrls(cliText, exePath, caller, cmd.Timestamp.UtcDateTime);
         }
 
-        // Apple iproxy notification
         if (cmd.Service.Equals("iproxy.exe", StringComparison.OrdinalIgnoreCase))
         {
             try
@@ -504,7 +508,6 @@ public partial class MonitoringEngine : IDisposable
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // 1. From SerialPortSensor active monitored ports
         if (_omniService?.SerialSensor != null)
         {
             foreach (var p in _omniService.SerialSensor.MonitoredPortNames)
@@ -513,7 +516,6 @@ public partial class MonitoringEngine : IDisposable
             }
         }
 
-        // 2. From Known COM ports tracked by watcher
         lock (_knownComPorts)
         {
             foreach (var p in _knownComPorts)
@@ -522,7 +524,6 @@ public partial class MonitoringEngine : IDisposable
             }
         }
 
-        // 3. From system SerialPort.GetPortNames() directly
         try
         {
             foreach (var p in System.IO.Ports.SerialPort.GetPortNames())
@@ -532,7 +533,6 @@ public partial class MonitoringEngine : IDisposable
         }
         catch { }
 
-        // Sort ports prioritizing modem / cellular ports
         return result.OrderByDescending(p =>
         {
             var desc = GetPortDescription(p) ?? "";
@@ -555,7 +555,7 @@ public partial class MonitoringEngine : IDisposable
         return null;
     }
 
-    // Granular Sensor Capture Flags (تشغيل/إيقاف كل مجس على حدة)
+    // Granular Sensor Capture Flags
     public bool IsUsbMonitoringEnabled { get; set; } = true;
     public bool IsAdbMonitoringEnabled { get; set; } = true;
     public bool IsSerialMonitoringEnabled { get; set; } = true;
@@ -774,15 +774,14 @@ public partial class MonitoringEngine : IDisposable
     private void HandleOmniRaw(PhoenixGSM.OmniTrace.Models.RawCaptureEvent raw)
     {
         if (raw.Sensor == PhoenixGSM.OmniTrace.Models.SensorType.VirtualProxy) return;
-        if (raw.Sensor == PhoenixGSM.OmniTrace.Models.SensorType.Serial) return; // Suppress duplicate SERIAL | Command: RAW #... events
+        if (raw.Sensor == PhoenixGSM.OmniTrace.Models.SensorType.Serial) return;
         if (raw.Metadata != null && raw.Metadata.TryGetValue("Source", out var src) && src.StartsWith("KernelDriver", StringComparison.OrdinalIgnoreCase)) return;
         if (raw.Sensor == PhoenixGSM.OmniTrace.Models.SensorType.USB) return;
-        if (raw.Sensor == PhoenixGSM.OmniTrace.Models.SensorType.Network) return; // Handled with richer metadata via HandleNetworkUrlCaptured
-        if (raw.Sensor == PhoenixGSM.OmniTrace.Models.SensorType.FileSystem) return; // Handled with richer metadata via HandleTempFileAtCaptured
-        if (raw.Direction == PhoenixGSM.OmniTrace.Models.PacketDirection.INTERNAL) return; // Handled via HandleInProcessCaptured
+        if (raw.Sensor == PhoenixGSM.OmniTrace.Models.SensorType.Network) return;
+        if (raw.Sensor == PhoenixGSM.OmniTrace.Models.SensorType.FileSystem) return;
+        if (raw.Direction == PhoenixGSM.OmniTrace.Models.PacketDirection.INTERNAL) return;
         if (raw.Metadata != null && raw.Metadata.TryGetValue("ExecutionType", out var execType) && execType == "InProcessDirect") return;
 
-        // Discard 0-byte transfer tokens that flood the UI with empty polling noise
         if (raw.RawPayload == null || raw.RawPayload.Length == 0) return;
 
         var category = raw.Sensor switch
@@ -853,7 +852,6 @@ public partial class MonitoringEngine : IDisposable
             }
         }
 
-        // Retrieve actual file bytes for zero-loss content & strings inspection
         byte[]? fileBytes = artifact.RawBytes;
         if (fileBytes == null || fileBytes.Length == 0)
         {

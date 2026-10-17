@@ -127,7 +127,7 @@ public static class MtkProtocolDecoder
     /// </summary>
     public static double EvaluateMtk(ReadOnlySpan<byte> buf)
     {
-        if (buf.Length == 0) return 0.0;
+        if (buf.Length == 0 || buf.Length > 64) return 0.0;
 
         // 1. Full 4-byte Handshake sync sequence
         if (buf.Length >= 4)
@@ -165,6 +165,7 @@ public static class MtkProtocolDecoder
         byte op = buf[0];
         if (BromCommands.ContainsKey(op) && !IsHandshakeSyncByte(op))
         {
+            if (buf.Length > 16) return 0.0;
             if (op is 0xD0 or 0xD1 or 0xD2 or 0xD3 or 0xD4 or 0xDC) return 0.95;
             return 0.85;
         }
@@ -172,10 +173,14 @@ public static class MtkProtocolDecoder
         // 4. DA stage signatures
         if (DaCommands.ContainsKey(op))
         {
+            if ((op is 0x5A or 0x5B) && buf.Length > 4) return 0.0;
             if (op is >= 0x20 and <= 0x7E)
             {
                 // Printable ASCII character cannot be matched as DA command without binary framing
-                return 0.0;
+                if (buf.Length < 4 || isAsciiString || (buf[1] is >= 0x20 and <= 0x7E))
+                {
+                    return 0.0;
+                }
             }
             return 0.85;
         }
@@ -194,7 +199,7 @@ public static class MtkProtocolDecoder
     /// </summary>
     public static MtkDecodedPacket? DecodePacket(ReadOnlySpan<byte> buffer, PacketDirection direction)
     {
-        if (buffer.Length == 0) return null;
+        if (buffer.Length == 0 || buffer.Length > 64) return null;
 
         // Check full 4-byte sync sequence
         if (buffer.Length >= 4)
@@ -278,6 +283,8 @@ public static class MtkProtocolDecoder
         // 1. Check BROM Commands (OpCodes 0xD0..0xDF)
         if (BromCommands.TryGetValue(op, out var bCmd))
         {
+            if (buffer.Length > 16) return null;
+
             var packet = new MtkDecodedPacket
             {
                 Stage = "BROM",
@@ -330,6 +337,8 @@ public static class MtkProtocolDecoder
         // 2. Check DA Commands
         if (DaCommands.TryGetValue(op, out var daCmd))
         {
+            if ((op is 0x5A or 0x5B) && buffer.Length > 4) return null;
+
             var packet = new MtkDecodedPacket
             {
                 Stage = "DA",

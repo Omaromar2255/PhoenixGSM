@@ -16,37 +16,27 @@ namespace PhoenixOmniTrace.L24_SourceSentinel.Core;
 public sealed class LiveHeapCommandHunter : IDisposable
 {
     private CancellationTokenSource? _cts;
-    private readonly ConcurrentDictionary<string, bool> _seenPayloads = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<int, int> _staticVidPidCounter = new();
+    private readonly ConcurrentDictionary<string, DateTime> _seenPayloads = new(StringComparer.OrdinalIgnoreCase);
     public event Action<SourceTelemetryEvent>? OnCommandCaptured;
 
-    // === الوضع المتوافق مع فلتر WinUSB / ADB (Filter-Friendly Passive Mode) ===
-    // عند تفعيله، يتوقف المسح المتكرر عن العملية الأم المحمية ويحوّل المسح لعملية adb.exe الفرعية فقط
+    // === الوضع المزدوج المتوافق مع فلتر WinUSB / ADB / MTK ===
+    // يمسح عمليات adb.exe الفرعية مع الاستمرار في مسح خفيف للعملية الأم لالتقاط أوامر MTK والمودم والبورتات
     private volatile bool _isWinUsbOrChildAdbActive;
-    private volatile bool _initialParentScanDone;
+    private int _parentScanCycleCounter;
     private readonly ConcurrentDictionary<int, string> _childAdbPids = new();
 
-    /// <summary>
-    /// خاصية تفعيل الوضع المتوافق مع فلتر WinUSB / ADB.
-    /// عند تفعيلها، يتوقف المسح المتكرر للذاكرة عن العملية الأم المحمية (مرة واحدة فقط عند الإقلاع)
-    /// ويحوّل المسح إلى عمليات adb.exe الفرعية فقط لترك أوامر الأداة تمر عبر WinUSB بحرية.
-    /// </summary>
     public bool IsWinUsbOrChildAdbActive
     {
         get => _isWinUsbOrChildAdbActive;
         set => _isWinUsbOrChildAdbActive = value;
     }
 
-    /// <summary>
-    /// تسجيل عملية adb.exe فرعية لمسح ذاكرتها بدلاً من العملية الأم المحمية.
-    /// </summary>
     public void RegisterChildAdbProcess(int childPid, string processName)
     {
         _childAdbPids[childPid] = processName;
         _isWinUsbOrChildAdbActive = true;
     }
 
-    // === أفعال الشل الصريحة المسموح بها لفلترة سلاسل "<<" ===
     private static readonly string[] AllowedShellVerbs =
     {
         "cat ", "sh ", "su ", "echo ", "dd ", "chmod ", "mount ", "rm ", "cp ", "mv ", "pm ", "am ", "setprop ", "getprop "
@@ -82,60 +72,59 @@ public sealed class LiveHeapCommandHunter : IDisposable
     private const uint PAGE_READWRITE = 0x04;
     private const uint PAGE_EXECUTE_READWRITE = 0x40;
 
-    // قائمة استبعاد البادئات المقطوعة التي ظهرت في السجل السابق
     private static readonly HashSet<string> TruncatedAtPrefixes = new(StringComparer.OrdinalIgnoreCase)
     {
         "AT+CGM", "AT+CIM", "AT+CNM", "AT+CFU", "AT+CSC",
         "AT+CIMP", "AT+CHU", "AT+CMG", "AT+CPB", "AT+DEVCO"
     };
 
-    // 1. أوامر المودم الصريحة + ردود الهاتف
+    // 1. أوامر المودم الصريحة (AT+, AT*, AT^, AT%, AT$, AT#, ATE, ATI, ATZ) + ردود الهاتف + أوامر RIL IPC الهيكس
     private static readonly Regex StrictAtCommandRegex = new(
-        @"(?:\bAT\+[A-Z0-9_]{3,24}(?:=[0-9A-Za-z,""\-\.\?]{1,60}|\?)?|" +
+        @"(?:\bAT[\+\*\^\%\$\#][A-Z0-9_]{2,28}(?:=[0-9A-Za-z,""\-\.\?\/\:]{1,120}|\?)?|" +
+        @"\b(?:ATE0|ATE1|ATI|ATZ|AT&F|AT&W)\b|" +
         @"\+DEVCONINFO:\s*[^\r\n\x00]{4,220}|" +
-        @"\+(?:CGMI|CGMM|CGMR|CGSN|CIMI|CPIN|CNUM):\s*[^\r\n\x00]{2,120}|" +
-        @"\bAT\$(?:QCDMG|QCPWRDN)\b)",
+        @"\+(?:CGMI|CGMM|CGMR|CGSN|CIMI|CPIN|CNUM|CLCK|IMEITEST|IMEISIGN|MSLSECUR|AKSEEDNO|VERSNAME|RFBYCODE):\s*[^\r\n\x00]{2,140}|" +
+        @"\b(?:060100[0-9A-Fa-f]{6,64}|120[dD]00[0-9A-Fa-f]{10,128}|514200[0-9A-Fa-f]{4,64}|516400[0-9A-Fa-f]{6,64})\b)",
         RegexOptions.Compiled);
 
     // 2. أوامر وبروتوكولات MediaTek (BROM / Preloader / DA / XFlash / Partition Operations)
     private static readonly Regex MtkProtocolRegex = new(
-        @"(\b(?:MTK_DOWNLOAD_AGENT|MTK_BLOADER_INFO|MTK_AllInOne_DA|DA_PL_CRYPTO|Brom_[A-Za-z0-9_]{3,40}|DA_[A-Za-z0-9_]{3,40}|SLA_Challenge|Send_DA|Jump_DA|CMD_Download_DA|CMD_Read16|CMD_Write16|XFLASH_[A-Za-z0-9_]{3,40})\b|" +
-        @"\b(?:preloader_[a-zA-Z0-9_]{2,40}\.bin|MT[0-9]{4}_Android_scatter\.txt|auth_sv5\.auth)\b|" +
-        @"\b(?:erase|read|write|format)\s+(?:nvram|nvdata|proinfo|protect1|protect2|seccfg|lk|boot|recovery|userdata|frp|persistent)\b[^\r\n\x00]{0,60})",
+        @"(\b(?:MTK_DOWNLOAD_AGENT|MTK_BLOADER_INFO|MTK_AllInOne_DA|DA_PL_CRYPTO|Brom_[A-Za-z0-9_]{3,40}|DA_[A-Za-z0-9_]{3,40}|SLA_Challenge|DAA_Challenge|Send_DA|Jump_DA|CMD_Download_DA|CMD_Read16|CMD_Write16|CMD_Read32|CMD_Write32|CMD_GetHwCode|CMD_GetTargetConfig|XFLASH_[A-Za-z0-9_]{3,40}|EMMC_BOOT|UFS_BOOT|ERASE_FRP|UNLOCK_BL)\b|" +
+        @"\b(?:preloader_[a-zA-Z0-9_]{2,40}\.bin|MT[0-9]{4}_Android_scatter\.txt|auth_sv5\.auth|DA_SWSEC[A-Za-z0-9_\.]*\.bin)\b|" +
+        @"\b(?:erase|read|write|format|dump|flash|wipe)\s+(?:nvram|nvdata|proinfo|protect1|protect2|seccfg|lk|lk2|boot|para|misc|recovery|userdata|frp|persistent|md1img|super|vbmeta)\b[^\r\n\x00]{0,60})",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    // 3. ملفات البوت واللودر واستخراج الملفات (DA / Firehose / Programmer / Scatter / Archive Extraction)
-    // فلترة: يشترط وجود اسم ملف ينتهي بامتداد صريح مسبوق بنقطة لمنع التقاط كلمات tar أو 7z المجردة
+    // 3. ملفات البوت واللودر واستخراج الملفات
     private static readonly Regex BootLoaderAndFileOpsRegex = new(
         @"((?<![a-zA-Z0-9_])([a-zA-Z0-9_\-\./\\]{2,120}\.(?:tar|7z|bin|mbn|elf|img|pit|ops|ofp|pac|qcn))(?![a-zA-Z0-9_])|" +
         @"\b(?:prog_emmc_firehose|prog_ufs_firehose|rawprogram[0-9]|patch[0-9]|gpt_main[0-9]|gpt_backup[0-9])[A-Za-z0-9_\-\.]*\.(?:mbn|elf|xml|bin)\b|" +
         @"\b(?:unzip|lz4|simg2img|img2simg)\s+[^\r\n\x00]{3,100})",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    // 4. جميع أطوار ADB و Shell (Wire Protocol + Interactive $ / # + Heredoc << + Linux Commands)
+    // 4. جميع أطوار ADB و Shell (Wire Protocol + Interactive $ / # + Heredoc << + Linux Commands + /data/local/tmp/AT)
     private static readonly Regex DeepAdbAndShellRegex = new(
-        @"((?:shell|host|sync):[A-Za-z0-9_\-\s\.\/,\=\$\#\|\<\>\&\;""'\+]{2,160}|" +
-        @"(?:^|[\r\n])\s*(?:[\$\#]\s*)?(?:su\s+-c|getprop|setprop|pm\s+(?:uninstall|install|clear|grant|revoke|disable|disable-user|enable)|am\s+(?:start|broadcast|force-stop)|dd\s+if=|mount\s+-o|chmod\s+[0-7]{3,4}|chown\s+|rm\s+-rf|cat\s+|echo\s+-e|sh\s+|busybox\s+|toybox\s+)[^\r\n\x00]{2,160}|" +
+        @"((?:shell|host|sync|usb|reboot|remount|reverse|tcp|localabstract|abb|abb_exec):[A-Za-z0-9_\-\s\.\/,\=\$\#\|\<\>\&\;""'\+]{1,220}|" +
+        @"(?:^|[\r\n])\s*(?:[\$\#]\s*)?(?:su\s+-c|getprop|setprop|service\s+call|logcat\s+|dumpsys\s+|pm\s+(?:uninstall|install|clear|grant|revoke|disable|disable-user|enable|list|path)|am\s+(?:start|broadcast|force-stop|startservice)|dd\s+if=|mount\s+-o|chmod\s+[0-7]{3,4}|chown\s+|rm\s+-rf|cat\s+|echo\s+|sh\s+|busybox\s+|toybox\s+|/data/local/tmp/AT)[^\r\n\x00]{0,200}|" +
         @"[A-Za-z0-9_\-\.\/]+\s*<<-?\s*['""]?[A-Za-z0-9_]+['""]?[\s\S]{1,240}|" +
         @"(?:echo|cat)\s+[^\r\n\x00]{1,100}\s*>>?\s*\/(?:dev|data|sdcard|system|efs|vendor)\/[A-Za-z0-9_\-\.\/]+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    // 5. أوامر Fastboot و Qualcomm Firehose XML (غير جشعة Non-Greedy لفصل كل XML على حدة) و QMSL
+    // 5. أوامر Fastboot و Qualcomm Firehose XML و QMSL
     private static readonly Regex ExecutionCommandRegex = new(
-        @"(\b(?:adb|fastboot)\s+(?:shell|push|pull|install|reboot|flash|flashing|oem|getvar|erase|boot|devices|forward)\b[A-Za-z0-9_\-\s\.\/\:]{0,90}|" +
+        @"(\b(?:adb|fastboot)\s+(?:shell|push|pull|install|reboot|flash|flashing|oem|getvar|erase|boot|devices|forward)\b[A-Za-z0-9_\-\s\.\/\:]{0,120}|" +
         @"\bQLIB_[A-Za-z0-9_]{5,60}\b|" +
         @"<\?xml[\s\S]{10,350}?(?:</data>|</FUSMsg>)|" +
         @"<response\s+value=""(?:ACK|NAK)""[^>]{0,150}/>)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    // 6. المصيدة الاستدلالية للأساليب غير المتوقعة (أي تعامل مع مسارات داخل الهاتف /dev/ أو /data/local/tmp/ إلخ)
+    // 6. المصيدة الاستدلالية للمسارات داخل الهاتف
     private static readonly Regex HeuristicPhonePathRegex = new(
-        @"(\/(?:data\/local\/tmp|dev\/block\/bootdevice\/by-name|dev\/block\/platform|dev\/smd|dev\/ttyUSB|dev\/at_mdm|efs|nvdata|persist|sdcard\/Download)\/[A-Za-z0-9_\-\.\/]{1,80})",
+        @"(\/(?:data\/local\/tmp|dev\/block\/bootdevice\/by-name|dev\/block\/platform|dev\/smd|dev\/ttyUSB|dev\/ttyACM|dev\/at_mdm|dev\/umts_ipc|efs|nvdata|persist|sdcard\/Download)\/[A-Za-z0-9_\-\.\/]{1,80})",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     // 7. مسارات الأجهزة الفيزيائية المتصلة فعلياً ومنافذ COM
     private static readonly Regex ActiveDevicePathRegex = new(
-        @"(\\\\\?\\(?:usb|USB)#VID_[0-9A-Fa-f]{4}&PID_[0-9A-Fa-f]{4}#[^\s""\x00-\x1F\<\>]{4,110}|\\\\\.\\COM\d+\b)",
+        @"(\\\\\?\\(?:usb|USB)#VID_[0-9A-Fa-f]{4}&PID_[0-9A-Fa-f]{4}#[^\s""\x00-\x1F\<\>]{4,110}|\\\\\.\\COM\d+\b|\bCOM\d{1,3}\b)",
         RegexOptions.Compiled);
 
     public void StartHunting(int targetPid, string processName)
@@ -148,17 +137,9 @@ public sealed class LiveHeapCommandHunter : IDisposable
         {
             while (!token.IsCancellationRequested)
             {
-                // === الوضع المتوافق مع فلتر WinUSB / ADB ===
                 if (_isWinUsbOrChildAdbActive)
                 {
-                    // مسح العملية الأم المحمية مرة واحدة فقط عند الإقلاع
-                    if (!_initialParentScanDone)
-                    {
-                        ScanProcessHeapAndBuffers(targetPid, processName, token);
-                        _initialParentScanDone = true;
-                    }
-
-                    // مسح عمليات adb.exe الفرعية فقط بدلاً من العملية الأم
+                    // 1. مسح مستمر للعمليات الفرعية (adb.exe / fastboot.exe)
                     foreach (var kvp in _childAdbPids)
                     {
                         if (token.IsCancellationRequested) break;
@@ -172,24 +153,30 @@ public sealed class LiveHeapCommandHunter : IDisposable
                         }
                         catch
                         {
-                            // العملية الفرعية انتهت، إزالتها من القائمة
                             _childAdbPids.TryRemove(kvp.Key, out _);
                         }
+                    }
+
+                    // 2. الاستمرار بمسح العملية الأم كل دورة ثانية لالتقاط أوامر MTK والمودم والبورتات المباشرة دون إبطاء WinUSB
+                    _parentScanCycleCounter++;
+                    if (_parentScanCycleCounter % 2 == 1)
+                    {
+                        ScanProcessHeapAndBuffers(targetPid, processName, token);
                     }
                 }
                 else
                 {
-                    // الوضع العادي: مسح العملية الأم مباشرة
                     ScanProcessHeapAndBuffers(targetPid, processName, token);
                 }
 
-                await Task.Delay(900, token);
+                await Task.Delay(850, token);
             }
         }, token);
     }
 
     private void ScanProcessHeapAndBuffers(int pid, string processName, CancellationToken token)
     {
+        if (pid <= 0) return;
         IntPtr hProc = IntPtr.Zero;
         try
         {
@@ -236,7 +223,6 @@ public sealed class LiveHeapCommandHunter : IDisposable
         }
         finally
         {
-            // ضمان إغلاق مقبض العملية دائماً داخل بلوك finally
             if (hProc != IntPtr.Zero)
                 CloseHandle(hProc);
         }
@@ -244,10 +230,7 @@ public sealed class LiveHeapCommandHunter : IDisposable
 
     private void InspectBinaryAndTextBuffer(int pid, string processName, long memAddress, byte[] buffer, int length)
     {
-        // أ) فحص التواقيع الثنائية الخام لبروتوكول MediaTek (XFlash / BROM / DA) وبروتوكول ADB المباشر
         InspectRawBinarySignatures(pid, processName, memAddress, buffer, length);
-
-        // ب) فحص السلاسل النصية بترميزي ASCII و UTF-16
         ScanStringContent(pid, processName, memAddress, Encoding.ASCII.GetString(buffer, 0, length));
         ScanStringContent(pid, processName, memAddress, Encoding.Unicode.GetString(buffer, 0, length));
     }
@@ -277,15 +260,34 @@ public sealed class LiveHeapCommandHunter : IDisposable
                 }
             }
 
-            // 2. كشف حزمة ADB Wire Protocol المباشرة (CNXN / OPEN / WRTE) التي تمر عبر AdbWinApi.dll
+            // 2. كشف مصافحة MediaTek BROM الكاملة (A0 0A 50 05) متبوعة بأمر BROM (D0..DF أو C1..C7)
+            if (buf[i] == 0xA0 && buf[i + 1] == 0x0A && buf[i + 2] == 0x50 && buf[i + 3] == 0x05)
+            {
+                byte nextByte = i + 4 < len ? buf[i + 4] : (byte)0;
+                if (nextByte is >= 0xC1 and <= 0xDF or 0xA0 or 0x5F)
+                {
+                    int snapLen = Math.Min(16, len - i);
+                    string hex = Convert.ToHexString(buf.AsSpan(i, snapLen));
+                    EmitUnique(pid, processName, memAddress + i, SentinelStage.RawCommandExecution,
+                        "MTK BROM Handshake",
+                        $"مصافحة وأمر معالج MediaTek BROM المباشر [Sync: A0 0A 50 05, NextOp: 0x{nextByte:X2}]",
+                        hex, "MTK BROM Port", isAlreadyHex: true);
+                }
+            }
+
+            // 3. كشف حزمة ADB Wire Protocol المباشرة (CNXN / OPEN / WRTE) التي تمر عبر AdbWinApi.dll
             if ((buf[i] == 'O' && buf[i + 1] == 'P' && buf[i + 2] == 'E' && buf[i + 3] == 'N') ||
                 (buf[i] == 'W' && buf[i + 1] == 'R' && buf[i + 2] == 'T' && buf[i + 3] == 'E'))
             {
+                uint cmd = BitConverter.ToUInt32(buf, i);
                 int dataLen = BitConverter.ToInt32(buf, i + 12);
-                if (dataLen > 2 && dataLen <= 512 && i + 24 + dataLen <= len)
+                uint magic = BitConverter.ToUInt32(buf, i + 20);
+                // التحقق من صحة ترويسة ADB أو وجود حمولة منطقية
+                bool validMagic = (cmd ^ 0xFFFFFFFF) == magic || magic == 0;
+                if (validMagic && dataLen > 2 && dataLen <= 512 && i + 24 + dataLen <= len)
                 {
                     string adbPayload = CleanControlChars(Encoding.ASCII.GetString(buf, i + 24, dataLen), allowNewLines: true);
-                    if (adbPayload.Length >= 3)
+                    if (adbPayload.Length >= 3 && WinUsbFilterAdbBridge.IsCleanPrintableOrHexCommand(adbPayload))
                     {
                         string packetType = Encoding.ASCII.GetString(buf, i, 4);
                         EmitUnique(pid, processName, memAddress + i, SentinelStage.RawCommandExecution,
@@ -308,30 +310,23 @@ public sealed class LiveHeapCommandHunter : IDisposable
             else if (allowNewLines && (c == '\r' || c == '\n' || c == '\t'))
                 sb.Append(c);
             else
-                break; // قص محارف التحكم مثل \u0007OnClick فوراً
+                break;
         }
         return sb.ToString().Trim();
     }
 
-    /// <summary>
-    /// فلتر تنظيف الضوضاء: يتحقق من صلاحية السلسلة النصية المستخرجة من الرام.
-    /// يرفض السلاسل التي تحتوي على '?' أو محارف غير قابلة للطباعة أو سلاسل "<<" غير المبررة.
-    /// </summary>
     private static bool IsCleanRamString(string value)
     {
-        // 1. منع السلاسل التالفة: علامة استفهام أو محارف غير قابلة للطباعة
         foreach (char c in value)
         {
             if (c == '?') return false;
             if (c < 0x20 || c > 0x7E)
             {
-                // السماح بمحارف التحكم الأساسية فقط (CR/LF/TAB)
                 if (c != '\r' && c != '\n' && c != '\t')
                     return false;
             }
         }
 
-        // 2. فلترة علامة "<<": لا تقبلها إلا إذا بدأت بأحد أفعال الشل الصريحة
         if (value.Contains("<<"))
         {
             string trimmed = value.TrimStart();
@@ -352,18 +347,26 @@ public sealed class LiveHeapCommandHunter : IDisposable
 
     private void ScanStringContent(int pid, string processName, long memAddress, string text)
     {
-        // 1. أوامر المودم AT وردود الهاتف
+        // 1. أوامر المودم AT وردود الهاتف وأوامر RIL IPC الهيكس
         foreach (Match m in StrictAtCommandRegex.Matches(text))
         {
             string val = CleanControlChars(m.Value);
-            if (val.Length < 6 || TruncatedAtPrefixes.Contains(val)) continue;
-            if (val.Contains('?') && !val.EndsWith("=?")) continue;
+            if (val.Length < 2 || TruncatedAtPrefixes.Contains(val)) continue;
+            if (val.Contains('?') && !val.EndsWith("=?") && !val.EndsWith("?")) continue;
+
+            bool isRilHex = val.StartsWith("060100", StringComparison.OrdinalIgnoreCase) ||
+                            val.StartsWith("120D00", StringComparison.OrdinalIgnoreCase) ||
+                            val.StartsWith("514200", StringComparison.OrdinalIgnoreCase) ||
+                            val.StartsWith("516400", StringComparison.OrdinalIgnoreCase);
 
             bool isReply = val.StartsWith("+");
+            string cat = isRilHex ? "ADB RIL / AT IPC Command" : (isReply ? "Modem Phone Response" : "Modem AT Command");
+            string desc = isRilHex
+                ? $"أمر RIL/AT هيكس ممرر عبر أداة الهاتف: {val}"
+                : (isReply ? $"رد الهاتف الفعلي على أمر المودم: {val}" : $"أمر مودم صريح صادر من الأداة: {val}");
+
             EmitUnique(pid, processName, memAddress, SentinelStage.RawCommandExecution,
-                isReply ? "Modem Phone Response" : "Modem AT Command",
-                isReply ? $"رد الهاتف الفعلي على أمر المودم: {val}" : $"أمر مودم صريح صادر من الأداة: {val}",
-                val, "Active Modem Buffer");
+                cat, desc, val, isRilHex ? "/data/local/tmp/AT" : "Active Modem Buffer");
         }
 
         // 2. أوامر وبروتوكولات MediaTek (BROM / DA / Partition Commands)
@@ -379,7 +382,7 @@ public sealed class LiveHeapCommandHunter : IDisposable
                 val, "MTK Preloader / DA Engine");
         }
 
-        // 3. ملفات البوت واللودر واستخراج الملفات (DA, Firehose, Scatter, Auth, Extraction)
+        // 3. ملفات البوت واللودر واستخراج الملفات
         foreach (Match m in BootLoaderAndFileOpsRegex.Matches(text))
         {
             string val = CleanControlChars(m.Value);
@@ -397,7 +400,7 @@ public sealed class LiveHeapCommandHunter : IDisposable
         foreach (Match m in DeepAdbAndShellRegex.Matches(text))
         {
             string val = CleanControlChars(m.Value, allowNewLines: true);
-            if (val.Length < 5) continue;
+            if (val.Length < 4) continue;
             if (!IsCleanRamString(val)) continue;
 
             bool isHeredoc = val.Contains("<<") || val.Contains(">>");
@@ -407,7 +410,7 @@ public sealed class LiveHeapCommandHunter : IDisposable
                 val, "ADB / Shell Pipe");
         }
 
-        // 5. أوامر Fastboot و Firehose XML (منفصلة وغير مدمجة) و QMSL
+        // 5. أوامر Fastboot و Firehose XML و QMSL
         foreach (Match m in ExecutionCommandRegex.Matches(text))
         {
             bool isXml = m.Value.StartsWith("<", StringComparison.Ordinal);
@@ -424,7 +427,7 @@ public sealed class LiveHeapCommandHunter : IDisposable
                 category, $"أمر تنفيذي مكتشف في ذاكرة الأداة: {val}", val, "Command Execution Buffer");
         }
 
-        // 6. المصيدة الاستدلالية لمسارات الهاتف غير المتوقعة
+        // 6. المصيدة الاستدلالية لمسارات الهاتف
         foreach (Match m in HeuristicPhonePathRegex.Matches(text))
         {
             string val = CleanControlChars(m.Value);
@@ -441,9 +444,10 @@ public sealed class LiveHeapCommandHunter : IDisposable
         foreach (Match m in ActiveDevicePathRegex.Matches(text))
         {
             string val = CleanControlChars(m.Value);
-            if (val.Length < 7) continue;
+            if (val.Length < 4) continue;
 
-            bool isComPort = val.StartsWith(@"\\.\COM", StringComparison.OrdinalIgnoreCase);
+            bool isComPort = val.StartsWith(@"\\.\COM", StringComparison.OrdinalIgnoreCase) ||
+                             val.StartsWith("COM", StringComparison.OrdinalIgnoreCase);
             EmitUnique(pid, processName, memAddress,
                 isComPort ? SentinelStage.PortConfiguration : SentinelStage.PortAndDeviceRadar,
                 isComPort ? "Serial COM Port Target" : "Connected USB Device Path",
@@ -455,23 +459,25 @@ public sealed class LiveHeapCommandHunter : IDisposable
     private void EmitUnique(int pid, string processName, long memAddress, SentinelStage stage, string category, string desc, string rawValue, string targetRes, bool isAlreadyHex = false)
     {
         string key = $"{pid}:{category}:{rawValue}";
-        if (_seenPayloads.TryAdd(key, true))
+        DateTime now = DateTime.UtcNow;
+        if (_seenPayloads.TryGetValue(key, out var lastSeen) && (now - lastSeen).TotalSeconds < 3.0)
+            return;
+        _seenPayloads[key] = now;
+
+        byte[] rawBytes = Encoding.UTF8.GetBytes(rawValue);
+        OnCommandCaptured?.Invoke(new SourceTelemetryEvent
         {
-            byte[] rawBytes = Encoding.UTF8.GetBytes(rawValue);
-            OnCommandCaptured?.Invoke(new SourceTelemetryEvent
-            {
-                ProcessId = pid,
-                ThreadId = 0,
-                Stage = stage,
-                HookedApiName = "LiveRAM_UniversalInterceptor",
-                CallerModuleOrigin = $"{processName} [RAM @ 0x{memAddress:X8}]",
-                TargetResource = targetRes,
-                CommandCategory = category,
-                DecodedCommandText = desc,
-                RawPayloadHex = isAlreadyHex ? rawValue : Convert.ToHexString(rawBytes),
-                PayloadSize = rawBytes.Length
-            });
-        }
+            ProcessId = pid,
+            ThreadId = 0,
+            Stage = stage,
+            HookedApiName = "LiveRAM_UniversalInterceptor",
+            CallerModuleOrigin = $"{processName} [RAM @ 0x{memAddress:X8}]",
+            TargetResource = targetRes,
+            CommandCategory = category,
+            DecodedCommandText = desc,
+            RawPayloadHex = isAlreadyHex ? rawValue : Convert.ToHexString(rawBytes),
+            PayloadSize = rawBytes.Length
+        });
     }
 
     public void Dispose() => _cts?.Cancel();

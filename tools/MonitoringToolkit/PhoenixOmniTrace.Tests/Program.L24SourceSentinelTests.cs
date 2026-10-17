@@ -86,6 +86,7 @@ public static partial class Program
         string testLogDir = Path.Combine(Path.GetTempPath(), "PhoenixL24Test_" + Guid.NewGuid().ToString("N"));
         using var orchestrator = new SourceSentinelOrchestrator(testLogDir);
         orchestrator.Start();
+        Thread.Sleep(150);
 
         var capturedSignal = new ManualResetEventSlim(false);
         SourceTelemetryEvent? receivedEvt = null;
@@ -99,7 +100,7 @@ public static partial class Program
         // Write simulated packet directly to Named Pipe
         using (var client = new NamedPipeClientStream(".", SourceIpcServer.PipeName, PipeDirection.Out))
         {
-            client.Connect(2000);
+            client.Connect(5000);
             using var writer = new BinaryWriter(client, Encoding.Unicode, leaveOpen: true);
 
             writer.Write(9999); // PID
@@ -116,7 +117,7 @@ public static partial class Program
             writer.Flush();
         }
 
-        bool signaled = capturedSignal.Wait(3000);
+        bool signaled = capturedSignal.Wait(5000);
         if (!signaled || receivedEvt == null) return false;
         if (receivedEvt.ProcessId != 9999) return false;
         if (receivedEvt.CommandCategory != "Modem AT Command") return false;

@@ -1,11 +1,14 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
 using PhoenixGSM.MonitoringStudio.Models;
+using PhoenixGSM.OmniTrace.Commands;
 
 namespace PhoenixGSM.MonitoringStudio.ViewModels;
 
@@ -102,7 +105,6 @@ public partial class MainViewModel
         var ports = _engine.GetAvailableComPorts();
         if (ports.Length > 0)
         {
-            // Pick the best target port: prioritize modem descriptions
             string targetPort = ports[0];
             string targetDesc = _engine.GetPortDescription(targetPort) ?? "Serial Port";
             foreach (var p in ports)
@@ -227,6 +229,94 @@ public partial class MainViewModel
         }
     }
 
+    /// <summary>
+    /// Builds a structured, deduplicated list of (CommandType, PureCommand, PhoneResponse, Timestamp)
+    /// from a list of LiveEventItems.
+    /// Format guarantees:
+    /// 1. Command Type (e.g. ADB-SHELL, ADB-AT-RIL, MODEM-AT, MTK-BROM, ADB-PUSH)
+    /// 2. Pure Command starting cleanly at the beginning of the line
+    /// 3. Phone Response (paired immediately under the command if enabled or present)
+    /// </summary>
+    public static string BuildStructuredCommandsExportText(
+        IReadOnlyList<LiveEventItem> sourceEvents,
+        bool includeDeviceResponses,
+        out int exportedCommandsCount)
+    {
+        int count = 0;
+        var sb = new StringBuilder();
+
+        string? lastCommandText = null;
+        string? lastCommandType = null;
+        DateTime lastCommandTime = DateTime.MinValue;
+        var currentResponses = new List<string>();
+
+        void FlushPendingCommand()
+        {
+            if (string.IsNullOrWhiteSpace(lastCommandText)) return;
+
+            sb.AppendLine($"[{lastCommandType}]");
+            sb.AppendLine(lastCommandText);
+
+            if (includeDeviceResponses && currentResponses.Count > 0)
+            {
+                string combinedReply = string.Join(" | ", currentResponses.Distinct());
+                sb.AppendLine($"رد الهاتف: {combinedReply}");
+            }
+
+            sb.AppendLine(new string('-', 45));
+            count++;
+
+            lastCommandText = null;
+            lastCommandType = null;
+            currentResponses.Clear();
+        }
+
+        foreach (var ev in sourceEvents)
+        {
+            if (ev == null) continue;
+
+            // 1. Check if this event is a phone-directed command
+            string? pureCmd = ExtractPurePhoneCommand(ev);
+            if (!string.IsNullOrWhiteSpace(pureCmd))
+            {
+                string cmdType = PhoneCommandClassifier.ClassifyCommandTypeTag(
+                    ev.Command, ev.Protocol, ev.Category.ToString(), ev.Summary);
+
+                // Deduplicate identical consecutive commands emitted within 250ms (e.g. KernelDriver + OmniTraceBus)
+                if (lastCommandText != null &&
+                     string.Equals(lastCommandText, pureCmd, StringComparison.Ordinal) &&
+                    Math.Abs((ev.Timestamp - lastCommandTime).TotalMilliseconds) < 250)
+                {
+                    continue;
+                }
+
+                // Flush previous command along with any collected phone responses
+                FlushPendingCommand();
+
+                lastCommandType = cmdType;
+                lastCommandText = pureCmd;
+                lastCommandTime = ev.Timestamp;
+                continue;
+            }
+
+            // 2. Check if this event is a phone response (attached to the current command)
+            if (includeDeviceResponses && lastCommandText != null)
+            {
+                string? pureResp = ExtractPurePhoneResponse(ev);
+                if (!string.IsNullOrWhiteSpace(pureResp))
+                {
+                    currentResponses.Add(pureResp);
+                }
+            }
+        }
+
+        // Flush final command
+        FlushPendingCommand();
+
+        exportedCommandsCount = count;
+        return sb.ToString();
+    }
+
     private void ExportLogs()
     {
         var visibleEvents = FilteredEvents.Cast<LiveEventItem>().ToList();
@@ -244,8 +334,8 @@ public partial class MainViewModel
         {
             var phoneChoice = MessageBox.Show(
                 "أنت حالياً في تبويب أوامر الهاتف (Phone Cmds).\n\n" +
-                "- اختر 'Yes' لتصدير الأوامر المرسلة للهاتف فقط (أوامر صافية بدون أي مخرجات أخرى).\n" +
-                "- اختر 'No' لتصدير السجل المفصل بكامل تفاصيله التقنية (Detailed Report).\n" +
+                "- اختر 'Yes' لتصدير الأوامر المنظمة (نوع الأمر + الأمر من بداية السطر + رد الهاتف إن كان مفعلاً).\n" +
+                "- اختر 'No' لتصدير السجل الكامل بملف JSON.\n" +
                 "- اختر 'Cancel' للإلغاء.",
                 "خيارات تصدير أوامر الهاتف",
                 MessageBoxButton.YesNoCancel,
@@ -270,8 +360,8 @@ public partial class MainViewModel
             : "";
 
         var resType = MessageBox.Show(
-            $"هل تريد تصدير الأوامر فقط (ملف نصي TXT) أم السجلات الكاملة (ملف JSON)؟{exclusionMsg}\n\n- اختر 'Yes' لتصدير الأوامر فقط (ملف نصي خفيف).\n- اختر 'No' لتصدير السجلات كاملة (ملف JSON مفصل).\n- اختر 'Cancel' للإلغاء.",
-            "خيارات التصدير (مع تطبيق المستثنيات)",
+            $"هل تريد تصدير الأوامر المنظمة (ملف نصي TXT) أم السجلات الكاملة (ملف JSON)؟{exclusionMsg}\n\n- اختر 'Yes' لتصدير الأوامر بشكل منظم (نوع الأمر -> الأمر من بداية السطر -> رد الهاتف).\n- اختر 'No' لتصدير السجلات كاملة (ملف JSON مفصل).\n- اختر 'Cancel' للإلغاء.",
+            "خيارات التصدير المنظم",
             MessageBoxButton.YesNoCancel,
             MessageBoxImage.Question);
 
@@ -289,43 +379,23 @@ public partial class MainViewModel
         if (resType == MessageBoxResult.Yes)
         {
             filePath = Path.Combine(reportDir, $"commands_export_{timeStr}.txt");
+            bool includeReplies = IsCaptureDeviceResponsesEnabled ||
+                                  visibleEvents.Any(IsPhoneDeviceResponse);
+
+            string structuredBody = BuildStructuredCommandsExportText(
+                visibleEvents,
+                includeDeviceResponses: includeReplies,
+                out int exportedCmdCount);
+
             var sb = new StringBuilder();
-            if (SelectedCategory == EventSourceCategory.PhoneCommands)
-            {
-                sb.AppendLine("=== سجل أوامر الهاتف المباشرة (Pure Phone Commands Pipeline - Host ➔ Device) ===");
-            }
-            else
-            {
-                sb.AppendLine("=== سجل الأوامر المصفى (Commands Log - Excluded Filters Applied) ===");
-            }
+            sb.AppendLine("=== سجل الأوامر المنظم (Structured Phone Commands Log) ===");
             sb.AppendLine($"تاريخ التصدير: {DateTime.Now}");
-            sb.AppendLine($"إجمالي السجلات المسجلة: {totalCount}");
-            sb.AppendLine($"عدد السجلات المصدرة: {visibleEvents.Count}");
-            if (excludedCount > 0)
-            {
-                sb.AppendLine($"عدد السجلات المستثناة والمستبعدة: {excludedCount}");
-            }
+            sb.AppendLine($"إجمالي الأوامر الصافية المصدرة: {exportedCmdCount}");
+            sb.AppendLine($"حالة تضمين رد الهاتف: {(includeReplies ? "مفعّل (ON)" : "معطّل (OFF)")}");
             sb.AppendLine(new string('=', 60));
             sb.AppendLine();
+            sb.Append(structuredBody);
 
-            foreach (var ev in visibleEvents)
-            {
-                if (!string.IsNullOrWhiteSpace(ev.Command) || !string.IsNullOrWhiteSpace(ev.Summary))
-                {
-                    sb.AppendLine($"[{ev.TimeFormatted}] {ev.Protocol} | Command: {ev.Command}");
-                    
-                    if (!string.IsNullOrWhiteSpace(ev.Summary))
-                        sb.AppendLine($"Summary: {ev.Summary}");
-                        
-                    if (!string.IsNullOrWhiteSpace(ev.PayloadAscii) && ev.PayloadAscii.Trim() != ev.Command.Trim())
-                    {
-                        var inlinePayload = ev.PayloadAscii.Replace("\r\n", " | ").Replace("\n", " | ");
-                        sb.AppendLine($"Payload: {inlinePayload}");
-                    }
-                    
-                    sb.AppendLine(new string('-', 35));
-                }
-            }
             File.WriteAllText(filePath, sb.ToString(), Encoding.UTF8);
         }
         else
@@ -335,9 +405,7 @@ public partial class MainViewModel
             File.WriteAllText(filePath, json, Encoding.UTF8);
         }
 
-        string exportSummary = excludedCount > 0
-            ? $"تم تصدير {visibleEvents.Count} سجلاً بنجاح (مع استثناء {excludedCount} سجلاً مخفياً) إلى:\n{filePath}\n\nهل تريد فتح الملف الآن؟"
-            : $"تم تصدير {visibleEvents.Count} سجلاً بنجاح إلى:\n{filePath}\n\nهل تريد فتح الملف الآن؟";
+        string exportSummary = $"تم تصدير السجلات بشكل منظم بنجاح إلى:\n{filePath}\n\nهل تريد فتح الملف الآن؟";
 
         var res = MessageBox.Show(
             exportSummary,
@@ -356,57 +424,45 @@ public partial class MainViewModel
     }
 
     /// <summary>
-    /// Exports 100% pure clean commands directed to the mobile phone.
-    /// Free of timestamps, summaries, delimiters, or non-phone noise.
-    /// Also copies the complete pure commands list to Windows Clipboard for instant paste.
+    /// Exports organized phone commands (Command Type -> Command from start of line -> Phone Response if enabled).
+    /// Also copies the organized output to Windows Clipboard for instant paste.
     /// </summary>
     public void ExportPurePhoneCommandsOnly()
     {
-        var pureCommands = new List<string>();
+        string structuredContent = BuildStructuredCommandsExportText(
+            Events.ToList(),
+            includeDeviceResponses: IsCaptureDeviceResponsesEnabled,
+            out int cmdCount);
 
-        // Collect pure clean phone commands across all recorded events
-        foreach (var ev in Events)
-        {
-            string? cleanCmd = ExtractPurePhoneCommand(ev);
-            if (!string.IsNullOrWhiteSpace(cleanCmd))
-            {
-                pureCommands.Add(cleanCmd);
-            }
-        }
-
-        if (pureCommands.Count == 0)
+        if (cmdCount == 0)
         {
             MessageBox.Show(
                 "لم يتم التقاط أي أوامر موجهة للهاتف حتى الآن في الجلسة الحالية.\nتأكد من توصيل الهاتف وبدء العملية في الأداة.",
-                "تصدير أوامر الهاتف الصافية",
+                "تصدير أوامر الهاتف المنظمة",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
             return;
         }
 
-        // Pure clean commands: one command per line, zero headers, zero timestamps, zero noise
-        string content = string.Join(Environment.NewLine, pureCommands);
-
-        // Copy directly to Windows Clipboard for instant paste (Ctrl+V)
         try
         {
-            Clipboard.SetText(content);
+            Clipboard.SetText(structuredContent);
         }
         catch { }
 
         string timeStr = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        string filePath = Path.Combine(desktopPath, $"phone_commands_pure_{timeStr}.txt");
+        string filePath = Path.Combine(desktopPath, $"phone_commands_structured_{timeStr}.txt");
 
         try
         {
-            File.WriteAllText(filePath, content, Encoding.UTF8);
+            File.WriteAllText(filePath, structuredContent, Encoding.UTF8);
 
             var reportDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "PhoenixGSM", "Reports");
             Directory.CreateDirectory(reportDir);
-            File.WriteAllText(Path.Combine(reportDir, $"phone_commands_pure_{timeStr}.txt"), content, Encoding.UTF8);
+            File.WriteAllText(Path.Combine(reportDir, $"phone_commands_structured_{timeStr}.txt"), structuredContent, Encoding.UTF8);
         }
         catch (Exception ex)
         {
@@ -415,11 +471,11 @@ public partial class MainViewModel
         }
 
         var res = MessageBox.Show(
-            $"✅ تم استخراج وتصدير {pureCommands.Count} أمراً صافياً موجهاً للهاتف بنجاح وبدون أي مخرجات أخرى!\n\n" +
+            $"✅ تم استخراج وتصدير {cmdCount} أمراً منظماً موجهاً للهاتف بنجاح!\n\n" +
             $"📁 مسار الملف: {filePath}\n" +
-            $"📋 تم نسخ جميع الأوامر تلقائياً إلى الحافظة (Clipboard) للتمكن من لصقها مباشرة (Ctrl+V).\n\n" +
+            $"📋 تم نسخ جميع الأوامر تلقائياً إلى الحافظة (Clipboard).\n\n" +
             $"هل تريد فتح ملف الأوامر الآن؟",
-            "اكتمل تصدير أوامر الهاتف الصافية",
+            "اكتمل تصدير أوامر الهاتف المنظمة",
             MessageBoxButton.YesNo,
             MessageBoxImage.Information);
 

@@ -15,6 +15,15 @@ namespace PhoenixOmniTrace.L24_SourceSentinel.Core;
 
 public sealed class SourceSentinelOrchestrator : IDisposable
 {
+    private static readonly string[] KnownGsmToolNames =
+    [
+        "unlocktool", "chimera", "miracle", "dftpro", "pandora", "z3x", "octoplus",
+        "samfw", "odin", "3utools", "miflash", "qfil", "spflash", "flashtool", "umt",
+        "hydra", "easyjtag", "cheetah", "tft", "sigmakey", "dc-unlocker", "cm2",
+        "medusa", "ufi", "mrt", "trtools", "qcfire", "globalunlocker", "nck",
+        "key-tool", "keytool", "qunlock", "q-unlock", "cdma"
+    ];
+
     private readonly SourceIpcServer _ipcServer = new();
     private readonly RamAndModuleWatcher _ramWatcher = new();
     private readonly PortAndFileRadar _radar = new();
@@ -27,8 +36,10 @@ public sealed class SourceSentinelOrchestrator : IDisposable
 
     private readonly ConcurrentQueue<SourceTelemetryEvent> _sessionEvents = new();
     private readonly BlockingCollection<SourceTelemetryEvent> _diskLogQueue = new(new ConcurrentQueue<SourceTelemetryEvent>());
+    private readonly ConcurrentDictionary<int, string> _autoAttachedPids = new();
     private readonly CancellationTokenSource _cts = new();
     private Task? _diskLoggerTask;
+    private Task? _autoDiscoveryTask;
     private bool _isDisposed;
 
     private readonly string _logDirectory;
@@ -68,26 +79,27 @@ public sealed class SourceSentinelOrchestrator : IDisposable
         _portPoller.OnPortActivityDetected += HandleIncomingEvent;
         _kernelInterceptor.OnKernelActivityDetected += HandleIncomingEvent;
 
-        // ربط رصد WinUSB / adb.exe بوضع LiveHeapCommandHunter الهادئ
+        // ربط رصد WinUSB / adb.exe بوضع LiveHeapCommandHunter المتوازن
         _kernelInterceptor.OnChildAdbOrWinUsbDetected += (childPid, procName) =>
         {
             _heapHunter.IsWinUsbOrChildAdbActive = true;
-            if (string.Equals(procName, "adb.exe", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(procName, "adb.exe", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(procName, "fastboot.exe", StringComparison.OrdinalIgnoreCase))
             {
                 _heapHunter.RegisterChildAdbProcess(childPid, procName);
             }
-            OnLogMessage?.Invoke($"[L24 SourceSentinel] تفعيل الوضع الهادئ المتوافق مع WinUSB/ADB (الهدف: {procName}, PID: {childPid})");
+            OnLogMessage?.Invoke($"[L24 SourceSentinel] تفعيل المسح المزدوج المتوافق مع WinUSB/ADB/MTK (الهدف: {procName}, PID: {childPid})");
         };
 
         _ramWatcher.OnExternalModuleDiscovered += (pid, procName, dllPath) =>
         {
-            // رصد مكتبات WinUSB / AdbWinUsbApi المحملة في ذاكرة الأداة
             string fileName = Path.GetFileName(dllPath);
             if (fileName.Contains("winusb", StringComparison.OrdinalIgnoreCase) ||
-                fileName.Contains("adbwinusb", StringComparison.OrdinalIgnoreCase))
+                fileName.Contains("adbwinusb", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Contains("libusb", StringComparison.OrdinalIgnoreCase))
             {
                 _heapHunter.IsWinUsbOrChildAdbActive = true;
-                OnLogMessage?.Invoke($"[L24 SourceSentinel] رصد مكتبة {fileName} - تم تحويل Hunter إلى الوضع الهادئ المتوافق مع WinUSB");
+                OnLogMessage?.Invoke($"[L24 SourceSentinel] رصد مكتبة {fileName} - تفعيل المسح المزدوج المتوافق مع WinUSB/libusb");
             }
 
             _dllAuditor.AuditLoadedModule(pid, procName, dllPath);
@@ -96,12 +108,10 @@ public sealed class SourceSentinelOrchestrator : IDisposable
 
     private static string ResolveDefaultLogDirectory()
     {
-        // 1. مجلد المشروع المحلي إن وجد
         string localProjLogs = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs", "L24_SourceSentinel");
         if (Directory.Exists(Path.GetDirectoryName(localProjLogs)))
             return localProjLogs;
 
-        // 2. مجلد العمل الحالي
         string cwdLogs = Path.Combine(Directory.GetCurrentDirectory(), "Logs", "L24_SourceSentinel");
         return cwdLogs;
     }
@@ -114,9 +124,47 @@ public sealed class SourceSentinelOrchestrator : IDisposable
         ForensicNoiseGate.ResetSessionDeduplication();
         _ipcServer.Start();
         _radar.StartMonitoring();
+        // بدء مراقبة المنافذ التسلسلية والبورتات فوراً حتى قبل ربط أداة محددة
+        _portPoller.StartPolling(0, "SystemWidePortMonitor");
         _diskLoggerTask = Task.Run(DiskLoggerLoop);
+        _autoDiscoveryTask = Task.Run(() => AutoDiscoverGsmToolsLoop(_cts.Token));
 
-        OnLogMessage?.Invoke($"[L24 SourceSentinel] تم تشغيل خادم الاعتراض فائق السرعة عبر الأنبوب: {SourceIpcServer.PipeName}");
+        OnLogMessage?.Invoke($"[L24 SourceSentinel] تم تشغيل خادم الاعتراض الشامل (MTK / Modem / ADB / Ports) عبر الأنبوب: {SourceIpcServer.PipeName}");
+    }
+
+    private async Task AutoDiscoverGsmToolsLoop(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested && !_isDisposed)
+        {
+            try
+            {
+                var procs = Process.GetProcesses();
+                foreach (var p in procs)
+                {
+                    try
+                    {
+                        string nameLower = p.ProcessName.ToLowerInvariant();
+                        if (KnownGsmToolNames.Any(k => nameLower.Contains(k)) && !_autoAttachedPids.ContainsKey(p.Id))
+                        {
+                            _autoAttachedPids[p.Id] = p.ProcessName;
+                            AttachToRunningProcess(p.Id);
+                        }
+                    }
+                    catch { }
+                    finally
+                    {
+                        p.Dispose();
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                await Task.Delay(2000, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { break; }
+        }
     }
 
     private void HandleIncomingEvent(SourceTelemetryEvent evt)
@@ -162,21 +210,18 @@ public sealed class SourceSentinelOrchestrator : IDisposable
             var proc = Process.Start(startInfo);
             if (proc != null)
             {
+                _autoAttachedPids[proc.Id] = proc.ProcessName;
                 OnLogMessage?.Invoke($"[L24 SourceSentinel] تم تشغيل الأداة بنجاح (PID: {proc.Id}) - جاري تفعيل المراقبة من المصدر");
                 
-                // ربط رادار الملفات بالعملية الحالية
                 _radar.CurrentMonitoredPid = proc.Id;
                 _radar.CurrentMonitoredProcessName = proc.ProcessName;
 
-                // تشغيل صياد الذاكرة الحية ورادار منافذ السيريال والـ USB واعتراض الكيرنل
                 _heapHunter.StartHunting(proc.Id, proc.ProcessName);
                 _portPoller.StartPolling(proc.Id, proc.ProcessName);
                 _kernelInterceptor.StartMonitoring(proc.Id, proc.ProcessName);
 
-                // مسح أولي للمكتبات المحملة بالرام
                 _ramWatcher.ScanProcessModulesAndMemory(proc.Id, _logDirectory);
 
-                // بدء فحص دوري للمكتبات الجديدة المفكوكة
                 Task.Run(async () =>
                 {
                     while (!proc.HasExited && !_cts.IsCancellationRequested && !_isDisposed)
@@ -204,13 +249,12 @@ public sealed class SourceSentinelOrchestrator : IDisposable
             using var proc = Process.GetProcessById(processId);
             Start();
 
+            _autoAttachedPids[processId] = proc.ProcessName;
             OnLogMessage?.Invoke($"[L24 SourceSentinel] تم الارتباط بالعملية {proc.ProcessName} (PID: {processId}) بنجاح");
             
-            // ربط رادار الملفات بالعملية الحالية
             _radar.CurrentMonitoredPid = proc.Id;
             _radar.CurrentMonitoredProcessName = proc.ProcessName;
 
-            // تشغيل صياد الذاكرة الحية ورادار منافذ السيريال والـ USB واعتراض الكيرنل
             _heapHunter.StartHunting(proc.Id, proc.ProcessName);
             _portPoller.StartPolling(proc.Id, proc.ProcessName);
             _kernelInterceptor.StartMonitoring(proc.Id, proc.ProcessName);
@@ -291,7 +335,7 @@ public sealed class SourceSentinelOrchestrator : IDisposable
     public void AttachToOmniTraceEventBus(PhoenixGSM.OmniTrace.Bus.OmniTraceEventBus bus)
     {
         _adbBridge.Attach(bus);
-        OnLogMessage?.Invoke("[L24 SourceSentinel] تم ربط ناقل OmniTraceEventBus بنجاح لاستقبال وتوجيه أوامر ADB التفاعلية إلى السجل");
+        OnLogMessage?.Invoke("[L24 SourceSentinel] تم ربط ناقل OmniTraceEventBus بنجاح لاستقبال كافة أوامر MTK والمودم والبورتات و ADB التفاعلية");
     }
 
     public void Dispose()

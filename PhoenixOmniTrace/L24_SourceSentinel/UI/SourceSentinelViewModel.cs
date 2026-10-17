@@ -169,6 +169,11 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
         _orchestrator.Start();
     }
 
+    public void AttachToOmniTraceBus(PhoenixGSM.OmniTrace.Bus.OmniTraceEventBus bus)
+    {
+        _orchestrator.AttachToOmniTraceEventBus(bus);
+    }
+
     private void OnEventCaptured(SourceTelemetryEvent evt)
     {
         Application.Current?.Dispatcher.InvokeAsync(() =>
@@ -242,13 +247,16 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
         {
             bool isModemUsb = item.CommandCategory.Contains("AT", StringComparison.OrdinalIgnoreCase)
                            || item.CommandCategory.Contains("MTK", StringComparison.OrdinalIgnoreCase)
+                           || item.CommandCategory.Contains("MediaTek", StringComparison.OrdinalIgnoreCase)
                            || item.CommandCategory.Contains("BROM", StringComparison.OrdinalIgnoreCase)
                            || item.CommandCategory.Contains("Sahara", StringComparison.OrdinalIgnoreCase)
                            || item.CommandCategory.Contains("Firehose", StringComparison.OrdinalIgnoreCase)
                            || item.CommandCategory.Contains("Odin", StringComparison.OrdinalIgnoreCase)
                            || item.CommandCategory.Contains("BSL", StringComparison.OrdinalIgnoreCase)
+                           || item.CommandCategory.Contains("DIAG", StringComparison.OrdinalIgnoreCase)
+                           || item.CommandCategory.Contains("Modem", StringComparison.OrdinalIgnoreCase)
                            || item.CommandCategory.Contains("BaudRate", StringComparison.OrdinalIgnoreCase)
-                           || item.CommandCategory.Contains("Port Config", StringComparison.OrdinalIgnoreCase);
+                           || item.CommandCategory.Contains("Port", StringComparison.OrdinalIgnoreCase);
             if (!isModemUsb) return false;
         }
         else if (StageFilterMode == "Radar")
@@ -265,6 +273,8 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
         {
             bool isPipeOrShell = item.CommandCategory.Contains("Pipe", StringComparison.OrdinalIgnoreCase)
                               || item.CommandCategory.Contains("Shell", StringComparison.OrdinalIgnoreCase)
+                              || item.CommandCategory.Contains("ADB", StringComparison.OrdinalIgnoreCase)
+                              || item.CommandCategory.Contains("RIL", StringComparison.OrdinalIgnoreCase)
                               || item.TargetResource.Contains("pipe", StringComparison.OrdinalIgnoreCase);
             if (!isPipeOrShell) return false;
         }
@@ -394,8 +404,36 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
     private void ExecuteExportLogs()
     {
         _orchestrator.FlushAndExportSessionSnapshot();
-        StatusMessage = $"تم حفظ وتصدير الجلسة إلى: {_orchestrator.SessionLogPath}";
-        MessageBox.Show($"تم حفظ سجلات الجلسة بنجاح في:\n{_orchestrator.SessionLogPath}", "تصدير السجلات L24", MessageBoxButton.OK, MessageBoxImage.Information);
+
+        // تصدير ملف نصي منظم للأوامر بجانب ملف الـ JSON
+        try
+        {
+            string txtPath = Path.ChangeExtension(_orchestrator.SessionLogPath, ".txt");
+            var sb = new StringBuilder();
+            sb.AppendLine("=== سجل أوامر طبقة L24 SourceSentinel المنظم ===");
+            sb.AppendLine($"تاريخ التصدير: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            sb.AppendLine(new string('=', 60));
+            sb.AppendLine();
+
+            foreach (var ev in FilteredEvents.Cast<SourceTelemetryEvent>())
+            {
+                sb.AppendLine($"[{ev.CommandCategory}] ({ev.TimeFormatted})");
+                sb.AppendLine(ev.DecodedCommandText);
+                if (!string.IsNullOrWhiteSpace(ev.TargetResource) && ev.TargetResource != "N/A")
+                {
+                    sb.AppendLine($"الهدف/البورت: {ev.TargetResource}");
+                }
+                sb.AppendLine(new string('-', 40));
+            }
+            File.WriteAllText(txtPath, sb.ToString(), Encoding.UTF8);
+            StatusMessage = $"تم حفظ وتصدير الجلسة إلى: {txtPath}";
+            MessageBox.Show($"تم حفظ سجلات الجلسة بنجاح في:\n{txtPath}\n{_orchestrator.SessionLogPath}", "تصدير السجلات L24", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch
+        {
+            StatusMessage = $"تم حفظ وتصدير الجلسة إلى: {_orchestrator.SessionLogPath}";
+            MessageBox.Show($"تم حفظ سجلات الجلسة بنجاح في:\n{_orchestrator.SessionLogPath}", "تصدير السجلات L24", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
     }
 
     private void ExecuteOpenLogsFolder()

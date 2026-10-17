@@ -53,5 +53,6 @@ public sealed class SourceTelemetryEvent
     };
 
     public string FormattedTimestamp => Timestamp.ToLocalTime().ToString("HH:mm:ss.fff");
+    public string TimeFormatted => FormattedTimestamp;
     public string ProcessThreadInfo => $"{ProcessId}:{ThreadId}";
 }

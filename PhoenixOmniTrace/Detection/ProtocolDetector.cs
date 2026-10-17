@@ -413,9 +413,20 @@ public sealed class ProtocolDetector
 
     private static double EvaluateQualcommDiag(ReadOnlySpan<byte> buf)
     {
-        if (buf.Length < 3) return 0.0;
+        if (buf.Length < 3 || buf.Length > 4096) return 0.0;
 
-        // Framing 0x7E at boundaries
+        // Framing 0x7E at boundaries:
+        // If buffer is larger than 64 bytes, it MUST start AND end with 0x7E to prevent
+        // uploaded files (e.g. ADB push payloads) from being misclassified as QualcommDiag frames.
+        if (buf.Length > 64)
+        {
+            if (buf[0] == 0x7E && buf[^1] == 0x7E)
+            {
+                return 0.90;
+            }
+            return 0.0;
+        }
+
         if (buf[0] == 0x7E && buf[^1] == 0x7E)
         {
             return 0.90;

@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading;
-using System.Collections.Concurrent;
 
 namespace PhoenixGSM.OmniTrace.Commands;
 
@@ -33,7 +32,7 @@ public class AndroidInteractiveCommandInfo : EventArgs
 
 /// <summary>
 /// Intercepts shell scripts and interactive RIL/AT commands sent via ADB / smart sockets.
-/// يعترض نصوص شل وأوامر RIL التفاعلية المرسلة عبر ADB دون إسقاط أي بايت
+/// يعترض نصوص شل وأوامر RIL التفاعلية المرسلة عبر ADB دون إسقاط أي بايت مع استبعاد حزم الملفات الثنائية
 /// </summary>
 public class AndroidShellStdinInterceptor : IDisposable
 {
@@ -46,7 +45,6 @@ public class AndroidShellStdinInterceptor : IDisposable
     public bool IsInteractiveModeActive => !string.IsNullOrEmpty(_activeInteractiveTool);
     public string ActiveInteractiveTool => _activeInteractiveTool;
 
-    // Events emitted when a script or interactive command is captured
     public event EventHandler<AndroidScriptInfo>? OnAndroidShellScriptCaptured;
     public event EventHandler<AndroidInteractiveCommandInfo>? OnInteractiveCommandCaptured;
 
@@ -82,7 +80,7 @@ public class AndroidShellStdinInterceptor : IDisposable
 
     /// <summary>
     /// Intercepts an interactive packet sent to or received from the shell/tool.
-    /// Never drops any byte, handling both short and long commands.
+    /// Rejects binary ELF sync chunks while capturing all genuine commands and RIL IPC hex strings.
     /// </summary>
     public bool InterceptInteractivePacket(
         ReadOnlySpan<byte> data,
@@ -99,18 +97,28 @@ public class AndroidShellStdinInterceptor : IDisposable
         string clean = Encoding.UTF8.GetString(rawBytes).Trim('\r', '\n', '\0', ' ');
         string cleanTrimmed = clean.Trim();
 
-        bool isLongHex = cleanTrimmed.Length >= 16 && cleanTrimmed.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
+        if (PhoneCommandClassifier.IsCorruptedBinaryOrSyncNoise(cleanTrimmed))
+        {
+            return false;
+        }
+
+        bool isLongHex = cleanTrimmed.Length >= 12 &&
+                         cleanTrimmed.Length % 2 == 0 &&
+                         cleanTrimmed.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
 
         bool isRilIpc = isLongHex ||
+                        cleanTrimmed.StartsWith("060100", StringComparison.OrdinalIgnoreCase) ||
+                        cleanTrimmed.StartsWith("120D00", StringComparison.OrdinalIgnoreCase) ||
+                        cleanTrimmed.StartsWith("514200", StringComparison.OrdinalIgnoreCase) ||
+                        cleanTrimmed.StartsWith("516400", StringComparison.OrdinalIgnoreCase) ||
                         cleanTrimmed.StartsWith("116300", StringComparison.OrdinalIgnoreCase) ||
                         cleanTrimmed.StartsWith("06090004", StringComparison.OrdinalIgnoreCase) ||
                         cleanTrimmed.StartsWith("07170004", StringComparison.OrdinalIgnoreCase) ||
                         cleanTrimmed.StartsWith("3E257A2C", StringComparison.OrdinalIgnoreCase) ||
                         cleanTrimmed.StartsWith("AF6DBB85", StringComparison.OrdinalIgnoreCase) ||
                         cleanTrimmed.StartsWith("62E83911", StringComparison.OrdinalIgnoreCase) ||
-                        cleanTrimmed.StartsWith("d8d8d8", StringComparison.OrdinalIgnoreCase) ||
                         cleanTrimmed.StartsWith("<<", StringComparison.Ordinal) ||
-                        (rawBytes.Length >= 2 && rawBytes[0] == 0x11 && rawBytes[1] == 0x63);
+                        (rawBytes.Length >= 2 && rawBytes.Length <= 64 && rawBytes[0] == 0x11 && rawBytes[1] == 0x63);
 
         protocolTag = isRilIpc ? "ADB-RIL-IPC" : "ADB-INTERACTIVE-CMD";
         commandText = cleanTrimmed.Length > 0 ? cleanTrimmed : $"[{protocolTag}] ({rawBytes.Length}B): {Convert.ToHexString(rawBytes)}";
@@ -128,9 +136,6 @@ public class AndroidShellStdinInterceptor : IDisposable
         return true;
     }
 
-    /// <summary>
-    /// Injects captured ADB stdin bytes into the interceptor buffer.
-    /// </summary>
     public void InjectAdbStdin(byte[] data)
     {
         if (!_isRunning || data == null || data.Length == 0) return;
@@ -144,6 +149,11 @@ public class AndroidShellStdinInterceptor : IDisposable
             }
 
             string content = Encoding.UTF8.GetString(data);
+            if (PhoneCommandClassifier.IsCorruptedBinaryOrSyncNoise(content))
+            {
+                return;
+            }
+
             lock (_bufferLock)
             {
                 _scriptBuffer.Append(content);
