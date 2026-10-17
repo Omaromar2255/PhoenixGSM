@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -15,9 +17,23 @@ public partial class MonitoringEngine
     private static int _activeTransferChunkCount = 0;
     private static DateTime _activeTransferStartTime = DateTime.UtcNow;
 
-    // Requirement 1: Stateful Channel Tracking
+    // Requirement 1 & 4: Stateful Channel & Artifact Tracking
     private bool _isInsideFileSyncTransfer = false;
     private string _activeInteractiveShellCommand = string.Empty;
+    private string _activeSocketBridgeChannel = string.Empty;
+
+    private static readonly object _transferLock = new();
+    private static readonly MemoryStream _activeUploadStream = new();
+    private static string _activeUploadFilePath = string.Empty;
+    private static string _activeUploadFileMode = string.Empty;
+
+    private readonly PhoenixGSM.OmniTrace.BinaryAnalysis.ElfBinaryInspector _elfInspector = new();
+    private readonly PhoenixGSM.OmniTrace.BinaryAnalysis.ApkManifestInspector _apkInspector = new();
+    private readonly PhoenixGSM.OmniTrace.AdvancedExploits.PrivilegeBridgeDetector _bridgeDetector = new();
+
+    private readonly PhoenixGSM.OmniTrace.Decoders.AdbGetpropAggregator _getpropAggregator = new();
+    private bool _isAggregatingGetprop = false;
+    private DateTime _lastGetpropChunkTime = DateTime.UtcNow;
 
     #region USB Driver Capture Loop
     private async Task DriverCaptureLoop(CancellationToken token)
@@ -94,6 +110,17 @@ public partial class MonitoringEngine
                         _isInsideFileSyncTransfer = false;
                     }
 
+                    // Flush getprop aggregator if idle or another command is seen
+                    if (_isAggregatingGetprop)
+                    {
+                        if ((DateTime.UtcNow - _lastGetpropChunkTime).TotalMilliseconds > 400 ||
+                            cleanLineTrimmed.StartsWith("shell:") || cleanLineTrimmed.StartsWith("<<") ||
+                            cleanLineTrimmed.StartsWith("AT") || cleanLineTrimmed.StartsWith("SEND"))
+                        {
+                            FlushGetpropSummary(epHex, dir);
+                        }
+                    }
+
                     // Fastboot is only classified when an explicit Fastboot command is seen (never during generic OKAY/DATA/FAIL responses in ADB Sync)
                     bool isFastboot = rawAsciiPreview.StartsWith("getvar:", StringComparison.OrdinalIgnoreCase) ||
                                       rawAsciiPreview.StartsWith("flash:", StringComparison.OrdinalIgnoreCase) ||
@@ -115,7 +142,7 @@ public partial class MonitoringEngine
                                      rawAsciiPreview.StartsWith("DENT", StringComparison.Ordinal) ||
                                      rawAsciiPreview.StartsWith("LIST", StringComparison.Ordinal);
 
-                    bool isLongHex = cleanLineTrimmed.Length >= 32 && cleanLineTrimmed.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
+                    bool isLongHex = cleanLineTrimmed.Length >= 16 && cleanLineTrimmed.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
 
                     bool isAdbRilIpc = isLongHex ||
                                        rawAsciiPreview.StartsWith("1163000501", StringComparison.OrdinalIgnoreCase) ||
@@ -130,21 +157,36 @@ public partial class MonitoringEngine
                                        cleanLineTrimmed.StartsWith("AF6DBB85", StringComparison.OrdinalIgnoreCase) ||
                                        cleanLineTrimmed.StartsWith("62E83911", StringComparison.OrdinalIgnoreCase) ||
                                        cleanLineTrimmed.StartsWith("d8d8d8", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.StartsWith("<<", StringComparison.Ordinal) ||
                                        (chunk.Length >= 4 && chunk[0] == 0x11 && chunk[1] == 0x63);
 
                     bool isAsciiText = chunk.Length > 0 && chunk.All(b => b == 0 || b == 10 || b == 13 || (b >= 32 && b < 127));
                     bool isInteractiveShellActive = !string.IsNullOrEmpty(_activeInteractiveShellCommand);
 
-                    // Requirement 1: Zero-Drop Interactive Command Rule in OUT direction
+                    // Requirement 1 & 3: Zero-Drop Interactive Command Rule in OUT direction
                     bool isAdbInteractiveCmd = (dir == "OUT" && isInteractiveShellActive && !isAdbHeader && chunk.Length > 0 &&
                                                (isAsciiText || isLongHex || isAdbRilIpc || cleanLineTrimmed.Length > 0 ||
                                                 rawAsciiPreview.StartsWith("usb:", StringComparison.OrdinalIgnoreCase) ||
                                                 cleanLineTrimmed.StartsWith("usb:", StringComparison.OrdinalIgnoreCase) ||
                                                 cleanLineTrimmed.StartsWith("<<", StringComparison.Ordinal)));
 
+                    // Requirement 2: Detect Socket Bridges and Android 11+ Binder Bridges
+                    bool isSocketBridgeChannel = !string.IsNullOrEmpty(_activeSocketBridgeChannel) ||
+                                                 PhoenixGSM.OmniTrace.Decoders.AdbSmartSocketDecoder.IsSocketBridgeChannel(cleanLineTrimmed) ||
+                                                 PhoenixGSM.OmniTrace.Decoders.AdbSmartSocketDecoder.IsModernAndroidService(cleanLineTrimmed) ||
+                                                 cleanLineTrimmed.StartsWith("tcp:", StringComparison.OrdinalIgnoreCase) ||
+                                                 cleanLineTrimmed.StartsWith("localabstract:", StringComparison.OrdinalIgnoreCase) ||
+                                                 cleanLineTrimmed.StartsWith("abb:", StringComparison.OrdinalIgnoreCase);
+
+                    bool isAppPrivilegeCmd = PhoenixGSM.OmniTrace.Decoders.AdbSmartSocketDecoder.IsAppPrivilegeCommand(cleanLineTrimmed);
+
+                    // Requirement 3: Detect getprop property stream lines
+                    bool isGetpropOutput = cleanLineTrimmed.Contains("]: [") ||
+                                           (rawAsciiPreview.Contains("]: [") && !cleanLineTrimmed.StartsWith("AT", StringComparison.OrdinalIgnoreCase)) ||
+                                           (cleanLineTrimmed.StartsWith("[ro.") || cleanLineTrimmed.StartsWith("[gsm.") || cleanLineTrimmed.StartsWith("[sys.") || cleanLineTrimmed.StartsWith("[ril."));
+
                     bool isAdbStream = !isAdbRilIpc && !isAdbInteractiveCmd && (
-                                       rawAsciiPreview.Contains("]: [") ||
-                                       cleanLineTrimmed.Contains("]: [") ||
+                                       isGetpropOutput ||
                                        cleanLineTrimmed == "]" ||
                                        cleanLineTrimmed.Contains("0x0000") ||
                                        cleanLineTrimmed.Equals("Enforcing", StringComparison.OrdinalIgnoreCase) ||
@@ -158,6 +200,7 @@ public partial class MonitoringEngine
                                        cleanLineTrimmed.Contains("Serial Number", StringComparison.OrdinalIgnoreCase) ||
                                        cleanLineTrimmed.Contains("AuthKey Encrypt", StringComparison.OrdinalIgnoreCase) ||
                                        cleanLineTrimmed.Contains("restarting in USB mode", StringComparison.OrdinalIgnoreCase) ||
+                                       cleanLineTrimmed.StartsWith("usb:", StringComparison.OrdinalIgnoreCase) ||
                                        cleanLineTrimmed.Contains("device::ro.product.", StringComparison.OrdinalIgnoreCase) ||
                                        cleanLineTrimmed.Equals("OK\n\n\n#", StringComparison.Ordinal) ||
                                        cleanLineTrimmed.Equals("#OK", StringComparison.Ordinal) ||
@@ -197,13 +240,14 @@ public partial class MonitoringEngine
                     );
 
                     bool isUpperFilterPort = (pkt.TransferType == 4);
-                    bool isNonAtUsbProtocol = isAdbHeader || isAdbStream || isAdbRilIpc || isAdbInteractiveCmd || isAdbSync || isSahara || isFirehose || isFastboot;
+                    bool isNonAtUsbProtocol = isAdbHeader || isAdbStream || isAdbRilIpc || isAdbInteractiveCmd || isAdbSync || isSahara || isFirehose || isFastboot || isSocketBridgeChannel;
 
                     double atConf = chunk.Length > 0 
                         ? PhoenixGSM.OmniTrace.Detection.ProtocolDetector.EvaluateSerialAt(chunk, PhoenixGSM.OmniTrace.Models.SensorType.Serial, PhoenixGSM.OmniTrace.Models.TransportType.SERIAL) 
                         : 0.0;
 
-                    // Requirement 2: Strict Isolation against MTK False Detection
+                    // Requirement 2 & 4: Strict Isolation against MTK False Detection
+                    // Single handshake sync byte 'P' (0x50) in multi-byte packet must NEVER be treated as MTK
                     bool hasAdbOrPrintableKeywords = cleanLineTrimmed.Contains("Product", StringComparison.OrdinalIgnoreCase) ||
                                                      cleanLineTrimmed.Contains("Token", StringComparison.OrdinalIgnoreCase) ||
                                                      cleanLineTrimmed.Contains("AuthKey", StringComparison.OrdinalIgnoreCase) ||
@@ -214,12 +258,22 @@ public partial class MonitoringEngine
                                                      cleanLineTrimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
                                                      cleanLineTrimmed.StartsWith("/data/local/tmp", StringComparison.OrdinalIgnoreCase);
 
-                    bool isDeviceInAdb = isInteractiveShellActive || _isInsideFileSyncTransfer || isAdbHeader || isAdbStream || isAdbRilIpc || isAdbInteractiveCmd || hasAdbOrPrintableKeywords;
+                    bool isDeviceInAdb = isInteractiveShellActive || _isInsideFileSyncTransfer || isAdbHeader || isAdbStream || isAdbRilIpc || isAdbInteractiveCmd || hasAdbOrPrintableKeywords || isSocketBridgeChannel;
 
                     double mtkConf = (chunk.Length > 0 && !isDeviceInAdb && !hasAdbOrPrintableKeywords)
                         ? PhoenixGSM.OmniTrace.Decoders.MtkProtocolDecoder.EvaluateMtk(chunk)
                         : 0.0;
                     bool isMtk = mtkConf >= 0.70;
+
+                    // Absolute rule: Multi-byte buffer starting with 'P' (0x50) is NEVER MTK
+                    if (chunk.Length > 1 && (chunk[0] == 0x50 || chunk[0] == (byte)'P'))
+                    {
+                        isMtk = false;
+                        if (cleanLineTrimmed.StartsWith("Product Name", StringComparison.OrdinalIgnoreCase) || rawAsciiPreview.Contains("Product Name"))
+                        {
+                            isAdbStream = true;
+                        }
+                    }
 
                     string cleanUpper = cleanLineTrimmed.ToUpperInvariant();
                     bool isExplicitModemCmd = cleanUpper.StartsWith("AT+") || cleanUpper.StartsWith("AT*") ||
@@ -289,9 +343,50 @@ public partial class MonitoringEngine
                             catch { }
                         }
                     }
+                    else if (chunk.Length > 0 && isSocketBridgeChannel && !isAdbHeader && dir == "OUT")
+                    {
+                        // Requirement 2: ADB Socket Bridge (tcp, localabstract, abb, etc.)
+                        string bridgeTarget = !string.IsNullOrEmpty(_activeSocketBridgeChannel) ? _activeSocketBridgeChannel : cleanLineTrimmed;
+                        string bridgeCmd = cleanLineTrimmed.Length > 0 ? cleanLineTrimmed : $"[ADB-SOCKET-BRIDGE] ({chunk.Length}B): {Convert.ToHexString(chunk)}";
+
+                        EmitEvent(new LiveEventItem
+                        {
+                            Timestamp = DateTime.UtcNow,
+                            Category = EventSourceCategory.AdbProxy,
+                            SourceTag = "ADB-BRIDGE",
+                            Direction = dir,
+                            EndpointOrTarget = $"EP {epHex} -> {bridgeTarget}",
+                            Protocol = "ADB-SOCKET-BRIDGE",
+                            Command = bridgeCmd,
+                            Summary = $"[ADB-SOCKET-BRIDGE] {dir} -> {bridgeTarget}: {bridgeCmd}",
+                            RawPayload = chunk,
+                            PayloadAscii = cleanLine,
+                            PayloadHex = LiveEventItem.FormatHexDump(chunk),
+                            AdditionalDetails = $"Forwarded Bridge Channel: {bridgeTarget}\nDirection: {dir}\nLength: {chunk.Length} B\nSource: KernelDriver ADB Socket Bridge Sniff"
+                        });
+                    }
+                    else if (chunk.Length > 0 && isAppPrivilegeCmd && !isAdbHeader)
+                    {
+                        // Requirement 2: App Launching and Permission Granting (am start, pm grant, appops set, etc.)
+                        EmitEvent(new LiveEventItem
+                        {
+                            Timestamp = DateTime.UtcNow,
+                            Category = EventSourceCategory.AdbProxy,
+                            SourceTag = "ADB-PRIV",
+                            Direction = dir,
+                            EndpointOrTarget = $"EP {epHex}",
+                            Protocol = "ADB-PRIVILEGE-CMD",
+                            Command = cleanLineTrimmed,
+                            Summary = $"[ADB-PRIVILEGE-CMD] {dir}: {cleanLineTrimmed}",
+                            RawPayload = chunk,
+                            PayloadAscii = cleanLine,
+                            PayloadHex = LiveEventItem.FormatHexDump(chunk),
+                            AdditionalDetails = $"Privilege escalation command detected: {cleanLineTrimmed}\nDirection: {dir}\nLength: {chunk.Length} B"
+                        });
+                    }
                     else if (chunk.Length > 0 && (isAdbRilIpc || isAdbInteractiveCmd))
                     {
-                        // Requirement 1: Zero-Drop Interactive and RIL IPC Commands Sent to Tool / Shell
+                        // Requirement 1 & 3: Zero-Drop Interactive and RIL IPC Commands Sent to Tool / Shell
                         string protoTag = isAdbRilIpc ? "ADB-RIL-IPC" : "ADB-INTERACTIVE-CMD";
                         string sourceTag = isAdbRilIpc ? "ADB-RIL" : "ADB-SHELL";
                         string targetTool = !string.IsNullOrEmpty(_activeInteractiveShellCommand) ? _activeInteractiveShellCommand : "/data/local/tmp/AT";
@@ -354,6 +449,19 @@ public partial class MonitoringEngine
                                 _omniService.EventBus.ReportLogicalCommand(logicalCmd);
                             }
                             catch { }
+                        }
+                    }
+                    else if (chunk.Length > 0 && isGetpropOutput)
+                    {
+                        // Requirement 3: Aggregate fragmented getprop property output lines into a unified block
+                        _getpropAggregator.IngestChunk(cleanLine + "\n");
+                        _isAggregatingGetprop = true;
+                        _lastGetpropChunkTime = DateTime.UtcNow;
+
+                        // If prompt follows getprop or output terminated, flush unified summary
+                        if (cleanLineTrimmed.EndsWith("#") || cleanLineTrimmed.EndsWith("OK") || cleanLineTrimmed == "]")
+                        {
+                            FlushGetpropSummary(epHex, dir);
                         }
                     }
                     else if (chunk.Length > 0 && isAdbStream)
@@ -423,7 +531,7 @@ public partial class MonitoringEngine
                             }
                             else
                             {
-                                fullCommandText = cleanLine; // Preserves 100% of untruncated command text
+                                fullCommandText = cleanLine;
                                 asciiPayload = Encoding.ASCII.GetString(chunk).Trim('\0');
                             }
                         }
@@ -451,10 +559,10 @@ public partial class MonitoringEngine
                             Direction = dir,
                             EndpointOrTarget = $"EP {epHex}",
                             Protocol = proto,
-                            Command = fullCommandText, // Full, complete command with zero truncation
+                            Command = fullCommandText,
                             Summary = $"[MODEM-USB] {dir}: {fullCommandText} ({Math.Max(atConf, 0.90):P0} conf)",
                             RawPayload = chunk,
-                            PayloadAscii = asciiPayload, // Full un-truncated decoded ASCII payload
+                            PayloadAscii = asciiPayload,
                             PayloadHex = LiveEventItem.FormatHexDump(chunk),
                             AdditionalDetails = $"TransferType: {pkt.TransferType}\nDirection: {dir}\nActualLength: {pkt.ActualLength} B\nCaptured: {pkt.CapturedLength} B\nSource: UpperFilter Passive Sniff"
                         });
@@ -515,29 +623,27 @@ public partial class MonitoringEngine
                                     {
                                         _activeInteractiveShellCommand = payloadPreview.Trim();
                                     }
+                                    else if (PhoenixGSM.OmniTrace.Decoders.AdbSmartSocketDecoder.IsSocketBridgeChannel(payloadPreview) ||
+                                             PhoenixGSM.OmniTrace.Decoders.AdbSmartSocketDecoder.IsModernAndroidService(payloadPreview))
+                                    {
+                                        _activeSocketBridgeChannel = payloadPreview.Trim();
+                                    }
                                 }
 
-                                // Check if OPEN or WRTE or CNXN resulted in raw Hex string or mangled header
-                                if (frame.Command == "OPEN" || frame.Command == "WRTE" || frame.Command == "CNXN")
+                                // Requirement 4: Prevent printing duplicate ADB hex wire headers
+                                string pTrim = payloadPreview.Trim();
+                                bool isDuplicateWireHeader = pTrim.Contains("43 4C 53 45") ||
+                                                             pTrim.Contains("4F 4B 41 59") ||
+                                                             pTrim.Contains("57 52 54 45") ||
+                                                             pTrim.Contains("F7 2D E6 F4") ||
+                                                             pTrim.Contains("4E 45 50 4F") ||
+                                                             pTrim.Contains("4E 58 4E 43") ||
+                                                             pTrim.EndsWith("bytes total)") ||
+                                                             pTrim.Contains("OPEN CLSE");
+
+                                if (isDuplicateWireHeader)
                                 {
-                                    string pTrim = payloadPreview.Trim();
-                                    bool isHexByteDump = pTrim.Contains("bytes total)") ||
-                                                         (pTrim.Length >= 8 && pTrim.Contains(" ") &&
-                                                          pTrim.Split(' ').All(tok => (tok.Length == 2 && Uri.IsHexDigit(tok[0]) && Uri.IsHexDigit(tok[1])) || tok == "..." || tok.StartsWith("(") || tok.EndsWith(")")));
-
-                                    bool isMangledHeader = pTrim.Contains("CLSE") || pTrim.Contains("OPEN") ||
-                                                           pTrim.StartsWith("OKAY") || pTrim.StartsWith("WRTE") ||
-                                                           pTrim.StartsWith("CNXN") ||
-                                                           pTrim.StartsWith("43 4C 53 45") ||
-                                                           pTrim.StartsWith("4F 4B 41 59") ||
-                                                           pTrim.StartsWith("57 52 54 45") ||
-                                                           pTrim.StartsWith("4E 45 50 4F") ||
-                                                           pTrim.StartsWith("4E 58 4E 43");
-
-                                    if (isHexByteDump || isMangledHeader)
-                                    {
-                                        continue;
-                                    }
+                                    continue;
                                 }
 
                                 string cmdDisplay = (!string.IsNullOrEmpty(payloadPreview) && (frame.Command == "OPEN" || frame.Command == "WRTE"))
@@ -570,7 +676,7 @@ public partial class MonitoringEngine
                             }
                             else
                             {
-                                // 2. Check if chunk is a binary data chunk (> 40% non-printable characters or dots)
+                                // 2. Check if chunk is a binary data chunk (> 30% non-printable characters or dots)
                                 int nonPrintable = 0;
                                 for (int i = 0; i < chunk.Length; i++)
                                 {
@@ -587,6 +693,7 @@ public partial class MonitoringEngine
                                                                rawAsciiPreview.Contains("..a4") ||
                                                                rawAsciiPreview.Contains("..I7");
 
+                                // Requirement 4: ADB SEND handling inside sync: channel
                                 if (rawAsciiPreview.StartsWith("SEND /", StringComparison.Ordinal) || rawAsciiPreview.StartsWith("SEND ", StringComparison.Ordinal) ||
                                     rawAsciiPreview.Contains("SEND /data/local/tmp/"))
                                 {
@@ -604,94 +711,130 @@ public partial class MonitoringEngine
                                         targetPath = headerText.Replace("SEND", "").Trim();
                                     }
 
-                                    bool isElf = chunk.Length >= 4 && (Encoding.ASCII.GetString(chunk).Contains("ELF") || chunk.Any(b => b == 0x7F && rawAsciiPreview.Contains("ELF")));
-                                    string fileType = isElf ? "ELF Binary" : "Binary";
-                                    string syncCmd = $"PUSH {targetPath} (Mode: {mode}, Type: {fileType})";
-
-                                    _activeTransferFile = syncCmd;
-                                    _isInsideFileSyncTransfer = true;
-                                    _activeTransferDir = dir;
-                                    _activeTransferTotalBytes = chunk.Length;
-                                    _activeTransferChunkCount = 1;
-                                    _activeTransferStartTime = DateTime.UtcNow;
-
-                                    EmitEvent(new LiveEventItem
+                                    lock (_transferLock)
                                     {
-                                        Timestamp = DateTime.UtcNow,
-                                        Category = EventSourceCategory.UsbDriver,
-                                        SourceTag = "ADB-SYNC",
-                                        Direction = dir,
-                                        EndpointOrTarget = $"EP {epHex}",
-                                        Protocol = "ADB-SYNC",
-                                        Command = syncCmd,
-                                        Summary = $"[ADB-SYNC] {dir} Transfer Started: {syncCmd}",
-                                        RawPayload = chunk,
-                                        PayloadAscii = syncCmd,
-                                        PayloadHex = LiveEventItem.FormatHexDump(chunk[..Math.Min(chunk.Length, 64)]),
-                                        AdditionalDetails = $"Sync file push started: {syncCmd}\nDirection: {dir}\nEndpoint: {epHex}"
-                                    });
-                                }
-                                else if (rawAsciiPreview.StartsWith("RECV /", StringComparison.Ordinal) || rawAsciiPreview.StartsWith("RECV ", StringComparison.Ordinal))
-                                {
-                                    _activeTransferFile = rawAsciiPreview.Split(new[] { '\0', ',', '\r', '\n' })[0].Trim();
-                                    _activeTransferDir = dir;
-                                    _activeTransferTotalBytes = chunk.Length;
-                                    _activeTransferChunkCount = 1;
-                                    _activeTransferStartTime = DateTime.UtcNow;
+                                        _activeUploadStream.SetLength(0);
+                                        _activeUploadFilePath = targetPath;
+                                        _activeUploadFileMode = mode;
+                                        _activeTransferFile = targetPath;
+                                        _isInsideFileSyncTransfer = true;
+                                        _activeTransferDir = dir;
+                                        _activeTransferTotalBytes = 0;
+                                        _activeTransferChunkCount = 0;
+                                        _activeTransferStartTime = DateTime.UtcNow;
 
-                                    EmitEvent(new LiveEventItem
-                                    {
-                                        Timestamp = DateTime.UtcNow,
-                                        Category = EventSourceCategory.UsbDriver,
-                                        SourceTag = "ADB-SYNC",
-                                        Direction = dir,
-                                        EndpointOrTarget = $"EP {epHex}",
-                                        Protocol = "ADB-SYNC",
-                                        Command = _activeTransferFile,
-                                        Summary = $"[ADB-SYNC] {dir} Transfer Started: {_activeTransferFile}",
-                                        RawPayload = chunk,
-                                        PayloadAscii = _activeTransferFile,
-                                        PayloadHex = LiveEventItem.FormatHexDump(chunk[..Math.Min(chunk.Length, 64)]),
-                                        AdditionalDetails = $"Sync file pull started: {_activeTransferFile}\nDirection: {dir}\nEndpoint: {epHex}"
-                                    });
+                                        // If chunk already has DATA payload after SEND header, capture it
+                                        int dataHeaderIdx = -1;
+                                        for (int i = 0; i < chunk.Length - 4; i++)
+                                        {
+                                            if (chunk[i] == 'D' && chunk[i+1] == 'A' && chunk[i+2] == 'T' && chunk[i+3] == 'A')
+                                            {
+                                                dataHeaderIdx = i + 8; // skip "DATA" (4B) + length (4B)
+                                                break;
+                                            }
+                                        }
+                                        if (dataHeaderIdx >= 0 && dataHeaderIdx < chunk.Length)
+                                        {
+                                            _activeUploadStream.Write(chunk, dataHeaderIdx, chunk.Length - dataHeaderIdx);
+                                            _activeTransferTotalBytes += (chunk.Length - dataHeaderIdx);
+                                        }
+                                    }
                                 }
                                 else if (rawAsciiPreview.StartsWith("DONE", StringComparison.Ordinal) ||
                                          rawAsciiPreview.StartsWith("OKAY", StringComparison.Ordinal) ||
-                                         rawAsciiPreview.StartsWith("CLSE", StringComparison.Ordinal))
+                                         rawAsciiPreview.StartsWith("CLSE", StringComparison.Ordinal) ||
+                                         (chunk.Length >= 4 && chunk[0] == 0x44 && chunk[1] == 0x4F && chunk[2] == 0x4E && chunk[3] == 0x45)) // "DONE" token
                                 {
                                     _isInsideFileSyncTransfer = false;
-                                    if (!string.IsNullOrEmpty(_activeTransferFile))
+                                    lock (_transferLock)
                                     {
-                                        double duration = (DateTime.UtcNow - _activeTransferStartTime).TotalSeconds;
-                                        string summaryMsg = $"[ADB-SYNC] Transfer Completed: {_activeTransferFile} ({_activeTransferTotalBytes:N0} bytes, {_activeTransferChunkCount} chunks in {duration:F1}s)";
-
-                                        EmitEvent(new LiveEventItem
+                                        if (!string.IsNullOrEmpty(_activeTransferFile) && _activeUploadStream.Length > 0)
                                         {
-                                            Timestamp = DateTime.UtcNow,
-                                            Category = EventSourceCategory.UsbDriver,
-                                            SourceTag = "ADB-SYNC",
-                                            Direction = dir,
-                                            EndpointOrTarget = $"EP {epHex}",
-                                            Protocol = "ADB-SYNC",
-                                            Command = "TRANSFER DONE",
-                                            Summary = summaryMsg,
-                                            RawPayload = chunk,
-                                            PayloadAscii = summaryMsg,
-                                            PayloadHex = LiveEventItem.FormatHexDump(chunk),
-                                            AdditionalDetails = $"Total Transfer: {_activeTransferTotalBytes:N0} bytes\nChunks: {_activeTransferChunkCount}\nDuration: {duration:F2}s\nTarget: {_activeTransferFile}"
-                                        });
+                                            byte[] fileBytes = _activeUploadStream.ToArray();
+                                            string fname = Path.GetFileName(_activeUploadFilePath);
+                                            if (string.IsNullOrWhiteSpace(fname)) fname = "AT";
 
-                                        _activeTransferFile = null;
+                                            string artifactsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "CapturedArtifacts");
+                                            string savePath = Path.Combine(artifactsDir, fname);
+                                            try
+                                            {
+                                                Directory.CreateDirectory(artifactsDir);
+                                                File.WriteAllBytes(savePath, fileBytes);
+                                            }
+                                            catch { }
+
+                                            // Forensic inspection
+                                            string inspectionReport;
+                                            if (fileBytes.Length >= 4 && fileBytes[0] == 0x7F && fileBytes[1] == 0x45 && fileBytes[2] == 0x4C && fileBytes[3] == 0x46)
+                                            {
+                                                var elfRes = _elfInspector.InspectElf(fileBytes);
+                                                inspectionReport = !string.IsNullOrEmpty(elfRes.ForensicClassification)
+                                                    ? elfRes.ForensicClassification
+                                                    : $"ELF {elfRes.Architecture} (Symbols: {elfRes.DangerousSymbolsFound.Length})";
+                                            }
+                                            else if (fileBytes.Length >= 4 && fileBytes[0] == 0x50 && fileBytes[1] == 0x4B)
+                                            {
+                                                var apkRes = _apkInspector.InspectApk(fileBytes);
+                                                inspectionReport = !string.IsNullOrEmpty(apkRes.ForensicDescription)
+                                                    ? apkRes.ForensicDescription
+                                                    : "ZIP/APK Archive";
+                                            }
+                                            else
+                                            {
+                                                var elfRes = _elfInspector.InspectElf(fileBytes);
+                                                inspectionReport = elfRes.IsValidElf ? elfRes.ForensicClassification : $"Binary Payload ({fileBytes.Length:N0} B)";
+                                            }
+
+                                            string singleSummary = $"[ADB-SYNC] Transfer Completed: {_activeUploadFilePath} ({fileBytes.Length:N0} bytes) | Forensic: {inspectionReport} | Saved: CapturedArtifacts/{fname}";
+
+                                            EmitEvent(new LiveEventItem
+                                            {
+                                                Timestamp = DateTime.UtcNow,
+                                                Category = EventSourceCategory.UsbDriver,
+                                                SourceTag = "ADB-SYNC",
+                                                Direction = dir,
+                                                EndpointOrTarget = $"EP {epHex}",
+                                                Protocol = "ADB-SYNC",
+                                                Command = $"PUSH {_activeUploadFilePath}",
+                                                Summary = singleSummary,
+                                                RawPayload = fileBytes.Take(128).ToArray(),
+                                                PayloadAscii = singleSummary,
+                                                PayloadHex = LiveEventItem.FormatHexDump(fileBytes.Take(64).ToArray()),
+                                                AdditionalDetails = $"Target Path: {_activeUploadFilePath}\nMode: {_activeUploadFileMode}\nTotal Bytes: {fileBytes.Length:N0}\nForensic Classification: {inspectionReport}\nLocal Artifact: {savePath}"
+                                            });
+
+                                            _activeTransferFile = null;
+                                            _activeUploadStream.SetLength(0);
+                                            _activeUploadFilePath = string.Empty;
+                                        }
                                     }
                                 }
                                 else if (isRepeatedBinaryPattern || nonPrintableRatio > 0.30 || _isInsideFileSyncTransfer || !string.IsNullOrEmpty(_activeTransferFile))
                                 {
-                                    // Suppress individual 1024B / 4096B line flooding for binary chunks (ELF, cp, data)
-                                    _activeTransferTotalBytes += chunk.Length;
-                                    _activeTransferChunkCount++;
+                                    // Requirement 4: Suppress individual 1024B / 4096B line flooding for binary chunks during SEND
+                                    lock (_transferLock)
+                                    {
+                                        int chunkOffset = 0;
+                                        if (chunk.Length >= 8 && chunk[0] == 'D' && chunk[1] == 'A' && chunk[2] == 'T' && chunk[3] == 'A')
+                                        {
+                                            chunkOffset = 8;
+                                        }
+                                        if (chunk.Length > chunkOffset)
+                                        {
+                                            _activeUploadStream.Write(chunk, chunkOffset, chunk.Length - chunkOffset);
+                                        }
+                                        _activeTransferTotalBytes += chunk.Length;
+                                        _activeTransferChunkCount++;
+                                    }
                                 }
                                 else
                                 {
+                                    // Requirement 4: Suppress RAW-BULK | DATA IN (1B) and (5B) whose content is just '.' or '[1].'
+                                    if (chunk.Length <= 5 && (cleanLineTrimmed == "." || cleanLineTrimmed == "[1]." || cleanLineTrimmed == "" || cleanLineTrimmed == "[1]" || cleanLineTrimmed == ".."))
+                                    {
+                                        continue;
+                                    }
+
                                     string tag = pkt.TransferType == 0 ? "USB-CTRL" : "USB-RAW";
                                     string proto = pkt.TransferType == 0 ? "CONTROL" : "RAW-BULK";
                                     string fullAscii = Encoding.ASCII.GetString(chunk.Select(b => b >= 32 && b < 127 ? b : (byte)'.').ToArray());
@@ -740,6 +883,12 @@ public partial class MonitoringEngine
                 }
                 else
                 {
+                    // If queue is empty, check if pending getprop aggregator needs to be flushed
+                    if (_isAggregatingGetprop && (DateTime.UtcNow - _lastGetpropChunkTime).TotalMilliseconds > 300)
+                    {
+                        FlushGetpropSummary("0x81", "IN");
+                    }
+
                     // Empty queue, sleep shortly to preserve CPU
                     await Task.Delay(10, token);
                 }
@@ -754,15 +903,42 @@ public partial class MonitoringEngine
         }
     }
 
-    private static readonly string KernelDiagFile = System.IO.Path.Combine(
+    private void FlushGetpropSummary(string epHex, string dir)
+    {
+        if (!_isAggregatingGetprop) return;
+        _isAggregatingGetprop = false;
+
+        string summary = _getpropAggregator.BuildUnifiedSummary();
+        if (_getpropAggregator.ExtractedCount > 0)
+        {
+            EmitEvent(new LiveEventItem
+            {
+                Timestamp = DateTime.UtcNow,
+                Category = EventSourceCategory.AdbProxy,
+                SourceTag = "ADB-GETPROP",
+                Direction = dir,
+                EndpointOrTarget = $"EP {epHex}",
+                Protocol = "ADB-STREAM",
+                Command = "GETPROP SUMMARY",
+                Summary = summary,
+                RawPayload = Encoding.UTF8.GetBytes(summary),
+                PayloadAscii = summary,
+                PayloadHex = LiveEventItem.FormatHexDump(Encoding.UTF8.GetBytes(summary)),
+                AdditionalDetails = string.Join("\n", _getpropAggregator.GetAllProperties().Select(kv => $"{kv.Key} = {kv.Value}"))
+            });
+        }
+        _getpropAggregator.Reset();
+    }
+
+    private static readonly string KernelDiagFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PhoenixGSM", "Logs", "kernel_packets.log");
 
     private static void KernelDiagLog(string line)
     {
         try
         {
-            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(KernelDiagFile)!);
-            System.IO.File.AppendAllText(KernelDiagFile, $"{DateTime.Now:HH:mm:ss.fff} {line}\n");
+            Directory.CreateDirectory(Path.GetDirectoryName(KernelDiagFile)!);
+            File.AppendAllText(KernelDiagFile, $"{DateTime.Now:HH:mm:ss.fff} {line}\n");
         }
         catch { }
     }

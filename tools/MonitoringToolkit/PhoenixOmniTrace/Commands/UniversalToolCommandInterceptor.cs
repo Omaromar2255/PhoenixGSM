@@ -315,7 +315,9 @@ public sealed class UniversalToolCommandInterceptor : IDisposable
         }
 
         // Requirement 5: Strict Noise Exclusion
-        if (HasNoiseKeywords(exeName) || HasNoiseKeywords(cleanExe) || HasNoiseKeywords(cmdLine) ||
+        if (IsStrictlyExcludedProcess(cleanExe) || IsStrictlyExcludedProcess(exeName) ||
+            IsStrictlyExcludedProcess(parentName) || IsStrictlyExcludedProcess(parentPathOverride) ||
+            HasNoiseKeywords(exeName) || HasNoiseKeywords(cleanExe) || HasNoiseKeywords(cmdLine) ||
             HasNoiseKeywords(parentName) || HasNoiseKeywords(exePath) || HasNoiseKeywords(parentPathOverride))
         {
             return;
@@ -483,12 +485,7 @@ public sealed class UniversalToolCommandInterceptor : IDisposable
             item.SourceTag = "WMIC-QUERY";
 
             string wmicClass = ExtractWmicClass(trimmedCmd);
-            string rawUnquoted = trimmedCmd.Trim('"', ' ', '\'');
-            if (string.IsNullOrWhiteSpace(wmicClass) ||
-                rawUnquoted.Equals("wmic", StringComparison.OrdinalIgnoreCase) ||
-                rawUnquoted.Equals("wmic.exe", StringComparison.OrdinalIgnoreCase) ||
-                rawUnquoted.EndsWith(@"\wbem\wmic.exe", StringComparison.OrdinalIgnoreCase) ||
-                rawUnquoted.EndsWith(@"\wbem\wmic", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(wmicClass) || IsBareWmicCommand(trimmedCmd))
             {
                 item.Category = "Cmd";
                 item.CommandAction = "WMIC QUERY: \"\"";
@@ -499,7 +496,8 @@ public sealed class UniversalToolCommandInterceptor : IDisposable
             }
 
             // Deduplicate repeating WMIC queries per tool / session
-            string wmicDedupeKey = $"{parentName}:{trimmedCmd.ToLowerInvariant().Replace("\"", "").Trim()}";
+            string normalizedWmic = NormalizeWmicQuery(trimmedCmd);
+            string wmicDedupeKey = $"{parentName}:{normalizedWmic}";
             if (!_seenSessionWmicQueries.TryAdd(wmicDedupeKey, 1))
             {
                 item.Category = "Cmd";
@@ -910,6 +908,35 @@ public sealed class UniversalToolCommandInterceptor : IDisposable
                text.Contains("services.exe", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("conhost.exe", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("git.exe", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsStrictlyExcludedProcess(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        string clean = Path.GetFileName(name).ToLowerInvariant();
+        if (clean.EndsWith(".exe")) clean = clean[..^4];
+
+        return clean is "microsoftedgeupdate" or "googleupdate" or "edgeupdate" or
+                        "svchost" or "services" or "chrome" or "git" or "conhost" or
+                        "searchhost" or "runtimebroker" or "taskhostw" or "wmiprvse" or "explorer";
+    }
+
+    public static string NormalizeWmicQuery(string cmd)
+    {
+        if (string.IsNullOrWhiteSpace(cmd)) return string.Empty;
+        string s = cmd.Replace("\"", "").Replace("'", "").ToLowerInvariant().Trim();
+        s = Regex.Replace(s, @"/output:[^\s]+", "").Trim();
+        s = Regex.Replace(s, @"\s+", " ").Trim();
+        return s;
+    }
+
+    public static bool IsBareWmicCommand(string cmd)
+    {
+        if (string.IsNullOrWhiteSpace(cmd)) return true;
+        string clean = cmd.Trim('"', ' ', '\'').ToLowerInvariant();
+        return clean == "wmic" || clean == "wmic.exe" ||
+               clean.EndsWith(@"\wbem\wmic.exe") || clean.EndsWith(@"\wbem\wmic") ||
+               clean.EndsWith("/output:stdout") || clean.EndsWith("/output:stderr");
     }
 
     private static bool IsBenignNoiseProcess(string cleanExe, string cmdLine)

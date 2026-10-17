@@ -109,6 +109,15 @@ public partial class MonitoringEngine
     private static readonly HashSet<string> SeenSessionWmicQuerySet = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object _wmicLock = new();
 
+    public static string NormalizeWmic(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+        string s = raw.Replace("\"", "").Replace("'", "").ToLowerInvariant().Trim();
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"/output:[^\s]+", "").Trim();
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
+        return s;
+    }
+
     public static bool ShouldFilterWmicQuery(string? cmdLine, string? commandAction, string? toolCaller = null)
     {
         string raw = (cmdLine ?? string.Empty).Trim();
@@ -128,14 +137,16 @@ public partial class MonitoringEngine
         if (rawUnquoted.Equals("wmic", StringComparison.OrdinalIgnoreCase) ||
             rawUnquoted.Equals("wmic.exe", StringComparison.OrdinalIgnoreCase) ||
             rawUnquoted.EndsWith(@"\wbem\wmic.exe", StringComparison.OrdinalIgnoreCase) ||
-            rawUnquoted.EndsWith(@"\wbem\wmic", StringComparison.OrdinalIgnoreCase))
+            rawUnquoted.EndsWith(@"\wbem\wmic", StringComparison.OrdinalIgnoreCase) ||
+            rawUnquoted.EndsWith("/output:stdout", StringComparison.OrdinalIgnoreCase) ||
+            rawUnquoted.EndsWith("/output:stderr", StringComparison.OrdinalIgnoreCase))
         {
             return true; // Bare path without parameters (e.g. C:\Windows\SysWOW64\wbem\wmic.exe)
         }
 
         // Deduplicate repeating WMIC queries per tool / session using HashSet<string>
         string caller = string.IsNullOrWhiteSpace(toolCaller) ? "TOOL" : toolCaller.Trim();
-        string normalizedKey = $"{caller}:{raw.ToLowerInvariant().Replace("\"", "").Trim()}";
+        string normalizedKey = $"{caller}:{NormalizeWmic(raw)}";
 
         lock (_wmicLock)
         {
@@ -173,7 +184,12 @@ public partial class MonitoringEngine
             HasNoiseKeywords(cmd.ExecutablePath) ||
             ExcludedNoiseProcesses.Contains(pName) || ExcludedNoiseProcesses.Contains(eName) ||
             ExcludedNoiseProcesses.Contains(Path.GetFileNameWithoutExtension(pName)) ||
-            ExcludedNoiseProcesses.Contains(Path.GetFileNameWithoutExtension(eName)))
+            ExcludedNoiseProcesses.Contains(Path.GetFileNameWithoutExtension(eName)) ||
+            pName.Equals("git.exe", StringComparison.OrdinalIgnoreCase) || eName.Equals("git.exe", StringComparison.OrdinalIgnoreCase) ||
+            pName.Equals("conhost.exe", StringComparison.OrdinalIgnoreCase) || eName.Equals("conhost.exe", StringComparison.OrdinalIgnoreCase) ||
+            pName.Equals("svchost.exe", StringComparison.OrdinalIgnoreCase) || eName.Equals("svchost.exe", StringComparison.OrdinalIgnoreCase) ||
+            pName.Equals("services.exe", StringComparison.OrdinalIgnoreCase) || eName.Equals("services.exe", StringComparison.OrdinalIgnoreCase) ||
+            pName.Equals("chrome.exe", StringComparison.OrdinalIgnoreCase) || eName.Equals("chrome.exe", StringComparison.OrdinalIgnoreCase))
         {
             return;
         }

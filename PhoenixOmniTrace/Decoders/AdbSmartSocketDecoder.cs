@@ -13,6 +13,8 @@ public sealed class SmartSocketFrame
     public byte[] RawBytes { get; set; } = Array.Empty<byte>();
     public bool IsStatusResponse { get; set; }
     public bool IsOkay { get; set; }
+    public bool IsSocketBridge { get; set; }
+    public string BridgeClassification { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -20,6 +22,7 @@ public sealed class SmartSocketFrame
 /// Decodes 4-hex character length + payload format.
 /// Preserves unknown services without dropping.
 /// Enforces transport boundaries: avoids blind readPos++ sliding on unknown streams.
+/// Identifies socket forwarded channels, Android 11+ abb binder bridges, and privilege bridge commands.
 /// </summary>
 public sealed class AdbSmartSocketDecoder
 {
@@ -92,13 +95,17 @@ public sealed class AdbSmartSocketDecoder
                 string payloadStr = Encoding.UTF8.GetString(payloadBytes);
                 var (prefix, body) = ParseServiceString(payloadStr);
 
+                string classification = ClassifyService(payloadStr, out bool isBridge);
+
                 frames.Add(new SmartSocketFrame
                 {
                     DeclaredLength = length,
                     RawText = payloadStr,
                     RawBytes = payloadBytes,
                     ServicePrefix = prefix,
-                    ServicePayload = body
+                    ServicePayload = body,
+                    IsSocketBridge = isBridge,
+                    BridgeClassification = classification
                 });
 
                 offset += 4 + length;
@@ -114,7 +121,7 @@ public sealed class AdbSmartSocketDecoder
         return frames;
     }
 
-    private static (string prefix, string body) ParseServiceString(string raw)
+    public static (string prefix, string body) ParseServiceString(string raw)
     {
         if (string.IsNullOrEmpty(raw)) return ("UNKNOWN", "");
 
@@ -127,5 +134,68 @@ public sealed class AdbSmartSocketDecoder
         }
 
         return ("UNKNOWN", raw);
+    }
+
+    public static bool IsSocketBridgeChannel(string service)
+    {
+        if (string.IsNullOrWhiteSpace(service)) return false;
+        string s = service.Trim();
+        return s.StartsWith("tcp:", StringComparison.OrdinalIgnoreCase) ||
+               s.StartsWith("localabstract:", StringComparison.OrdinalIgnoreCase) ||
+               s.StartsWith("localfilesystem:", StringComparison.OrdinalIgnoreCase) ||
+               s.StartsWith("localreserved:", StringComparison.OrdinalIgnoreCase) ||
+               s.StartsWith("abb:", StringComparison.OrdinalIgnoreCase) ||
+               s.StartsWith("abb_exec:", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsModernAndroidService(string service)
+    {
+        if (string.IsNullOrWhiteSpace(service)) return false;
+        string s = service.Trim();
+        return s.StartsWith("abb:", StringComparison.OrdinalIgnoreCase) ||
+               s.StartsWith("abb_exec:", StringComparison.OrdinalIgnoreCase) ||
+               s.StartsWith("cmd ", StringComparison.OrdinalIgnoreCase) ||
+               s.StartsWith("service call ", StringComparison.OrdinalIgnoreCase) ||
+               s.Contains(";cmd ", StringComparison.OrdinalIgnoreCase) ||
+               s.Contains(";service call ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsAppPrivilegeCommand(string command)
+    {
+        if (string.IsNullOrWhiteSpace(command)) return false;
+        return command.Contains("am start", StringComparison.OrdinalIgnoreCase) ||
+               command.Contains("am startservice", StringComparison.OrdinalIgnoreCase) ||
+               command.Contains("am broadcast", StringComparison.OrdinalIgnoreCase) ||
+               command.Contains("pm grant", StringComparison.OrdinalIgnoreCase) ||
+               command.Contains("appops set", StringComparison.OrdinalIgnoreCase) ||
+               command.Contains("dpm set-device-owner", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static string ClassifyService(string raw, out bool isBridge)
+    {
+        isBridge = false;
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+
+        string trimmed = raw.Trim();
+
+        if (IsSocketBridgeChannel(trimmed))
+        {
+            isBridge = true;
+            return "[ADB-SOCKET-BRIDGE]";
+        }
+
+        if (IsModernAndroidService(trimmed))
+        {
+            isBridge = true;
+            return "[ADB-BINDER-BRIDGE]";
+        }
+
+        if (IsAppPrivilegeCommand(trimmed))
+        {
+            isBridge = true;
+            return "[ADB-PRIVILEGE-CMD]";
+        }
+
+        return string.Empty;
     }
 }

@@ -29,6 +29,7 @@ public sealed class MtkDecodedPacket
 /// LAYER 7C — MediaTek (MTK) BROM & Download Agent (DA) Protocol Decoder
 /// Decodes BROM start handshake sync bytes, hardware identification requests,
 /// SLA/DAA security authentication challenges, and DA flashing / partition operations.
+/// Strictly guards against single handshake sync bytes (0x50 'P', etc.) matching multi-byte ADB strings.
 /// </summary>
 public static class MtkProtocolDecoder
 {
@@ -117,10 +118,12 @@ public static class MtkProtocolDecoder
         [0xD8] = "DA_JUMP_EXEC"
     };
 
-    private static bool IsHandshakeSyncByte(byte b) => b is 0xA0 or 0x5F or 0x0A or 0xF5 or 0x50 or 0xAF or 0x05 or 0xFA;
+    public static bool IsHandshakeSyncByte(byte b) => b is 0xA0 or 0x5F or 0x0A or 0xF5 or 0x50 or 0xAF or 0x05 or 0xFA;
 
     /// <summary>
     /// Evaluates if buffer matches MediaTek BROM / PreLoader framing.
+    /// Handshake sync bytes (0xA0, 0x5F, 0x0A, 0xF5, 0x50, 0xAF, 0x05, 0xFA) are ONLY accepted if buffer.Length == 1.
+    /// If buffer.Length > 1, any handshake byte (including 0x50 'P') is immediately rejected.
     /// </summary>
     public static double EvaluateMtk(ReadOnlySpan<byte> buf)
     {
@@ -151,8 +154,7 @@ public static class MtkProtocolDecoder
         // Guard against printable ASCII strings (like "Product Name...", "[ro.boot...", "10-14...", "AuthKey...", "shell...")
         bool isAsciiString = buf.Length > 1 && 
                              buf[0] is >= 0x20 and <= 0x7E && 
-                             buf[1] is >= 0x20 and <= 0x7E && 
-                             (buf.Length < 3 || buf[2] is >= 0x20 and <= 0x7E);
+                             buf[1] is >= 0x20 and <= 0x7E;
 
         if (isAsciiString)
         {
@@ -188,6 +190,7 @@ public static class MtkProtocolDecoder
 
     /// <summary>
     /// Decodes an MTK protocol packet.
+    /// Strictly rejects any multi-byte buffer starting with handshake sync byte (such as 'P' = 0x50).
     /// </summary>
     public static MtkDecodedPacket? DecodePacket(ReadOnlySpan<byte> buffer, PacketDirection direction)
     {
@@ -250,7 +253,7 @@ public static class MtkProtocolDecoder
             return pkt;
         }
 
-        // If buffer.Length > 1, reject if it starts with handshake sync byte or is ASCII
+        // If buffer.Length > 1, reject if it starts with handshake sync byte (such as 0x50 'P') or is ASCII
         if (IsHandshakeSyncByte(buffer[0]))
         {
             return null;
@@ -260,6 +263,12 @@ public static class MtkProtocolDecoder
                        buffer[0] is >= 0x20 and <= 0x7E &&
                        buffer[1] is >= 0x20 and <= 0x7E;
         if (isAscii)
+        {
+            return null;
+        }
+
+        // Must satisfy MTK confidence evaluation
+        if (EvaluateMtk(buffer) < 0.70)
         {
             return null;
         }

@@ -1,10 +1,108 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using PhoenixGSM.OmniTrace.Models;
 
 namespace PhoenixGSM.OmniTrace.Decoders;
+
+/// <summary>
+/// Aggregates and reconstructs fragmented chunks of `getprop` output into a clean, unified device summary.
+/// </summary>
+public sealed class AdbGetpropAggregator
+{
+    private readonly StringBuilder _buffer = new();
+    private readonly Dictionary<string, string> _properties = new(StringComparer.OrdinalIgnoreCase);
+    private DateTime _lastAppendTime = DateTime.UtcNow;
+
+    private static readonly string[] ImportantProperties =
+    {
+        "ro.product.model",
+        "gsm.version.baseband",
+        "ro.boot.carrierid",
+        "ro.boot.debug_level",
+        "ro.boot.serialno",
+        "ril.product_code",
+        "sys.usb.config"
+    };
+
+    public bool HasPendingData => _buffer.Length > 0 || _properties.Count > 0;
+    public int ExtractedCount => _properties.Count;
+    public DateTime LastAppendTime => _lastAppendTime;
+
+    public void IngestChunk(string textFragment)
+    {
+        if (string.IsNullOrEmpty(textFragment)) return;
+        _buffer.Append(textFragment);
+        _lastAppendTime = DateTime.UtcNow;
+        ParseCompletedLines();
+    }
+
+    private void ParseCompletedLines()
+    {
+        string current = _buffer.ToString();
+        var matches = Regex.Matches(current, @"\[([a-zA-Z0-9_\.\-]+)\]:\s*\[([^\]]*)\]");
+        foreach (Match m in matches)
+        {
+            string key = m.Groups[1].Value.Trim();
+            string val = m.Groups[2].Value.Trim();
+            _properties[key] = val;
+        }
+
+        int lastNewline = current.LastIndexOf('\n');
+        if (lastNewline >= 0 && lastNewline < current.Length - 1)
+        {
+            string remainder = current[(lastNewline + 1)..];
+            _buffer.Clear();
+            _buffer.Append(remainder);
+        }
+        else if (lastNewline >= 0)
+        {
+            _buffer.Clear();
+        }
+    }
+
+    public string BuildUnifiedSummary()
+    {
+        ParseCompletedLines();
+
+        var parts = new List<string>();
+        foreach (var key in ImportantProperties)
+        {
+            if (_properties.TryGetValue(key, out var val))
+            {
+                parts.Add($"{key}={val}");
+            }
+        }
+
+        if (parts.Count == 0 && _properties.Count > 0)
+        {
+            foreach (var kvp in _properties.Take(7))
+            {
+                parts.Add($"{kvp.Key}={kvp.Value}");
+            }
+        }
+
+        string result = parts.Count > 0
+            ? string.Join(" | ", parts)
+            : (_properties.Count > 0 ? $"{_properties.Count} properties extracted" : "No properties");
+
+        return $"[ADB-GETPROP-SUMMARY] {result}";
+    }
+
+    public IReadOnlyDictionary<string, string> GetAllProperties()
+    {
+        ParseCompletedLines();
+        return _properties;
+    }
+
+    public void Reset()
+    {
+        _buffer.Clear();
+        _properties.Clear();
+    }
+}
 
 /// <summary>
 /// LAYER 10 — Shell Stream Reconstruction Engine
@@ -13,6 +111,7 @@ namespace PhoenixGSM.OmniTrace.Decoders;
 /// handles chunk-fragmented escape sequences, and maintains dual streams:
 /// 1. Byte-exact Raw Stream (for forensic evidence)
 /// 2. Reconstructed Human Command (for analytical clarity)
+/// Includes dedicated getprop fragment aggregator.
 /// </summary>
 public sealed class ShellStreamReconstructor
 {
@@ -20,6 +119,9 @@ public sealed class ShellStreamReconstructor
     private readonly List<char> _lineBuffer = [];
     private int _cursorPos = 0;
     private readonly List<string> _reconstructedCommands = [];
+    private readonly AdbGetpropAggregator _getpropAggregator = new();
+
+    public AdbGetpropAggregator GetpropAggregator => _getpropAggregator;
 
     // State machine for chunk-spanning escape sequences
     private enum ParserState
@@ -340,5 +442,6 @@ public sealed class ShellStreamReconstructor
         _expectedUtf8Bytes = 0;
         _currentCommandSequences.Clear();
         _currentCommandHashes.Clear();
+        _getpropAggregator.Reset();
     }
 }
