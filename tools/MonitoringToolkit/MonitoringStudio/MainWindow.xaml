@@ -69,8 +69,8 @@
                                  Style="{StaticResource TabRadioBtn}" Margin="0,0,6,0">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="🛡️ أوامر الفني لهاتف العميل (Technician ➔ Phone Audit)" FontWeight="Bold" Foreground="#00FFC2" VerticalAlignment="Center" />
-                            <Border Background="#0C3325" BorderBrush="#00FF9D" BorderThickness="1" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding TechAuditTotalCount, StringFormat='{}{0} Cmds'}" FontWeight="Bold" FontSize="10.5" Foreground="#00FF9D" />
+                            <Border Background="{Binding TechnicianAuditTabBadgeBg}" BorderBrush="{Binding TechnicianAuditTabBadgeBorder}" BorderThickness="1" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding TechnicianAuditTabBadgeText}" FontWeight="Bold" FontSize="10.5" Foreground="{Binding TechnicianAuditTabBadgeForeground}" />
                             </Border>
                         </StackPanel>
                     </RadioButton>

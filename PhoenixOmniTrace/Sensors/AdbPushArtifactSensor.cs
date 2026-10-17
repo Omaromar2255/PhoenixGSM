@@ -65,7 +65,6 @@ public sealed class AdbPushArtifactSensor : IDisposable
         if (_isRunning) return;
         _isRunning = true;
         _bus.OnLogicalCommand += HandleLogicalCommand;
-        ScanKnownStagingDirectories();
         StartDirectoryWatchers();
     }
 

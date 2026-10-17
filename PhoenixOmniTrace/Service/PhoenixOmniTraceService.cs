@@ -57,6 +57,11 @@ public sealed class PhoenixOmniTraceService : IDisposable
 
     // 🎯 Technician-to-Client Phone Audit Layer
     public TechnicianAudit.TechnicianPhoneCommandAuditLayer TechnicianAuditLayer { get; }
+    public bool TechnicianAuditEnabled
+    {
+        get => TechnicianAuditLayer.IsEnabled;
+        set => TechnicianAuditLayer.IsEnabled = value;
+    }
 
     // ⚡ Autonomous Tool-Source Command Interception Layer (MTP, MTK BROM, Odin, Port)
     public ToolSourceInterception.ToolSourceInterceptionOrchestrator ToolSourceOrchestrator { get; }
@@ -96,7 +101,7 @@ public sealed class PhoenixOmniTraceService : IDisposable
         KernelTelemetry = new KernelTelemetry.KernelTelemetryOrchestrator(EventBus);
         UniversalToolInterceptor = new Commands.UniversalToolCommandInterceptor(EventBus);
         NetworkPayloadDumper = new NetworkInterception.NetworkStreamPayloadDumper(ArtifactSensor.Vault.VaultDirectory);
-        TechnicianAuditLayer = new TechnicianAudit.TechnicianPhoneCommandAuditLayer(EventBus);
+        TechnicianAuditLayer = new TechnicianAudit.TechnicianPhoneCommandAuditLayer(EventBus, defaultEnabled: false);
         ToolSourceOrchestrator = new ToolSourceInterception.ToolSourceInterceptionOrchestrator(EventBus);
 
         // ربط محرك الكشف السلوكي بالأوامر المنطقية

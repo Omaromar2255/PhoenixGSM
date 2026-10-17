@@ -65,21 +65,22 @@ public sealed partial class TempFileAtSensor
             return true;
         }
 
-        // Common temp extensions used by GSM tools staging AT scripts
-        string ext = Path.GetExtension(filePath);
-        if (ext.Equals(".tmp", StringComparison.OrdinalIgnoreCase) ||
-            ext.Equals(".txt", StringComparison.OrdinalIgnoreCase) ||
-            ext.Equals(".bat", StringComparison.OrdinalIgnoreCase) ||
-            ext.Equals(".cmd", StringComparison.OrdinalIgnoreCase) ||
-            ext.Equals(".bin", StringComparison.OrdinalIgnoreCase) ||
-            ext.Equals(".dat", StringComparison.OrdinalIgnoreCase) ||
-            ext.Equals(".script", StringComparison.OrdinalIgnoreCase) ||
-            ext.Equals(".cfg", StringComparison.OrdinalIgnoreCase) ||
-            ext.Equals(".ini", StringComparison.OrdinalIgnoreCase) ||
-            string.IsNullOrEmpty(ext))
-        {
-            return true;
-        }
+        // Check if directory belongs to a known GSM tool
+        bool inToolDir = dirSegments.Any(s =>
+            s.Contains("UnlockTool", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("Chimera", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("DFT", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("Pandora", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("Z3X", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("Odin", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("Octoplus", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("Miracle", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("Infinity", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("Hydra", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("QFIL", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("PhoenixGSM", StringComparison.OrdinalIgnoreCase));
+
+        if (inToolDir) return true;
 
         return false;
     }

@@ -83,9 +83,6 @@ public sealed partial class TempFileAtSensor : IDisposable
         _consumerTask = Task.Run(ProcessFileQueueAsync);
 
         _isRunning = true;
-
-        // 3. Sweep existing files in staging directories on startup
-        ScanExistingStagedFiles();
     }
 
     public void Stop()

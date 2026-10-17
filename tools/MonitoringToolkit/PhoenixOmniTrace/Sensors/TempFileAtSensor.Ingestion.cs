@@ -16,7 +16,22 @@ public sealed partial class TempFileAtSensor
         string? overrideProcessName = null,
         int overridePid = 0)
     {
-        // 3. Inspect if file is in an AT/staging folder or named AT/payload
+        // 1. Ignore known background system, browser, and development processes to eliminate noise
+        if (!string.IsNullOrEmpty(overrideProcessName))
+        {
+            string pLow = overrideProcessName.ToLowerInvariant();
+            if (pLow.Contains("chrome") || pLow.Contains("msedge") || pLow.Contains("firefox") ||
+                pLow.Contains("brave") || pLow.Contains("opera") || pLow.Contains("svchost") ||
+                pLow.Contains("explorer") || pLow.Contains("searchhost") || pLow.Contains("devenv") ||
+                pLow.Contains("code") || pLow.Contains("git") || pLow.Contains("powershell") ||
+                pLow.Contains("cmd") || pLow.Contains("conhost") || pLow.Contains("taskhostw") ||
+                pLow.Contains("runtimebroker"))
+            {
+                return;
+            }
+        }
+
+        // 2. Inspect if file is in an AT/staging folder or named AT/payload
         string dirName = Path.GetDirectoryName(filePath) ?? "";
         string fileName = Path.GetFileName(filePath);
         string[] dirSegments = dirName.Split(
@@ -28,8 +43,15 @@ public sealed partial class TempFileAtSensor
             s.StartsWith("AT_", StringComparison.OrdinalIgnoreCase) ||
             s.StartsWith("AT-", StringComparison.OrdinalIgnoreCase) ||
             s.Equals("staging", StringComparison.OrdinalIgnoreCase) ||
-            s.Equals("Temp", StringComparison.OrdinalIgnoreCase) ||
-            s.Equals("Tmp", StringComparison.OrdinalIgnoreCase)) ||
+            s.Contains("UnlockTool", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("Chimera", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("DFT", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("Pandora", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("Z3X", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("Odin", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("Octoplus", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("Miracle", StringComparison.OrdinalIgnoreCase) ||
+            s.Contains("PhoenixGSM", StringComparison.OrdinalIgnoreCase)) ||
             dirName.Contains(@"\mac\tmp", StringComparison.OrdinalIgnoreCase) ||
             dirName.Contains(@"/mac/tmp", StringComparison.OrdinalIgnoreCase) ||
             dirName.Contains(@"\mac\5", StringComparison.OrdinalIgnoreCase) ||
@@ -41,13 +63,9 @@ public sealed partial class TempFileAtSensor
             fileName.StartsWith("SRV", StringComparison.OrdinalIgnoreCase) ||
             fileName.StartsWith("athun", StringComparison.OrdinalIgnoreCase) ||
             fileName.StartsWith("trd", StringComparison.OrdinalIgnoreCase) ||
-            fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
             fileName.EndsWith(".at", StringComparison.OrdinalIgnoreCase) ||
             fileName.EndsWith(".atcmd", StringComparison.OrdinalIgnoreCase) ||
             fileName.EndsWith(".seq", StringComparison.OrdinalIgnoreCase) ||
-            fileName.EndsWith(".bat", StringComparison.OrdinalIgnoreCase) ||
-            fileName.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) ||
-            fileName.EndsWith(".script", StringComparison.OrdinalIgnoreCase) ||
             fileName.EndsWith(".modem", StringComparison.OrdinalIgnoreCase);
 
         // Check if content is binary modem payload vs text

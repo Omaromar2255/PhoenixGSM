@@ -60,7 +60,9 @@ Backup*/
 *.log
 gui_debug.log
 Logs/
-TechnicianAudit/
+**/Logs/TechnicianAudit/
+!tools/**/TechnicianAudit/**
+!PhoenixOmniTrace/TechnicianAudit/**
 build_log.txt
 build_omni.txt
 dump_deep_results.txt

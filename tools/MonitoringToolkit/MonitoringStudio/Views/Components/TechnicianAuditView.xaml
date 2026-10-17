@@ -47,14 +47,31 @@
                     <!-- Title & Live Save Badge -->
                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                         <TextBlock Text="🛡️" FontSize="16" VerticalAlignment="Center" Margin="0,0,6,0" />
-                        <TextBlock Text="Technician ➔ Phone Audit Layer" FontSize="13" FontWeight="Bold" Foreground="#00FFC2" VerticalAlignment="Center" />
+                        <TextBlock Text="Technician ➔ Phone Audit" FontSize="13" FontWeight="Bold" Foreground="#00FFC2" VerticalAlignment="Center" />
                         
-                        <!-- Auto-Save Badge -->
-                        <Border Background="#0B2B20" BorderBrush="#00FF9D" BorderThickness="1" CornerRadius="4" Margin="10,0,0,0" Padding="7,2" VerticalAlignment="Center"
+                        <!-- Master Layer Toggle Button -->
+                        <Button Command="{Binding ToggleTechnicianAuditCommand}"
+                                Margin="10,0,0,0" Height="26" FontSize="10.5" Padding="10,2"
+                                ToolTip="{Binding TechnicianAuditMasterTooltip}">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ModernBtn}">
+                                    <Setter Property="Background" Value="{Binding TechnicianAuditMasterButtonBg}" />
+                                    <Setter Property="BorderBrush" Value="{Binding TechnicianAuditMasterButtonBorder}" />
+                                    <Setter Property="BorderThickness" Value="1.5" />
+                                </Style>
+                            </Button.Style>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding TechnicianAuditMasterStatusIcon}" FontSize="10" Margin="0,0,5,0" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding TechnicianAuditMasterButtonText}" FontWeight="Bold" Foreground="#FFFFFF" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+
+                        <!-- Auto-Save Status Badge -->
+                        <Border Background="{Binding TechnicianAuditTabBadgeBg}" BorderBrush="{Binding TechnicianAuditTabBadgeBorder}" BorderThickness="1" CornerRadius="4" Margin="8,0,0,0" Padding="7,2" VerticalAlignment="Center"
                                 ToolTip="{Binding AutoSaveLogPathDisplay}">
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <TextBlock Text="🟢" FontSize="9" Margin="0,0,4,0" VerticalAlignment="Center" />
-                                <TextBlock Text="Auto-Save Active (JSONL &amp; LOG)" FontSize="10" FontWeight="Bold" Foreground="#00FF9D" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding TechnicianAuditMasterStatusIcon}" FontSize="9" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding TechnicianAuditMasterStatusText}" FontSize="10" FontWeight="Bold" Foreground="{Binding TechnicianAuditTabBadgeForeground}" VerticalAlignment="Center" />
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -700,6 +717,25 @@
                         </Border>
                     </StackPanel>
                 </Button>
+            </Border>
+
+            <!-- Layer Disabled Overlay & Quick-Enable Callout -->
+            <Border Visibility="{Binding IsTechnicianAuditDisabledNoticeVisible, Converter={StaticResource BoolToVis}}"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="#101520" BorderBrush="#253046" BorderThickness="1.5"
+                    CornerRadius="10" Padding="28,20" MaxWidth="620">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="20" ShadowDepth="4" Opacity="0.5" Color="#000000" />
+                </Border.Effect>
+                <StackPanel HorizontalAlignment="Center">
+                    <TextBlock Text="🛡️" FontSize="36" HorizontalAlignment="Center" Margin="0,0,0,10" />
+                    <TextBlock Text="مراقبة أوامر الفني لهاتف العميل معطلة حالياً" FontSize="15" FontWeight="Bold" Foreground="#00FFC2" HorizontalAlignment="Center" />
+                    <TextBlock Text="تم إيقاف هذه الطبقة افتراضياً لأنكم لا تستخدمون أوامر الفني للعميل، ولتفادي السجلات العشوائية وحفظ موارد النظام. يمكنك تفعيلها فوراً بالضغط على الزر أدناه عند الحاجة."
+                               FontSize="11.5" Foreground="#94A3B8" TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,16" LineHeight="18" />
+                    <Button Command="{Binding ToggleTechnicianAuditCommand}"
+                            Content="▶ تفعيل مراقبة أوامر الفني الآن (Enable On Demand)"
+                            Style="{StaticResource GreenActionBtn}" Height="34" FontSize="12" Padding="20,4" HorizontalAlignment="Center" />
+                </StackPanel>
             </Border>
         </Grid>
     </Border>

@@ -97,6 +97,64 @@ public partial class MainViewModel
     public bool IsTechAuditFastbootSelected => TechAuditSelectedProtocol == "FASTBOOT";
 
     // ══════════════════════════════════════════════════════════════
+    // TECHNICIAN COMMAND AUDIT LAYER MASTER TOGGLE (ON-DEMAND)
+    // ══════════════════════════════════════════════════════════════
+    public bool IsTechnicianAuditEnabled
+    {
+        get => _engine.IsTechnicianAuditEnabled;
+        set
+        {
+            if (_engine.IsTechnicianAuditEnabled != value)
+            {
+                _engine.IsTechnicianAuditEnabled = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(TechnicianAuditMasterStatusText));
+                OnPropertyChanged(nameof(TechnicianAuditMasterStatusBadge));
+                OnPropertyChanged(nameof(TechnicianAuditMasterStatusColor));
+                OnPropertyChanged(nameof(TechnicianAuditMasterButtonText));
+                OnPropertyChanged(nameof(TechnicianAuditMasterButtonBg));
+                OnPropertyChanged(nameof(TechnicianAuditMasterButtonBorder));
+                OnPropertyChanged(nameof(TechnicianAuditMasterStatusIcon));
+                OnPropertyChanged(nameof(TechnicianAuditTabBadgeText));
+                OnPropertyChanged(nameof(TechnicianAuditTabBadgeForeground));
+                OnPropertyChanged(nameof(TechnicianAuditTabBadgeBg));
+                OnPropertyChanged(nameof(TechnicianAuditTabBadgeBorder));
+                OnPropertyChanged(nameof(TechnicianAuditMasterTooltip));
+                OnPropertyChanged(nameof(IsTechnicianAuditDisabledNoticeVisible));
+                OnPropertyChanged(nameof(AutoSaveLogPathDisplay));
+            }
+        }
+    }
+
+    public string TechnicianAuditMasterStatusText => IsTechnicianAuditEnabled
+        ? "مراقبة أوامر الفني: نشطة ومفعلة 🟢"
+        : "مراقبة أوامر الفني: معطلة (تفعيل عند الحاجة) ⚪";
+
+    public string TechnicianAuditMasterButtonText => IsTechnicianAuditEnabled
+        ? "⏸️ إيقاف مراقبة أوامر الفني"
+        : "▶️ تفعيل مراقبة أوامر الفني";
+
+    public string TechnicianAuditMasterStatusBadge => IsTechnicianAuditEnabled ? "نشط 🟢" : "معطل ⚪";
+    public string TechnicianAuditMasterStatusColor => IsTechnicianAuditEnabled ? "#00FF9D" : "#8E9AA8";
+    public string TechnicianAuditMasterButtonBg => IsTechnicianAuditEnabled ? "#3A1B14" : "#0D3526";
+    public string TechnicianAuditMasterButtonBorder => IsTechnicianAuditEnabled ? "#FF5252" : "#00FF9D";
+    public string TechnicianAuditMasterStatusIcon => IsTechnicianAuditEnabled ? "🟢" : "⚪";
+
+    public string TechnicianAuditTabBadgeText => IsTechnicianAuditEnabled
+        ? $"{TechAuditTotalCount} Cmds 🟢"
+        : "⚪ معطل (عند الحاجة)";
+
+    public string TechnicianAuditTabBadgeForeground => IsTechnicianAuditEnabled ? "#00FF9D" : "#8E9AA8";
+    public string TechnicianAuditTabBadgeBg => IsTechnicianAuditEnabled ? "#0C3325" : "#151A24";
+    public string TechnicianAuditTabBadgeBorder => IsTechnicianAuditEnabled ? "#00FF9D" : "#2A3347";
+
+    public string TechnicianAuditMasterTooltip => IsTechnicianAuditEnabled
+        ? "إيقاف طبقة مراقبة أوامر الفني لهاتف العميل لمنع استهلاك الموارد وحفظ السجلات"
+        : "تفعيل طبقة مراقبة أوامر الفني لهاتف العميل لبدء التقاط وتسجيل الأوامر الحقيقية الموجهة للهاتف";
+
+    public bool IsTechnicianAuditDisabledNoticeVisible => !IsTechnicianAuditEnabled;
+
+    // ══════════════════════════════════════════════════════════════
     // DEVICE RESPONSE INTERCEPTION TOGGLE & DIRECTION FILTERS
     // ══════════════════════════════════════════════════════════════
     private bool _isCaptureDeviceResponsesEnabled = false;
@@ -229,11 +287,14 @@ public partial class MainViewModel
         set { _techAuditFastbootCount = value; OnPropertyChanged(); }
     }
 
-    public string AutoSaveLogPathDisplay => _engine.TechnicianAuditLayer?.Store.CurrentJsonlPath ?? "Active -> Logs\\TechnicianAudit\\";
+    public string AutoSaveLogPathDisplay => IsTechnicianAuditEnabled
+        ? (_engine.TechnicianAuditLayer?.Store.CurrentJsonlPath ?? "Active -> Logs\\TechnicianAudit\\")
+        : "⚪ معطلة حالياً (تفعيل عند الحاجة فقط)";
 
     // ══════════════════════════════════════════════════════════════
     // COMMANDS
     // ══════════════════════════════════════════════════════════════
+    public ICommand ToggleTechnicianAuditCommand { get; private set; } = null!;
     public ICommand SwitchToGeneralViewCommand { get; private set; } = null!;
     public ICommand SwitchToTechnicianAuditViewCommand { get; private set; } = null!;
     public ICommand SelectTechAuditProtocolCommand { get; private set; } = null!;
@@ -249,6 +310,11 @@ public partial class MainViewModel
     {
         FilteredTechnicianAuditRecords = CollectionViewSource.GetDefaultView(TechnicianAuditRecords);
         FilteredTechnicianAuditRecords.Filter = FilterTechnicianAuditPredicate;
+
+        ToggleTechnicianAuditCommand = new RelayCommand(_ =>
+        {
+            IsTechnicianAuditEnabled = !IsTechnicianAuditEnabled;
+        });
 
         SwitchToGeneralViewCommand = new RelayCommand(_ =>
         {
@@ -281,6 +347,7 @@ public partial class MainViewModel
             TechAuditSpdCount = 0;
             TechAuditAppleCount = 0;
             TechAuditFastbootCount = 0;
+            OnPropertyChanged(nameof(TechnicianAuditTabBadgeText));
         });
 
         ExportTechnicianAuditCommand = new RelayCommand(_ => ExportTechnicianAuditRecords());
@@ -322,6 +389,7 @@ public partial class MainViewModel
 
             TechnicianAuditRecords.Add(record);
             TechAuditTotalCount++;
+            OnPropertyChanged(nameof(TechnicianAuditTabBadgeText));
 
             if (record.IsResponse)
                 TechAuditInboundCount++;

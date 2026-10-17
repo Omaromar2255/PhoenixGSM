@@ -12,7 +12,7 @@ public static partial class Program
 {
     public static bool Test61_TechnicianAuditAdbShellInterception()
     {
-        using var layer = new TechnicianPhoneCommandAuditLayer();
+        using var layer = new TechnicianPhoneCommandAuditLayer(defaultEnabled: true);
         TechnicianAuditRecord? capturedRecord = null;
         layer.OnCommandAudited += rec => capturedRecord = rec;
 
@@ -39,7 +39,7 @@ public static partial class Program
 
     public static bool Test62_TechnicianAuditAtModemInterception()
     {
-        using var layer = new TechnicianPhoneCommandAuditLayer();
+        using var layer = new TechnicianPhoneCommandAuditLayer(defaultEnabled: true);
 
         var record = layer.AuditOutboundCommand(
             rawCommand: "[MODEM-USB] OUT: AT+KICOMP=1,0\r\n",
@@ -60,7 +60,7 @@ public static partial class Program
 
     public static bool Test63_TechnicianAuditMtkBromAndPreloader()
     {
-        using var layer = new TechnicianPhoneCommandAuditLayer();
+        using var layer = new TechnicianPhoneCommandAuditLayer(defaultEnabled: true);
         byte[] bromHandshake = [0xA0, 0x0A, 0x50, 0x05];
 
         var record = layer.AuditOutboundCommand(
@@ -82,7 +82,7 @@ public static partial class Program
 
     public static bool Test64_TechnicianAuditQualcommEdlFirehose()
     {
-        using var layer = new TechnicianPhoneCommandAuditLayer();
+        using var layer = new TechnicianPhoneCommandAuditLayer(defaultEnabled: true);
         string firehoseXml = "<?xml version=\"1.0\" ?><data><program SECTOR_SIZE_IN_BYTES=\"512\" num_partition_sectors=\"2048\" physical_partition_number=\"0\" start_sector=\"0\" filename=\"boot.img\"/></data>";
 
         var record = layer.AuditOutboundCommand(
@@ -104,7 +104,7 @@ public static partial class Program
 
     public static bool Test65_TechnicianAuditAppleDfuAndRecovery()
     {
-        using var layer = new TechnicianPhoneCommandAuditLayer();
+        using var layer = new TechnicianPhoneCommandAuditLayer(defaultEnabled: true);
 
         var record = layer.AuditOutboundCommand(
             rawCommand: "irecovery -c setenv boot-args \"-v serial=3\"",
@@ -127,7 +127,7 @@ public static partial class Program
         string tempDir = Path.Combine(Path.GetTempPath(), "TechAuditTest_" + Guid.NewGuid().ToString("N"));
         try
         {
-            using (var layer = new TechnicianPhoneCommandAuditLayer(bus: null, customLogDirectory: tempDir))
+            using (var layer = new TechnicianPhoneCommandAuditLayer(bus: null, customLogDirectory: tempDir, defaultEnabled: true))
             {
                 layer.AuditOutboundCommand(
                     rawCommand: "reboot bootloader",
@@ -174,11 +174,40 @@ public static partial class Program
     public static bool Test67_TechnicianAuditResponseToggleDisabledVsEnabled()
     {
         var bus = new OmniTraceEventBus();
-        using var layer = new TechnicianPhoneCommandAuditLayer(bus);
+        using var layer = new TechnicianPhoneCommandAuditLayer(bus, defaultEnabled: false);
 
-        // 1. When toggle is FALSE (default)
+        // 1. When master layer toggle is FALSE (default: disabled)
+        if (layer.IsEnabled != false) return false;
+
+        bus.ReportLogicalCommand(new LogicalCommandEvent
+        {
+            Command = "AT+DEVINFO",
+            Direction = PacketDirection.HOST_TO_DEVICE,
+            Protocol = KnownProtocol.SerialAt,
+            DeviceIdentity = "COM15",
+            Attribution = new ProcessAttributionMetadata { ImageName = "UnlockTool.exe", ProcessId = 5412 }
+        });
+
+        if (layer.TotalAuditedCount != 0) return false;
+        if (layer.OutboundCommandsCount != 0) return false;
+
+        // 2. Enable master toggle, but keep response capture disabled (default)
+        layer.IsEnabled = true;
         if (layer.CaptureDeviceResponses != false) return false;
 
+        bus.ReportLogicalCommand(new LogicalCommandEvent
+        {
+            Command = "AT+DEVINFO",
+            Direction = PacketDirection.HOST_TO_DEVICE,
+            Protocol = KnownProtocol.SerialAt,
+            DeviceIdentity = "COM15",
+            Attribution = new ProcessAttributionMetadata { ImageName = "UnlockTool.exe", ProcessId = 5412 }
+        });
+
+        if (layer.TotalAuditedCount != 1) return false;
+        if (layer.OutboundCommandsCount != 1) return false;
+
+        // Device response is still disabled
         bus.ReportLogicalCommand(new LogicalCommandEvent
         {
             Command = "<< OK",
@@ -189,9 +218,9 @@ public static partial class Program
         });
 
         if (layer.InboundResponsesCount != 0) return false;
-        if (layer.TotalAuditedCount != 0) return false;
+        if (layer.TotalAuditedCount != 1) return false;
 
-        // 2. When toggle is TRUE (enabled)
+        // 3. When response capture toggle is ALSO enabled
         layer.CaptureDeviceResponses = true;
 
         bus.ReportLogicalCommand(new LogicalCommandEvent
@@ -204,14 +233,14 @@ public static partial class Program
         });
 
         if (layer.InboundResponsesCount != 1) return false;
-        if (layer.TotalAuditedCount != 1) return false;
+        if (layer.TotalAuditedCount != 2) return false;
 
         return true;
     }
 
     public static bool Test68_TechnicianAuditAtModemResponseInterceptionAndPairing()
     {
-        using var layer = new TechnicianPhoneCommandAuditLayer();
+        using var layer = new TechnicianPhoneCommandAuditLayer(defaultEnabled: true);
         layer.CaptureDeviceResponses = true;
 
         // 1. Outbound AT Command
@@ -258,7 +287,7 @@ public static partial class Program
 
     public static bool Test69_TechnicianAuditAdbShellResponseInterception()
     {
-        using var layer = new TechnicianPhoneCommandAuditLayer();
+        using var layer = new TechnicianPhoneCommandAuditLayer(defaultEnabled: true);
         layer.CaptureDeviceResponses = true;
 
         // 1. Outbound ADB Command
@@ -291,7 +320,7 @@ public static partial class Program
 
     public static bool Test70_TechnicianAuditMtkBromAndPreloaderResponse()
     {
-        using var layer = new TechnicianPhoneCommandAuditLayer();
+        using var layer = new TechnicianPhoneCommandAuditLayer(defaultEnabled: true);
         layer.CaptureDeviceResponses = true;
 
         byte[] bromHandshake = [0xA0, 0x0A, 0x50, 0x05];
@@ -326,7 +355,7 @@ public static partial class Program
 
     public static bool Test71_TechnicianAuditQualcommEdlFirehoseResponse()
     {
-        using var layer = new TechnicianPhoneCommandAuditLayer();
+        using var layer = new TechnicianPhoneCommandAuditLayer(defaultEnabled: true);
         layer.CaptureDeviceResponses = true;
 
         string firehoseCmd = "<?xml version=\"1.0\" ?><data><program SECTOR_SIZE_IN_BYTES=\"512\" num_partition_sectors=\"2048\" physical_partition_number=\"0\" start_sector=\"0\" filename=\"boot.img\"/></data>";
@@ -359,7 +388,7 @@ public static partial class Program
 
     public static bool Test72_TechnicianAuditFastbootResponseInterception()
     {
-        using var layer = new TechnicianPhoneCommandAuditLayer();
+        using var layer = new TechnicianPhoneCommandAuditLayer(defaultEnabled: true);
         layer.CaptureDeviceResponses = true;
 
         var cmd = layer.AuditOutboundCommand(
@@ -400,7 +429,7 @@ public static partial class Program
         string tempDir = Path.Combine(Path.GetTempPath(), "TechAuditRespTest_" + Guid.NewGuid().ToString("N"));
         try
         {
-            using (var layer = new TechnicianPhoneCommandAuditLayer(bus: null, customLogDirectory: tempDir))
+            using (var layer = new TechnicianPhoneCommandAuditLayer(bus: null, customLogDirectory: tempDir, defaultEnabled: true))
             {
                 layer.CaptureDeviceResponses = true;
 

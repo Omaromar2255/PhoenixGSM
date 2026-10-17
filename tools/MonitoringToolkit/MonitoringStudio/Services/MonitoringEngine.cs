@@ -56,6 +56,20 @@ public partial class MonitoringEngine : IDisposable
     public PhoenixGSM.OmniTrace.TechnicianAudit.TechnicianPhoneCommandAuditLayer? TechnicianAuditLayer => _omniService?.TechnicianAuditLayer;
     public PhoenixGSM.OmniTrace.ToolSourceInterception.ToolSourceInterceptionOrchestrator? ToolSourceOrchestrator => _omniService?.ToolSourceOrchestrator;
 
+    private bool _isTechnicianAuditEnabled = false;
+    public bool IsTechnicianAuditEnabled
+    {
+        get => _omniService?.TechnicianAuditEnabled ?? _isTechnicianAuditEnabled;
+        set
+        {
+            _isTechnicianAuditEnabled = value;
+            if (_omniService != null)
+            {
+                _omniService.TechnicianAuditEnabled = value;
+            }
+        }
+    }
+
     public bool CaptureDeviceResponses
     {
         get => _omniService?.CaptureDeviceResponses ?? false;
@@ -92,6 +106,7 @@ public partial class MonitoringEngine : IDisposable
             _omniService.ToolSessionSensor.OnToolSessionCaptured += HandleToolSessionCaptured;
             _omniService.TechnicianAuditLayer.OnCommandAudited += HandleTechnicianAudit;
             _omniService.ToolSourceOrchestrator.OnCommandCaptured += HandleToolSourceCommandCaptured;
+            _omniService.TechnicianAuditEnabled = _isTechnicianAuditEnabled;
             _omniService.Start();
         }
         catch { }
