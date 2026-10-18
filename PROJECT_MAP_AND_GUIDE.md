@@ -322,11 +322,62 @@ PhoenixOmniTrace/Sensors/
 - `OmniTraceEventBus.cs` (310 أسطر): البنية الأساسية للقناة وتوجيه الأحداث.
 - `OmniTraceEventBus.Decoders.cs` (567 سطراً): كافة دوال تفكيك التدفقات البروتوكولية المتعددة.
 
-### 5. إعادة هيكلة `MainViewModel.cs` (كان 796 سطراً):
-- `MainViewModel.cs` (299 سطراً): الخصائص وربط الواجهة.
-- `MainViewModel.Events.cs` (230 سطراً): معالجة الأحداث والعدادات والتصفية.
-- `MainViewModel.Actions.cs` (255 سطراً): أوامر التصدير والاستعلام وفحص المنافذ.
-- `RelayCommand.cs` (23 سطراً): فئة الأوامر المستقلة.
+### 5. إعادة هيكلة `MainViewModel.cs` (كان 919 سطراً ⬅️ أصبح موزعاً على 4 ملفات منضبطة):
+```
+MonitoringStudio/ViewModels/
+├── MainViewModel.cs                  # المحرك الأساسي ودورة الحياة والـ Dispatcher والربط بالأوامر (122 سطر)
+├── MainViewModel.Properties.cs       # خصائص التحديد، البحث، التمرير التلقائي وحالة النظام (163 سطر)
+├── MainViewModel.SensorsAndFilters.cs# مفاتيح تشغيل/إيقاف المجسات، الفلاتر ومستثنيات العرض (273 سطر)
+└── MainViewModel.Counters.cs         # عدادات الإحصائيات الحية للبروتوكولات والأجهزة (95 سطر)
+```
+
+### 6. إعادة هيكلة `SmartFilePushArchiver.cs` (كان 1,436 سطراً ⬅️ أصبح مجلداً منظماً يضم 6 ملفات متخصصة):
+```
+PhoenixOmniTrace/Sensors/SmartFilePushArchiver/
+├── CapturedPushedFileRecord.cs       # نماذج البيانات وسجلات الملفات والمهام (50 سطر)
+├── SmartFilePushArchiver.cs          # فئة المحرك والحالة وإدارة دورة الحياة والأحداث (95 سطر)
+├── SmartFilePushArchiver.Framing.cs  # تفكيك الإطارات وترميزات ADB/Wire والتعابير النمطية (160 سطر)
+├── SmartFilePushArchiver.Ingestion.cs# استقبال حزم USB وفك Base64 والتدفق اللحظي (395 سطر)
+├── SmartFilePushArchiver.Storage.cs  # معالجة مهام الحفظ في الخلفية والتصنيف الذكي للقرص (170 سطر)
+└── SmartFilePushArchiver.Recovery.cs # استرجاع الملفات من القرص والتنقيب في ذاكرة RAM (550 سطر)
+```
+
+### 7. إعادة هيكلة `MonitoringEngine.KernelDriver.cs` (كان 1,217 سطراً ⬅️ أصبح مجلداً منظماً يضم 5 ملفات متخصصة):
+```
+MonitoringStudio/Services/KernelDriver/
+├── MonitoringEngine.KernelDriver.cs               # دورة حياة حلقة الالتقاط والاتصال بتعريف الكيرنل (100 سطر)
+├── MonitoringEngine.KernelDriver.Dispatch.cs      # تصنيف الحزم، حساب نسب الحروف، وتوجيه البروتوكولات (275 سطر)
+├── MonitoringEngine.KernelDriver.Protocols.cs     # معالجات البروتوكولات (MTK, ADB, Modem/AT, Raw USB) (470 سطر)
+├── MonitoringEngine.KernelDriver.Helpers.cs       # تنظيف ردود المودم، فك الـ RIL Hex، وتدقيق getprop (220 سطر)
+└── MonitoringEngine.KernelDriver.MinGwWatchdog.cs  # المعالجة التلقائية لإلغاء نوافذ خطأ MinGw في الخلفية (85 سطر)
+```
+
+### 8. إعادة هيكلة `UniversalToolCommandInterceptor.cs` (كان 992 سطراً ⬅️ أصبح مجلداً منظماً يضم 4 ملفات متخصصة):
+```
+PhoenixOmniTrace/Commands/UniversalToolCommandInterceptor/
+├── InterceptedToolCommand.cs                       # نموذج بيانات الأوامر الملتقطة وتفاصيل التنفيذ (34 سطر)
+├── UniversalToolCommandInterceptor.cs              # دورة حياة المراقبين (WMI, Audit 4688, Delta Poller) وتوجيه الأحداث (425 سطر)
+├── UniversalToolCommandInterceptor.Analyzer.cs     # محرك التحليل الجنائي وتصنيف الحالات الـ 10 لأدوات الـ GSM (429 سطر)
+└── UniversalToolCommandInterceptor.NoiseFilters.cs # فلاتر استبعاد ضوضاء النظام وتطبيع استعلامات WMIC (144 سطر)
+```
+
+### 9. إعادة هيكلة `MonitoringEngine.cs` (كان 945 سطراً ⬅️ أصبح موزعاً على 4 ملفات منضبطة):
+```
+MonitoringStudio/Services/
+├── MonitoringEngine.cs                           # دورة الحياة، أعلام تشغيل المجسات، والتحكم بالخدمة (241 سطر)
+├── MonitoringEngine.OmniHandlers.cs              # معالجة أحداث OmniTrace الحية والحزم الخام (340 سطر)
+├── MonitoringEngine.ArtifactAndSensors.cs        # معالجات روابط الويب، الملفات المؤقتة، والـ Artifact Vault (314 سطر)
+└── MonitoringEngine.SerialActions.cs             # دوال فحص واستعلام منافذ الـ COM وإرسال أوامر AT (70 سطر)
+```
+
+### 10. إعادة هيكلة `PhoneCommandClassifier.cs` (كان 820 سطراً ⬅️ أصبح مجلداً منظماً يضم 4 ملفات متخصصة):
+```
+PhoenixOmniTrace/Commands/PhoneCommandClassifier/
+├── PhoneCommandClassifier.cs                     # الواجهة والواجهات التفاعلية العامة (27 سطر)
+├── PhoneCommandClassifier.DirectedCommands.cs     # فحص واستخلاص أوامر الهاتف الصادرة (IsPhoneDirectedCommand) (344 سطر)
+├── PhoneCommandClassifier.DeviceResponses.cs      # فحص واستخلاص ردود أجهزة الهاتف (IsPhoneDeviceResponse) (222 سطر)
+└── PhoneCommandClassifier.AnnotationsAndNoise.cs # تصنيف الوسوم، فك RIL Hex، وفلترة الضوضاء المشوهة (201 سطر)
+```
 
 ---
 
