@@ -145,16 +145,23 @@ public partial class UsbFilterManagerWindow : Window
             if (choice != MessageBoxResult.Yes) return;
         }
 
-        bool isSerialOrModem = selected.DeviceName.Contains("(COM", StringComparison.OrdinalIgnoreCase) || 
+        DriverManager.SanitizeWinUsbAndAndroidStack();
+
+        bool isWinUsbOrAdb = selected.Driver.Contains("winusb", StringComparison.OrdinalIgnoreCase) ||
+                             selected.Driver.Contains("usbccgp", StringComparison.OrdinalIgnoreCase) ||
+                             selected.DeviceName.Contains("ADB", StringComparison.OrdinalIgnoreCase) ||
+                             selected.DeviceName.Contains("Android", StringComparison.OrdinalIgnoreCase) ||
+                             selected.DeviceName.Contains("WinUSB", StringComparison.OrdinalIgnoreCase);
+
+        bool isSerialOrModem = !isWinUsbOrAdb && (
+                               selected.DeviceName.Contains("(COM", StringComparison.OrdinalIgnoreCase) || 
                                selected.DeviceName.Contains("Modem", StringComparison.OrdinalIgnoreCase) ||
                                selected.DeviceName.Contains("PC UI", StringComparison.OrdinalIgnoreCase) ||
-                               selected.DeviceName.Contains("Serial", StringComparison.OrdinalIgnoreCase) ||
                                selected.Driver.Contains("modem", StringComparison.OrdinalIgnoreCase) ||
                                selected.Driver.Contains("usbser", StringComparison.OrdinalIgnoreCase) ||
-                               selected.Driver.Contains("ser", StringComparison.OrdinalIgnoreCase) ||
                                selected.InstanceId.Contains("MODEM", StringComparison.OrdinalIgnoreCase) ||
                                selected.InstanceId.Contains("DIAG", StringComparison.OrdinalIgnoreCase) ||
-                               selected.InstanceId.Contains("PORTS", StringComparison.OrdinalIgnoreCase);
+                               selected.InstanceId.Contains("PORTS", StringComparison.OrdinalIgnoreCase));
 
         bool ok = isSerialOrModem 
             ? DriverManager.AttachDeviceUpperFilter(selected.InstanceId, restartDevice: true)

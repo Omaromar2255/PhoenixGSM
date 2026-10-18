@@ -372,16 +372,22 @@ VOID FilterEvtIoInternalDeviceControl(WDFQUEUE Queue, WDFREQUEST Request, size_t
                         }
 
                         if (buffer != NULL && len > 0) {
-                            PHOENIX_USB_PACKET pkt;
-                            RtlZeroMemory(&pkt, sizeof(PHOENIX_USB_PACKET));
-                            KeQuerySystemTime(&pkt.Timestamp);
-                            pkt.Direction = PHOENIX_DIR_OUT;
-                            pkt.EndpointAddress = epAddr;
-                            pkt.TransferType = isBulk ? 2 : 0;
-                            pkt.ActualLength = len;
-                            pkt.CapturedLength = (len > PHOENIX_MAX_PAYLOAD_CAPTURE) ? PHOENIX_MAX_PAYLOAD_CAPTURE : len;
-                            RtlCopyMemory(pkt.Data, buffer, pkt.CapturedLength);
-                            PhoenixQueueEnqueue(context->Queue, &pkt);
+                            ULONG maxTotalSlice = (len > 65536) ? 65536 : len;
+                            ULONG offset = 0;
+                            do {
+                                PHOENIX_USB_PACKET pkt;
+                                RtlZeroMemory(&pkt, sizeof(PHOENIX_USB_PACKET));
+                                KeQuerySystemTime(&pkt.Timestamp);
+                                pkt.Direction = PHOENIX_DIR_OUT;
+                                pkt.EndpointAddress = epAddr;
+                                pkt.TransferType = isBulk ? 2 : 0;
+                                pkt.ActualLength = len;
+                                ULONG rem = maxTotalSlice - offset;
+                                pkt.CapturedLength = (rem > PHOENIX_MAX_PAYLOAD_CAPTURE) ? PHOENIX_MAX_PAYLOAD_CAPTURE : rem;
+                                RtlCopyMemory(pkt.Data, (PUCHAR)buffer + offset, pkt.CapturedLength);
+                                PhoenixQueueEnqueue(context->Queue, &pkt);
+                                offset += pkt.CapturedLength;
+                            } while (isBulk && offset < maxTotalSlice);
                         }
 
                         // Forward without formatting when using SEND_AND_FORGET
@@ -391,8 +397,8 @@ VOID FilterEvtIoInternalDeviceControl(WDFQUEUE Queue, WDFREQUEST Request, size_t
                             WdfRequestComplete(Request, WdfRequestGetStatus(Request));
                         }
                         return;
-                    } else {
-                        // IN Transfer (Target -> Host)
+                    } else if (isBulk) {
+                        // IN Bulk Transfer (Target -> Host) — Never hook IN Control transfers so WinUsb_Initialize is 100% untouched
                         PCOMPLETION_CTX cmpCtx = (PCOMPLETION_CTX)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(COMPLETION_CTX), PHOENIX_CTX_TAG);
                         if (cmpCtx != NULL) {
                             cmpCtx->DevCtx = context;

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -30,6 +31,8 @@ public partial class MonitoringEngine
     #region USB Driver Capture Loop
     private async Task DriverCaptureLoop(CancellationToken token)
     {
+        try { PhoenixGSM.UsbMonitor.DriverManager.SanitizeWinUsbAndAndroidStack(); } catch { }
+        _ = Task.Run(() => AutoDismissMinGwAssertionLoopAsync(token), token);
         _smartFileArchiver.OnFileArchivedAsync -= EmitCapturedPushedFile;
         _smartFileArchiver.OnFileArchivedAsync += EmitCapturedPushedFile;
         bool driverAvailable = false;
@@ -128,7 +131,7 @@ public partial class MonitoringEngine
                                           cleanLineTrimmed.Contains(",33188DATA", StringComparison.Ordinal) ||
                                           cleanLineTrimmed.Contains(",33261DATA", StringComparison.Ordinal);
 
-                    // تجاهل أوامر الحفظ الخلفية الخاصة بالراصد (.phx_keep_) حتى لا تظهر في سجل الأوامر
+                    // Ignore internal background archiver commands (.phx_keep_) so they never pollute the user log
                     if (rawAsciiPreview.Contains(".phx_keep_", StringComparison.OrdinalIgnoreCase) ||
                         cleanLineTrimmed.Contains(".phx_keep_", StringComparison.OrdinalIgnoreCase))
                     {
@@ -146,8 +149,8 @@ public partial class MonitoringEngine
                         _activeInteractiveShellCommand = string.Empty;
                     }
 
-                    // تمرير حزم رفع الملفات في البداية قبل فحص isAdbInteractiveCmd و isAdbStream
-                    if (dir == "OUT" && !isUpperFilterPort && !isAdbHeader &&
+                    // Feed outbound non-shell packets into SmartFilePushArchiver BEFORE evaluating isAdbInteractiveCmd/isAdbStream
+                    if (dir == "OUT" && !isUpperFilterPort && !(isAdbHeader && chunk.Length == 24) &&
                         !cleanLineTrimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
                     {
                         _smartFileArchiver.ProcessOutboundSyncOrBulkChunk(chunk, dir, epHex, pkt.ActualLength, out _);
@@ -718,6 +721,8 @@ public partial class MonitoringEngine
                     }
                     else
                     {
+
+
                         var frames = _adbParser.ProcessChunk(chunk, dir, "Android Phone", "", "", 1, epHex);
 
                         if (frames != null && frames.Count > 0)
@@ -1136,6 +1141,76 @@ public partial class MonitoringEngine
                     });
             }
             catch { }
+        }
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string? lpszClass, string? lpszWindow);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    private const uint WM_COMMAND = 0x0111;
+    private const uint BM_CLICK = 0x00F5;
+    private const int IDIGNORE = 5;
+
+    /// <summary>
+    /// Automatically detects and clicks "Ignore" (IDIGNORE = 5) on any "MinGW Runtime Assertion" popup
+    /// (such as adb_winusb_interface.cpp Line 42: INVALID_HANDLE_VALUE == usb_device_handle_) within < 100ms.
+    /// </summary>
+    private static async Task AutoDismissMinGwAssertionLoopAsync(CancellationToken token)
+    {
+        string[] assertionTitles =
+        [
+            "MinGW Runtime Assertion",
+            "Microsoft Visual C++ Runtime Library"
+        ];
+
+        string[] ignoreButtonLabels =
+        [
+            "&Ignore",
+            "Ignore",
+            "تجاهل"
+        ];
+
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                foreach (string title in assertionTitles)
+                {
+                    IntPtr hDlg = FindWindow("#32770", title);
+                    if (hDlg == IntPtr.Zero)
+                    {
+                        hDlg = FindWindow(null, title);
+                    }
+
+                    if (hDlg != IntPtr.Zero)
+                    {
+                        foreach (string btnText in ignoreButtonLabels)
+                        {
+                            IntPtr hBtn = FindWindowEx(hDlg, IntPtr.Zero, "Button", btnText);
+                            if (hBtn != IntPtr.Zero)
+                            {
+                                SendMessage(hBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                                break;
+                            }
+                        }
+
+                        // Standard Win32 MessageBox IDIGNORE command (ID = 5)
+                        PostMessage(hDlg, WM_COMMAND, (IntPtr)IDIGNORE, IntPtr.Zero);
+                    }
+                }
+            }
+            catch { }
+
+            await Task.Delay(120, token).ConfigureAwait(false);
         }
     }
     #endregion

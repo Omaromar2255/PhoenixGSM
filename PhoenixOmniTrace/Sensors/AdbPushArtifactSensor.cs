@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using PhoenixGSM.OmniTrace.Bus;
 using PhoenixGSM.OmniTrace.Decoders;
 using PhoenixGSM.OmniTrace.Models;
@@ -13,11 +14,11 @@ using PhoenixGSM.OmniTrace.Models;
 namespace PhoenixGSM.OmniTrace.Sensors;
 
 /// <summary>
-/// LAYER 12 — ADB Push Artifact & Exploit Interception Sensor
+/// LAYER 12 — ADB Push Artifact Interception Sensor
 /// Dual-Vector Capture Architecture:
-///   Vector A: Pre-Push Host Snapshotting (microsecond snapshot with non-exclusive FileShare before tool deletes %TEMP% binaries)
+///   Vector A: Pre-Push Host Snapshotting (microsecond snapshot with non-exclusive FileShare before tool deletes staged binaries)
 ///   Vector B: In-Flight ADB Sync Protocol Wire Reassembly (reconstructs files pushed directly from memory / in-process tools)
-/// Includes CAS SHA-256 deduplication and deep content analysis (ELF/DEX/APK/scripts).
+/// Strictly ignores host diagnostic logs (adb.log, *.tmp, *.etl) so they never pollute the command log.
 /// </summary>
 public sealed class AdbPushArtifactSensor : IDisposable
 {
@@ -36,7 +37,6 @@ public sealed class AdbPushArtifactSensor : IDisposable
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "mac", "tmp"),
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "mac"),
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "tools"),
-        Path.GetTempPath(),
         Path.Combine(Path.GetTempPath(), "mac"),
         Path.Combine(Path.GetTempPath(), "adb")
     ];
@@ -58,6 +58,23 @@ public sealed class AdbPushArtifactSensor : IDisposable
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
         _vault = new AdbPushArtifactVault(customVaultDir);
         _reconstructor = new AdbSyncStreamReconstructor(_vault);
+    }
+
+    public static bool IsIgnoredHostNoiseFile(string? pathOrName)
+    {
+        if (string.IsNullOrWhiteSpace(pathOrName)) return true;
+        string fn = Path.GetFileName(pathOrName);
+        if (string.IsNullOrWhiteSpace(fn)) return true;
+
+        return fn.Equals("adb.log", StringComparison.OrdinalIgnoreCase) ||
+               fn.EndsWith(".log", StringComparison.OrdinalIgnoreCase) ||
+               fn.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
+               fn.EndsWith(".etl", StringComparison.OrdinalIgnoreCase) ||
+               fn.EndsWith(".lock", StringComparison.OrdinalIgnoreCase) ||
+               fn.StartsWith("phx_pull_", StringComparison.OrdinalIgnoreCase) ||
+               fn.StartsWith(".phx_keep_", StringComparison.OrdinalIgnoreCase) ||
+               fn.StartsWith("aria-", StringComparison.OrdinalIgnoreCase) ||
+               fn.StartsWith("~", StringComparison.OrdinalIgnoreCase);
     }
 
     public void Start()
@@ -93,6 +110,11 @@ public sealed class AdbPushArtifactSensor : IDisposable
 
         if (_reconstructor.ProcessSyncPayload(channelId, payload, procName, pid, deviceSerial, out completedArtifact) && completedArtifact != null)
         {
+            if (IsIgnoredHostNoiseFile(completedArtifact.FileName))
+            {
+                completedArtifact = null;
+                return false;
+            }
             RecordCapturedArtifact(completedArtifact);
             return true;
         }
@@ -115,7 +137,9 @@ public sealed class AdbPushArtifactSensor : IDisposable
 
         if (TryParseAdbPushCommand(text, out string localSource, out string remoteTarget))
         {
-            // Resolve relative paths if necessary (e.g. search staging dirs, %TEMP% or current directory)
+            if (IsIgnoredHostNoiseFile(localSource) || IsIgnoredHostNoiseFile(remoteTarget))
+                return;
+
             string resolvedPath = ResolveLocalFilePath(localSource);
 
             int pid = cmd.Attribution?.ProcessId ?? 0;
@@ -130,7 +154,9 @@ public sealed class AdbPushArtifactSensor : IDisposable
         }
         else if (TryParseAdbPullCommand(text, out string remotePull, out string localPull))
         {
-            // Vector C: Post-Pull Host Interception (pulls like /data/local/tmp/athun)
+            if (IsIgnoredHostNoiseFile(remotePull) || IsIgnoredHostNoiseFile(localPull))
+                return;
+
             int pid = cmd.Attribution?.ProcessId ?? 0;
             string procName = cmd.Attribution?.ImageName ?? (!string.IsNullOrWhiteSpace(cmd.Service) ? cmd.Service : "GSM_Tool.exe");
             string serial = cmd.DeviceIdentity ?? "";
@@ -163,6 +189,9 @@ public sealed class AdbPushArtifactSensor : IDisposable
     /// </summary>
     private void RecordCapturedArtifact(PushedArtifactInfo artifact)
     {
+        if (IsIgnoredHostNoiseFile(artifact.FileName) || IsIgnoredHostNoiseFile(artifact.TargetDevicePath))
+            return;
+
         Interlocked.Increment(ref _capturedFilesCount);
         Interlocked.Add(ref _totalBytesCaptured, artifact.FileSizeBytes);
 
@@ -175,7 +204,6 @@ public sealed class AdbPushArtifactSensor : IDisposable
         }
         _recentlyCaptured[key] = now.AddMilliseconds(500);
 
-        // Clean up expired keys if cache exceeds 1000 items
         if (_recentlyCaptured.Count > 1000)
         {
             foreach (var kvp in _recentlyCaptured)
@@ -184,10 +212,8 @@ public sealed class AdbPushArtifactSensor : IDisposable
             }
         }
 
-        // Fire sensor event
         OnArtifactCaptured?.Invoke(artifact);
 
-        // Report correlated event to EventBus for live feed and logging
         string sizeStr = FormatBytes(artifact.FileSizeBytes);
         string shortSha = artifact.Sha256.Length > 8 ? artifact.Sha256[..8] : artifact.Sha256;
         var busCmd = _bus.Correlation.Correlate(
@@ -221,17 +247,12 @@ public sealed class AdbPushArtifactSensor : IDisposable
         _bus.ReportLogicalCommand(busCmd);
     }
 
-    /// <summary>
-    /// Parses host command lines to detect "adb push" or "push" syntax and extracts local source and remote target.
-    /// </summary>
     public static bool TryParseAdbPushCommand(string commandLine, out string localPath, out string targetPath)
     {
         localPath = string.Empty;
         targetPath = string.Empty;
 
         if (string.IsNullOrWhiteSpace(commandLine)) return false;
-
-        // Must contain "push" (case-insensitive) as a whole word
         if (!Regex.IsMatch(commandLine, @"\bpush\b", RegexOptions.IgnoreCase)) return false;
 
         var tokens = TokenizeCommandLine(commandLine);
@@ -247,7 +268,6 @@ public sealed class AdbPushArtifactSensor : IDisposable
 
         if (pushIdx < 0) return false;
 
-        // Skip any flags after push (e.g. -p, -a, -z, --sync)
         int argStart = pushIdx + 1;
         while (argStart < tokens.Count && tokens[argStart].StartsWith("-"))
         {
@@ -273,16 +293,12 @@ public sealed class AdbPushArtifactSensor : IDisposable
         return false;
     }
 
-    /// <summary>
-    /// Parses host command lines to detect "adb pull" or "pull" syntax and extracts remote source and local target.
-    /// </summary>
     public static bool TryParseAdbPullCommand(string commandLine, out string remotePath, out string localPath)
     {
         remotePath = string.Empty;
         localPath = string.Empty;
 
         if (string.IsNullOrWhiteSpace(commandLine)) return false;
-
         if (!Regex.IsMatch(commandLine, @"\bpull\b", RegexOptions.IgnoreCase)) return false;
 
         var tokens = TokenizeCommandLine(commandLine);
@@ -323,9 +339,6 @@ public sealed class AdbPushArtifactSensor : IDisposable
         return false;
     }
 
-    /// <summary>
-    /// Resolves local file paths, checking relative paths against staging dirs, %TEMP% or current directory.
-    /// </summary>
     public static string ResolveLocalFilePath(string path)
     {
         if (File.Exists(path)) return path;
@@ -356,9 +369,6 @@ public sealed class AdbPushArtifactSensor : IDisposable
         return path;
     }
 
-    /// <summary>
-    /// Scans known tool staging directories (e.g. Desktop\mac\tmp, %TEMP%) to capture staged binaries before execution.
-    /// </summary>
     public void ScanKnownStagingDirectories()
     {
         foreach (var dir in KnownStagingDirectories)
@@ -371,6 +381,7 @@ public sealed class AdbPushArtifactSensor : IDisposable
                 {
                     try
                     {
+                        if (IsIgnoredHostNoiseFile(file)) continue;
                         var info = new FileInfo(file);
                         if (info.Length == 0 || info.Length > AdbPushArtifactVault.DefaultMaxFullCaptureBytes) continue;
                         string relName = Path.GetFileName(file);
@@ -421,13 +432,13 @@ public sealed class AdbPushArtifactSensor : IDisposable
 
     private void OnStagedFileDiscovered(string fullPath, string stageDir)
     {
-        if (!_isRunning) return;
+        if (!_isRunning || IsIgnoredHostNoiseFile(fullPath)) return;
         _ = Task.Run(async () =>
         {
-            await Task.Delay(200); // Give file writer time to flush
+            await Task.Delay(200);
             try
             {
-                if (!File.Exists(fullPath)) return;
+                if (!File.Exists(fullPath) || IsIgnoredHostNoiseFile(fullPath)) return;
                 string fn = Path.GetFileName(fullPath);
                 var art = _vault.TryCaptureLocalFile(
                     fullPath, $"/data/local/tmp/{fn}", "StagedDirectoryWatcher", 0, "ALL_DEVICES",
@@ -441,9 +452,6 @@ public sealed class AdbPushArtifactSensor : IDisposable
         });
     }
 
-    /// <summary>
-    /// Tokenizes a command line respecting single and double quotes.
-    /// </summary>
     public static List<string> TokenizeCommandLine(string cmdLine)
     {
         var tokens = new List<string>();
@@ -486,9 +494,6 @@ public sealed class AdbPushArtifactSensor : IDisposable
         return tokens;
     }
 
-    /// <summary>
-    /// Simulates capturing a host file push for testing and manual forensics ingestion.
-    /// </summary>
     public PushedArtifactInfo? SimulateHostPush(
         string localFilePath,
         string remoteTargetPath,
@@ -504,9 +509,6 @@ public sealed class AdbPushArtifactSensor : IDisposable
         return artifact;
     }
 
-    /// <summary>
-    /// Simulates an in-flight ADB sync stream (SEND -> DATA chunks -> DONE) for testing.
-    /// </summary>
     public PushedArtifactInfo? SimulateSyncStream(
         uint channelId,
         string remoteTargetPath,
@@ -517,7 +519,6 @@ public sealed class AdbPushArtifactSensor : IDisposable
     {
         fileBytes ??= [];
 
-        // 1. Build SEND packet: ID_SEND (4B) + PathLen (4B) + "remoteTargetPath,33261"
         string pathAndMode = $"{remoteTargetPath},33261";
         byte[] pathBytes = Encoding.UTF8.GetBytes(pathAndMode);
         byte[] sendPacket = new byte[8 + pathBytes.Length];
@@ -527,7 +528,6 @@ public sealed class AdbPushArtifactSensor : IDisposable
 
         ProcessSyncWirePayload(channelId, sendPacket, toolName, pid, serial, out _);
 
-        // 2. Build DATA packets (in 16KB chunks)
         int chunkSize = 16 * 1024;
         int offset = 0;
         while (offset < fileBytes.Length)
@@ -542,7 +542,6 @@ public sealed class AdbPushArtifactSensor : IDisposable
             offset += currentLen;
         }
 
-        // 3. Build DONE packet: ID_DONE (4B) + mtime (4B)
         byte[] donePacket = new byte[8];
         BitConverter.GetBytes(AdbSyncStreamReconstructor.ID_DONE).CopyTo(donePacket, 0);
         BitConverter.GetBytes((uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds()).CopyTo(donePacket, 4);

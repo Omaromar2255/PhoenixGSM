@@ -82,7 +82,15 @@ public static class PhoneCommandClassifier
         string cat = (categoryName ?? "").Trim();
 
         // 0. Reject corrupted binary ELF chunks and low-level sync tokens immediately
-        if (IsCorruptedBinaryOrSyncNoise(cmd))
+        if (IsCorruptedBinaryOrSyncNoise(cmd) ||
+            cmd.Contains(".phx_keep_", StringComparison.OrdinalIgnoreCase) ||
+            sum.Contains(".phx_keep_", StringComparison.OrdinalIgnoreCase) ||
+            cmd.Contains("phx_pull_", StringComparison.OrdinalIgnoreCase) ||
+            sum.Contains("phx_pull_", StringComparison.OrdinalIgnoreCase) ||
+            cmd.Contains("FORK-SERVER SERVER", StringComparison.OrdinalIgnoreCase) ||
+            cmd.Equals("ADB ADB", StringComparison.OrdinalIgnoreCase) ||
+            cmd.Contains("/data/local/tmp/adb.log", StringComparison.OrdinalIgnoreCase) ||
+            sum.Contains("/data/local/tmp/adb.log", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }

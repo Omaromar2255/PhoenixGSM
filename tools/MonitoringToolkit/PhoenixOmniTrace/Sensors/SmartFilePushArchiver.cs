@@ -43,7 +43,7 @@ public sealed class CapturedPushedFileRecord
 }
 
 /// <summary>
-/// Non-blocking background job for parallel full-size file recovery and disk saving.
+/// Non-blocking background job for 100% passive, parallel full-size file recovery and disk saving.
 /// </summary>
 internal sealed class PendingFileArchiveJob
 {
@@ -51,6 +51,7 @@ internal sealed class PendingFileArchiveJob
     public string Mode { get; init; } = "33188";
     public byte[] WireBytes { get; init; } = [];
     public byte[]? HeaderSignature { get; init; }
+    public Task<byte[]?>? EagerSnapshotTask { get; init; }
     public long TotalDeclaredBytes { get; init; }
     public long TotalActualUrbBytes { get; init; }
     public bool HadTruncatedUrb { get; init; }
@@ -59,20 +60,30 @@ internal sealed class PendingFileArchiveJob
 }
 
 /// <summary>
-/// LAYER 12C — High-Speed Parallel Smart File Push Archiver
-/// Zero-latency on the USB capture thread: buffers wire chunks in memory (< 5us) and offloads
-/// all heavy recovery (adb pull mirror, 64-bit target process RAM carving, disk I/O, hashing)
-/// to a dedicated parallel background worker channel.
-/// Strictly saves ONLY ONE file per pushed item (no duplicate .elf or .analysis.txt files).
+/// LAYER 12C — 100% Passive High-Speed Parallel Smart File Push Archiver.
+/// - ZERO USB interruption: Never spawns adb.exe, never runs "adb pull" or "adb shell ln -f",
+///   and never competes with direct WinUSB tools (such as KEY-Tool.exe) for the USB handle.
+/// - Captures files of ALL sizes from 1 byte (e.g. 72-byte ASKSW.xml, trustedTime) up to 64 MB (15MB R2.zip, 480KB AT).
+/// - Handles multi-file coalesced USB buffers where a small file (like ASKSW.xml) starts at offset > 160
+///   immediately after the previous file's DONE token in the same USB Bulk transfer.
+/// - Strictly saves ONLY ONE file per pushed item with its exact original name and full size.
 /// </summary>
 public sealed class SmartFilePushArchiver : IDisposable
 {
-    public static readonly Regex PathAndModeRegex = new(
-        @"((?:/data/local/tmp/|/data/|/sdcard/|/storage/|/system/|/vendor/|/tmp/)[A-Za-z0-9_\-\./]+)(?:,(\d+))?",
+    public static readonly Regex SendPathAndModeRegex = new(
+        @"((?:/data/local/tmp/|/data/|/sdcard/|/storage/|/system/|/vendor/|/tmp/)[A-Za-z0-9_\-\./]+),(\d+)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    public static readonly Regex StatPathRegex = new(
+        @"(?:STAT|SEND).{0,8}?((?:/data/local/tmp/|/data/|/sdcard/|/storage/|/system/|/vendor/|/tmp/)[A-Za-z0-9_\-\./]+)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+    public static readonly Regex ShellFilePathRegex = new(
+        @"((?:/data/local/tmp/|/data/system/)[A-Za-z0-9_\-\./]+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public static readonly Regex Base64EchoRegex = new(
-        @"echo\s+['""]?([A-Za-z0-9+/=]{16,})['""]?\s*\|\s*(?:toybox\s+|busybox\s+)?base64\s+(?:-d|--decode)\s*>\s*([^\s;&|]+)",
+        @"echo\s+['""]?([A-Za-z0-9+/=]{8,})['""]?\s*\|\s*(?:toybox\s+|busybox\s+)?base64\s+(?:-d|--decode)\s*>\s*([^\s;&|]+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private readonly object _transferLock = new();
@@ -83,6 +94,7 @@ public sealed class SmartFilePushArchiver : IDisposable
     private long _declaredDataSize = 0;
     private long _totalActualUrbBytes = 0;
     private byte[]? _firstHeaderSignature = null;
+    private Task<byte[]?>? _eagerSnapshotTask = null;
     private bool _hadTruncatedUrb = false;
     private bool _isInsideTransfer = false;
     private string _pendingHeaderBuffer = string.Empty;
@@ -121,7 +133,6 @@ public sealed class SmartFilePushArchiver : IDisposable
             SingleWriter = false
         });
 
-        // Start 2 parallel background consumers so large files (e.g. 15MB R2.zip) never block small files
         for (int i = 0; i < 2; i++)
         {
             _ = Task.Run(() => ProcessArchiveJobsLoopAsync(_cts.Token));
@@ -136,7 +147,7 @@ public sealed class SmartFilePushArchiver : IDisposable
         }
     }
 
-    #region P/Invoke Definitions for 64-Bit Process RAM Carving
+    #region P/Invoke Definitions for 64-Bit & 32-Bit Process RAM Carving
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
 
@@ -162,6 +173,7 @@ public sealed class SmartFilePushArchiver : IDisposable
     }
 
     private const uint PROCESS_QUERY_INFORMATION = 0x0400;
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
     private const uint PROCESS_VM_READ = 0x0010;
     private const uint MEM_COMMIT = 0x1000;
     private const uint PAGE_NOACCESS = 0x01;
@@ -173,9 +185,22 @@ public sealed class SmartFilePushArchiver : IDisposable
     private const uint PAGE_EXECUTE_READWRITE = 0x40;
     #endregion
 
+    private static bool IsIgnoredNoiseFile(string pathOrName)
+    {
+        if (string.IsNullOrWhiteSpace(pathOrName)) return true;
+        string fname = Path.GetFileName(pathOrName);
+        if (string.IsNullOrWhiteSpace(fname)) return true;
+
+        return fname.Equals("adb.log", StringComparison.OrdinalIgnoreCase) ||
+               fname.StartsWith(".phx_keep_", StringComparison.OrdinalIgnoreCase) ||
+               fname.StartsWith("phx_pull_", StringComparison.OrdinalIgnoreCase) ||
+               fname.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
+               fname.EndsWith(".etl", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// Fast, non-blocking packet ingestion on the USB capture thread.
-    /// Never performs disk I/O or process memory scans on the calling thread.
+    /// Supports coalesced multi-file sync buffers and tiny files (e.g. 72-byte ASKSW.xml, trustedTime).
     /// </summary>
     public bool ProcessOutboundSyncOrBulkChunk(
         byte[] chunk,
@@ -187,197 +212,319 @@ public sealed class SmartFilePushArchiver : IDisposable
         completedRecord = null;
         if (chunk == null || chunk.Length == 0 || dir != "OUT") return false;
 
-        string rawAsciiPreview = Encoding.ASCII.GetString(chunk[..Math.Min(chunk.Length, 128)]);
-        string cleanLineTrimmed = rawAsciiPreview.Trim('\r', '\n', '\0', ' ');
+        lock (_transferLock)
+        {
+            return ProcessChunkInternalLocked(chunk, epHex, actualUrbLength, depth: 0);
+        }
+    }
 
-        if (cleanLineTrimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
+    private bool ProcessChunkInternalLocked(byte[] chunk, string epHex, uint actualUrbLength, int depth)
+    {
+        if (chunk == null || chunk.Length == 0 || depth > 8) return false;
+
+        // 0. If the packet begins with a 24-byte ADB wire header (e.g. WRTE + payload in the same URB), strip the 24-byte header
+        while (chunk.Length >= 24 && IsAdbWireHeader(chunk, 0))
+        {
+            if (chunk.Length == 24) return false;
+            chunk = chunk[24..];
+        }
+
+        // Convert the ENTIRE chunk (up to 1024B) to ASCII so SEND tokens at offset > 160 are NEVER missed!
+        string fullChunkAscii = Encoding.ASCII.GetString(chunk);
+        string cleanLineTrimmed = fullChunkAscii.Trim('\r', '\n', '\0', ' ');
+
+        // Never treat shell commands or host commands as raw file push chunks
+        if (cleanLineTrimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
+            cleanLineTrimmed.StartsWith("host:", StringComparison.OrdinalIgnoreCase) ||
+            cleanLineTrimmed.StartsWith("chmod ", StringComparison.OrdinalIgnoreCase) ||
+            cleanLineTrimmed.StartsWith("rm ", StringComparison.OrdinalIgnoreCase) ||
+            cleanLineTrimmed.StartsWith("ln ", StringComparison.OrdinalIgnoreCase) ||
+            cleanLineTrimmed.StartsWith("cp ", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        lock (_transferLock)
+        string combined = _pendingHeaderBuffer + fullChunkAscii;
+
+        bool hasSendToken = StartsWithAscii(chunk, "SEND") || FindAsciiTokenOffset(chunk, "SEND", 0, chunk.Length) >= 0;
+        bool hasStatToken = StartsWithAscii(chunk, "STAT") || FindAsciiTokenOffset(chunk, "STAT", 0, Math.Min(chunk.Length, 64)) >= 0;
+
+        // 1. Check for explicit SEND "/path,mode" anywhere in the chunk
+        Match sendMatch = SendPathAndModeRegex.Match(combined);
+        if (sendMatch.Success)
         {
-            string combined = _pendingHeaderBuffer + rawAsciiPreview;
+            string matchedPath = sendMatch.Groups[1].Value.Trim();
+            string matchedMode = sendMatch.Groups[2].Value.Trim();
 
-            bool hasSendToken = StartsWithAscii(chunk, "SEND") || FindAsciiTokenOffset(chunk, "SEND", 0, Math.Min(chunk.Length, 64)) >= 0;
-            bool hasStatToken = StartsWithAscii(chunk, "STAT") || FindAsciiTokenOffset(chunk, "STAT", 0, Math.Min(chunk.Length, 32)) >= 0;
+            // Check if this SEND starts partway through the chunk (after the end of a previous file!)
+            int sendTokenIdx = FindAsciiTokenOffset(chunk, "SEND", 0, chunk.Length);
+            int pathIdxInChunk = fullChunkAscii.IndexOf(matchedPath, StringComparison.OrdinalIgnoreCase);
+            int newFileStartOffset = sendTokenIdx >= 0 ? sendTokenIdx : (pathIdxInChunk >= 8 ? pathIdxInChunk - 8 : 0);
 
-            // Only run regex on header-sized previews or when SEND/STAT/path prefix is present
-            Match m = Match.Empty;
-            if (hasSendToken || hasStatToken || !string.IsNullOrEmpty(_pendingHeaderBuffer) ||
-                rawAsciiPreview.Contains("/data/") || rawAsciiPreview.Contains("/sdcard/"))
+            if (_isInsideTransfer && !string.IsNullOrEmpty(_activeTargetPath) &&
+                !string.Equals(_activeTargetPath, matchedPath, StringComparison.OrdinalIgnoreCase))
             {
-                m = PathAndModeRegex.Match(combined);
-                if (!m.Success && chunk.Length <= 256)
+                // If bytes before newFileStartOffset belong to the previous file, append them before flushing!
+                if (newFileStartOffset > 0)
                 {
-                    m = PathAndModeRegex.Match(Encoding.ASCII.GetString(chunk));
+                    int prevEnd = newFileStartOffset;
+                    int prevDone = FindDoneTrailerOffset(chunk[..newFileStartOffset], 0);
+                    if (prevDone >= 0) prevEnd = prevDone;
+                    if (prevEnd > 0)
+                    {
+                        _activeUploadStream.Write(chunk, 0, prevEnd);
+                        if (_firstHeaderSignature == null && _activeUploadStream.Length > 0)
+                        {
+                            byte[] prevArr = _activeUploadStream.ToArray();
+                            _firstHeaderSignature = prevArr[..Math.Min(prevArr.Length, 64)];
+                        }
+                    }
+                }
+
+                EnqueueCurrentTransferForBackgroundSave(epHex, "NewSendStarted");
+
+                if (newFileStartOffset > 0 && newFileStartOffset < chunk.Length)
+                {
+                    return ProcessChunkInternalLocked(chunk[newFileStartOffset..], epHex, (uint)(chunk.Length - newFileStartOffset), depth + 1);
                 }
             }
 
-            if (hasSendToken || hasStatToken || m.Success)
+            if (IsIgnoredNoiseFile(matchedPath))
             {
-                if (m.Success)
-                {
-                    string matchedPath = m.Groups[1].Value.Trim();
-                    bool hasExplicitMode = m.Groups[2].Success;
-                    string matchedMode = hasExplicitMode ? m.Groups[2].Value.Trim() : "33188";
-
-                    // If this is merely a STAT path check before SEND, record _pendingStatPath without resetting an active stream for the same file
-                    if (hasStatToken && !hasSendToken && !hasExplicitMode)
-                    {
-                        if (_isInsideTransfer && _activeUploadStream.Length > 0 &&
-                            !string.IsNullOrEmpty(_activeTargetPath) &&
-                            !string.Equals(_activeTargetPath, matchedPath, StringComparison.OrdinalIgnoreCase))
-                        {
-                            EnqueueCurrentTransferForBackgroundSave(epHex, "NewStatStarted");
-                        }
-                        _pendingStatPath = matchedPath;
-                        _pendingHeaderBuffer = string.Empty;
-                        return false;
-                    }
-
-                    // If previous transfer for a different file had data, enqueue it for background saving first
-                    if (_isInsideTransfer && _activeUploadStream.Length > 0 &&
-                        !string.IsNullOrEmpty(_activeTargetPath) &&
-                        !string.Equals(_activeTargetPath, matchedPath, StringComparison.OrdinalIgnoreCase))
-                    {
-                        EnqueueCurrentTransferForBackgroundSave(epHex, "NewSendStarted");
-                    }
-
-                    _activeTargetPath = matchedPath;
-                    _activeMode = matchedMode;
-                    _isInsideTransfer = true;
-                    _activeUploadStream.SetLength(0);
-                    _declaredDataSize = 0;
-                    _totalActualUrbBytes = 0;
-                    _firstHeaderSignature = null;
-                    _hadTruncatedUrb = actualUrbLength > chunk.Length;
-                    _pendingHeaderBuffer = string.Empty;
-                    _lastChunkTime = DateTime.UtcNow;
-
-                    int dataIdx = FindDataHeaderOffset(chunk);
-                    if (dataIdx >= 0 && dataIdx + 8 <= chunk.Length)
-                    {
-                        uint dLen = BitConverter.ToUInt32(chunk, dataIdx + 4);
-                        if (dLen > 0 && dLen <= 64 * 1024 * 1024)
-                        {
-                            _declaredDataSize += dLen;
-                        }
-
-                        int payloadStart = dataIdx + 8;
-                        bool isTruncatedPacket = actualUrbLength > chunk.Length;
-                        int doneIdx = !isTruncatedPacket ? FindDoneTrailerOffset(chunk, payloadStart) : -1;
-                        int payloadEnd = (doneIdx >= payloadStart) ? doneIdx : chunk.Length;
-
-                        if (payloadEnd > payloadStart)
-                        {
-                            int count = payloadEnd - payloadStart;
-                            _activeUploadStream.Write(chunk, payloadStart, count);
-
-                            if (_firstHeaderSignature == null && count >= 16)
-                            {
-                                _firstHeaderSignature = chunk[payloadStart..(payloadStart + Math.Min(count, 64))];
-                            }
-                        }
-
-                        _totalActualUrbBytes += Math.Max(actualUrbLength, (uint)chunk.Length);
-
-                        if (doneIdx >= payloadStart)
-                        {
-                            EnqueueCurrentTransferForBackgroundSave(epHex, "SinglePacketSendDataDone");
-                            return true;
-                        }
-                    }
-
-                    return false;
-                }
-                else if (hasSendToken || hasStatToken)
-                {
-                    _pendingHeaderBuffer = rawAsciiPreview;
-                    _lastChunkTime = DateTime.UtcNow;
-                    return false;
-                }
+                _pendingHeaderBuffer = string.Empty;
+                return false;
             }
 
-            // Active transfer continuation chunk
-            if (_isInsideTransfer || (!string.IsNullOrEmpty(_pendingStatPath) && StartsWithAscii(chunk, "DATA")))
+            _activeTargetPath = matchedPath;
+            _activeMode = matchedMode;
+            _isInsideTransfer = true;
+            _activeUploadStream.SetLength(0);
+            _declaredDataSize = 0;
+            _totalActualUrbBytes = 0;
+            _firstHeaderSignature = null;
+            _eagerSnapshotTask = null;
+            _hadTruncatedUrb = actualUrbLength > chunk.Length;
+            _pendingHeaderBuffer = string.Empty;
+            _lastChunkTime = DateTime.UtcNow;
+
+            int searchDataFrom = pathIdxInChunk >= 0 ? pathIdxInChunk + matchedPath.Length : 0;
+            int dataIdx = FindDataHeaderOffset(chunk, searchDataFrom);
+            if (dataIdx >= 0 && dataIdx + 8 <= chunk.Length)
             {
-                if (!_isInsideTransfer)
+                uint dLen = BitConverter.ToUInt32(chunk, dataIdx + 4);
+                if (dLen > 0 && dLen <= 64 * 1024 * 1024)
                 {
-                    _activeTargetPath = _pendingStatPath;
-                    _isInsideTransfer = true;
+                    _declaredDataSize += dLen;
                 }
 
-                if (actualUrbLength > chunk.Length)
-                {
-                    _hadTruncatedUrb = true;
-                }
-
-                _lastChunkTime = DateTime.UtcNow;
-                _totalActualUrbBytes += Math.Max(actualUrbLength, (uint)chunk.Length);
-
-                // Check for standalone 8-byte DONE packet ("DONE" + 4-byte mtime)
-                if (chunk.Length == 8 && StartsWithAscii(chunk, "DONE"))
-                {
-                    EnqueueCurrentTransferForBackgroundSave(epHex, "StandaloneDonePacket");
-                    return true;
-                }
-
-                int payloadStart = 0;
-                if (StartsWithAscii(chunk, "DATA") && chunk.Length >= 8)
-                {
-                    uint dLen = BitConverter.ToUInt32(chunk, 4);
-                    if (dLen > 0 && dLen <= 64 * 1024 * 1024)
-                    {
-                        _declaredDataSize += dLen;
-                    }
-                    payloadStart = 8;
-                }
-                else if (chunk.Length >= 24 && IsAdbWireHeader(chunk, 0))
-                {
-                    payloadStart = 24;
-                    if (chunk.Length >= 32 && chunk[24] == 'D' && chunk[25] == 'A' && chunk[26] == 'T' && chunk[27] == 'A')
-                    {
-                        uint dLen = BitConverter.ToUInt32(chunk, 28);
-                        if (dLen > 0 && dLen <= 64 * 1024 * 1024)
-                        {
-                            _declaredDataSize += dLen;
-                        }
-                        payloadStart = 32;
-                    }
-                }
-
-                // Only check for DONE trailer at the end of the chunk if this URB was NOT truncated (actualUrbLength <= chunk.Length)
+                int payloadStart = dataIdx + 8;
                 bool isTruncatedPacket = actualUrbLength > chunk.Length;
-                int doneIdx = !isTruncatedPacket ? FindDoneTrailerOffset(chunk, payloadStart) : -1;
-                int payloadEnd = (doneIdx >= payloadStart) ? doneIdx : chunk.Length;
+
+                // Exact framing for small files (e.g. 72-byte ASKSW.xml where payloadStart + dLen <= chunk.Length)
+                int exactDataEnd = (dLen > 0 && payloadStart + (long)dLen <= chunk.Length)
+                    ? payloadStart + (int)dLen
+                    : -1;
+
+                int doneIdx = -1;
+                if (exactDataEnd >= payloadStart && exactDataEnd + 4 <= chunk.Length &&
+                    chunk[exactDataEnd] == 'D' && chunk[exactDataEnd + 1] == 'O' &&
+                    chunk[exactDataEnd + 2] == 'N' && chunk[exactDataEnd + 3] == 'E')
+                {
+                    doneIdx = exactDataEnd;
+                }
+                else if (!isTruncatedPacket)
+                {
+                    doneIdx = FindDoneTrailerOffset(chunk, payloadStart);
+                }
+
+                int payloadEnd = (doneIdx >= payloadStart)
+                    ? doneIdx
+                    : (exactDataEnd >= payloadStart ? exactDataEnd : chunk.Length);
 
                 if (payloadEnd > payloadStart)
                 {
                     int count = payloadEnd - payloadStart;
                     _activeUploadStream.Write(chunk, payloadStart, count);
 
-                    if (_firstHeaderSignature == null && count >= 16)
+                    if (_firstHeaderSignature == null && count >= 1)
                     {
                         _firstHeaderSignature = chunk[payloadStart..(payloadStart + Math.Min(count, 64))];
+                        StartEagerMidTransferSnapshot(_activeTargetPath, _firstHeaderSignature, _declaredDataSize > 0 ? _declaredDataSize : count);
                     }
                 }
 
+                _totalActualUrbBytes += Math.Max(actualUrbLength, (uint)chunk.Length);
+
                 if (doneIdx >= payloadStart)
                 {
-                    EnqueueCurrentTransferForBackgroundSave(epHex, "DoneTrailerInChunk");
+                    EnqueueCurrentTransferForBackgroundSave(epHex, "SinglePacketSendDataDone");
+
+                    // If another SEND/STAT follows DONE + 4-byte mtime in the same buffer, process it immediately!
+                    int nextPos = doneIdx + 8;
+                    if (nextPos < chunk.Length)
+                    {
+                        ProcessChunkInternalLocked(chunk[nextPos..], epHex, (uint)(chunk.Length - nextPos), depth + 1);
+                    }
                     return true;
                 }
             }
 
             return false;
         }
+
+        // 2. Check for STAT path check preceding SEND
+        if (hasStatToken || hasSendToken)
+        {
+            Match statMatch = StatPathRegex.Match(combined);
+            if (statMatch.Success)
+            {
+                string statPath = statMatch.Groups[1].Value.Trim();
+                if (!IsIgnoredNoiseFile(statPath))
+                {
+                    if (_isInsideTransfer && _activeUploadStream.Length > 0 &&
+                        !string.IsNullOrEmpty(_activeTargetPath) &&
+                        !string.Equals(_activeTargetPath, statPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        EnqueueCurrentTransferForBackgroundSave(epHex, "NewStatStarted");
+                    }
+                    _pendingStatPath = statPath;
+                }
+                _pendingHeaderBuffer = hasSendToken ? fullChunkAscii : string.Empty;
+                _lastChunkTime = DateTime.UtcNow;
+                return false;
+            }
+
+            _pendingHeaderBuffer = fullChunkAscii;
+            _lastChunkTime = DateTime.UtcNow;
+            return false;
+        }
+
+        // 3. Active transfer continuation chunk
+        if (_isInsideTransfer || (!string.IsNullOrEmpty(_pendingStatPath) && StartsWithAscii(chunk, "DATA")))
+        {
+            if (!_isInsideTransfer)
+            {
+                _activeTargetPath = _pendingStatPath;
+                _isInsideTransfer = true;
+            }
+
+            if (actualUrbLength > chunk.Length)
+            {
+                _hadTruncatedUrb = true;
+            }
+
+            _lastChunkTime = DateTime.UtcNow;
+            _totalActualUrbBytes += Math.Max(actualUrbLength, (uint)chunk.Length);
+
+            // Check for standalone DONE packet ("DONE" + 4-byte mtime)
+            if (chunk.Length >= 8 && StartsWithAscii(chunk, "DONE"))
+            {
+                EnqueueCurrentTransferForBackgroundSave(epHex, "StandaloneDonePacket");
+                if (chunk.Length > 8)
+                {
+                    ProcessChunkInternalLocked(chunk[8..], epHex, (uint)(chunk.Length - 8), depth + 1);
+                }
+                return true;
+            }
+
+            int payloadStart = 0;
+            uint currentBlockDeclaredLen = 0;
+            if (StartsWithAscii(chunk, "DATA") && chunk.Length >= 8)
+            {
+                uint dLen = BitConverter.ToUInt32(chunk, 4);
+                if (dLen > 0 && dLen <= 64 * 1024 * 1024)
+                {
+                    _declaredDataSize += dLen;
+                    currentBlockDeclaredLen = dLen;
+                }
+                payloadStart = 8;
+            }
+
+            bool isTruncatedPacket = actualUrbLength > chunk.Length;
+            int exactDataEnd = (currentBlockDeclaredLen > 0 && payloadStart + (long)currentBlockDeclaredLen <= chunk.Length)
+                ? payloadStart + (int)currentBlockDeclaredLen
+                : -1;
+
+            int doneIdx = -1;
+            if (exactDataEnd >= payloadStart && exactDataEnd + 4 <= chunk.Length &&
+                chunk[exactDataEnd] == 'D' && chunk[exactDataEnd + 1] == 'O' &&
+                chunk[exactDataEnd + 2] == 'N' && chunk[exactDataEnd + 3] == 'E')
+            {
+                doneIdx = exactDataEnd;
+            }
+            else if (!isTruncatedPacket)
+            {
+                doneIdx = FindDoneTrailerOffset(chunk, payloadStart);
+            }
+
+            int payloadEnd = (doneIdx >= payloadStart)
+                ? doneIdx
+                : (exactDataEnd >= payloadStart ? exactDataEnd : chunk.Length);
+
+            if (payloadEnd > payloadStart)
+            {
+                int count = payloadEnd - payloadStart;
+                _activeUploadStream.Write(chunk, payloadStart, count);
+
+                if (_firstHeaderSignature == null && count >= 1)
+                {
+                    _firstHeaderSignature = chunk[payloadStart..(payloadStart + Math.Min(count, 64))];
+                    StartEagerMidTransferSnapshot(_activeTargetPath, _firstHeaderSignature, _declaredDataSize > 0 ? _declaredDataSize : count);
+                }
+            }
+
+            if (doneIdx >= payloadStart)
+            {
+                EnqueueCurrentTransferForBackgroundSave(epHex, "DoneTrailerInChunk");
+                int nextPos = doneIdx + 8;
+                if (nextPos < chunk.Length)
+                {
+                    ProcessChunkInternalLocked(chunk[nextPos..], epHex, (uint)(chunk.Length - nextPos), depth + 1);
+                }
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Starts an immediate, non-blocking background snapshot from Host Disk & Target Tool RAM
+    /// at the exact moment the first DATA chunk starts flowing over USB.
+    /// </summary>
+    private void StartEagerMidTransferSnapshot(string targetPath, byte[]? signature, long estimatedSize)
+    {
+        if (string.IsNullOrWhiteSpace(targetPath) || _eagerSnapshotTask != null) return;
+        string fileName = Path.GetFileName(targetPath);
+        if (string.IsNullOrWhiteSpace(fileName)) return;
+
+        byte[]? sigCopy = signature != null ? (byte[])signature.Clone() : null;
+        long est = estimatedSize;
+
+        _eagerSnapshotTask = Task.Run(() =>
+        {
+            byte[]? disk = TryRecoverFromHostDisk(fileName, sigCopy);
+            if (disk != null && disk.Length > 0 && (est <= 0 || disk.Length >= est))
+            {
+                return disk;
+            }
+
+            byte[]? ram = TryCarveFileFromTargetProcessRam(sigCopy, est);
+            if (ram != null && (disk == null || ram.Length > disk.Length))
+            {
+                return ram;
+            }
+
+            return disk;
+        });
     }
 
     /// <summary>
     /// Non-blocking check when a shell command arrives.
-    /// Enqueues any pending file transfer for parallel saving AND ensures any referenced /data/local/tmp/ file
-    /// is mirrored in the background if not yet saved at full size.
+    /// 1. Decodes inline Base64 file writes.
+    /// 2. Flushes any active file transfer.
+    /// 3. Passively verifies that any file referenced in /data/local/tmp/ (e.g. chmod 777 /data/local/tmp/retail/ASKSW.xml)
+    ///    has been saved to CapturedArtifacts, recovering it from Host Disk if needed (ZERO adb.exe spawning!).
     /// </summary>
     public bool CheckShellCommandForInlineFileOrFlush(
         string shellCommand,
@@ -420,29 +567,33 @@ public sealed class SmartFilePushArchiver : IDisposable
             }
         }
 
-        // 3. If the shell command references a file in /data/local/tmp/ (e.g. chmod 777 /data/local/tmp/AT or unzip /data/local/tmp/R2.zip),
-        // trigger a background check to pull the full original file from the device if our saved copy is missing or smaller!
+        // 3. Passive Host-Disk Verification for any /data/local/tmp/ file referenced by chmod/cp/mv/unzip
         if (!trimmed.StartsWith("rm ", StringComparison.OrdinalIgnoreCase) &&
             !trimmed.Contains("rm -r", StringComparison.OrdinalIgnoreCase))
         {
-            var matches = PathAndModeRegex.Matches(trimmed);
+            var matches = ShellFilePathRegex.Matches(trimmed);
             foreach (Match pm in matches)
             {
                 string refPath = pm.Groups[1].Value.Trim();
-                if (string.IsNullOrEmpty(refPath) || refPath.EndsWith("/") || refPath.EndsWith("*")) continue;
+                if (string.IsNullOrEmpty(refPath) || refPath.EndsWith("/") || IsIgnoredNoiseFile(refPath))
+                    continue;
 
-                _jobChannel.Writer.TryWrite(new PendingFileArchiveJob
+                if (!_savedFileSizesByPath.ContainsKey(refPath))
                 {
-                    TargetPath = refPath,
-                    Mode = "0777",
-                    WireBytes = [],
-                    HeaderSignature = null,
-                    TotalDeclaredBytes = 0,
-                    TotalActualUrbBytes = 0,
-                    HadTruncatedUrb = true,
-                    EndpointHex = "0x01",
-                    TriggerReason = "ShellReferenceVerify"
-                });
+                    _jobChannel.Writer.TryWrite(new PendingFileArchiveJob
+                    {
+                        TargetPath = refPath,
+                        Mode = "0777",
+                        WireBytes = [],
+                        HeaderSignature = null,
+                        EagerSnapshotTask = null,
+                        TotalDeclaredBytes = 0,
+                        TotalActualUrbBytes = 0,
+                        HadTruncatedUrb = true,
+                        EndpointHex = "0x01",
+                        TriggerReason = "PassiveShellReferenceVerify"
+                    });
+                }
             }
         }
 
@@ -463,8 +614,6 @@ public sealed class SmartFilePushArchiver : IDisposable
                 return false;
             }
 
-            // Do NOT prematurely cut off a large multi-megabyte transfer (like 15MB R2.zip or 480KB AT)
-            // on a transient CLSE frame from an earlier channel while chunks are actively flowing!
             if (isClseSignal && (DateTime.UtcNow - _lastChunkTime).TotalMilliseconds < 350)
             {
                 return false;
@@ -480,6 +629,7 @@ public sealed class SmartFilePushArchiver : IDisposable
         string targetPath = !string.IsNullOrWhiteSpace(_activeTargetPath) ? _activeTargetPath : _pendingStatPath;
         byte[] wireBytes = _activeUploadStream.ToArray();
         byte[]? sig = _firstHeaderSignature;
+        Task<byte[]?>? eagerTask = _eagerSnapshotTask;
         string mode = _activeMode;
         long declared = _declaredDataSize;
         long actualUrb = _totalActualUrbBytes;
@@ -492,17 +642,25 @@ public sealed class SmartFilePushArchiver : IDisposable
         _declaredDataSize = 0;
         _totalActualUrbBytes = 0;
         _firstHeaderSignature = null;
+        _eagerSnapshotTask = null;
         _hadTruncatedUrb = false;
         _pendingHeaderBuffer = string.Empty;
 
-        if (string.IsNullOrWhiteSpace(targetPath)) return;
+        if (string.IsNullOrWhiteSpace(targetPath) || IsIgnoredNoiseFile(targetPath)) return;
+
+        byte[] cleanWire = StripDoneTrailer(wireBytes);
+        if (!truncated && declared > 0 && cleanWire.Length > declared)
+        {
+            cleanWire = cleanWire[..(int)declared];
+        }
 
         _jobChannel.Writer.TryWrite(new PendingFileArchiveJob
         {
             TargetPath = targetPath,
             Mode = mode,
-            WireBytes = StripDoneTrailer(wireBytes),
+            WireBytes = cleanWire,
             HeaderSignature = sig,
+            EagerSnapshotTask = eagerTask,
             TotalDeclaredBytes = declared,
             TotalActualUrbBytes = actualUrb,
             HadTruncatedUrb = truncated,
@@ -512,8 +670,8 @@ public sealed class SmartFilePushArchiver : IDisposable
     }
 
     /// <summary>
-    /// Dedicated background worker loop: recovers the 100% full-size file in parallel
-    /// without ever slowing down the USB/ADB command capture loop.
+    /// Dedicated background worker loop: saves small non-truncated files (e.g. 72-byte ASKSW.xml)
+    /// directly from WireBytes or Host Disk, and recovers truncated large files from Host Disk + Process RAM.
     /// </summary>
     private async Task ProcessArchiveJobsLoopAsync(CancellationToken token)
     {
@@ -522,53 +680,78 @@ public sealed class SmartFilePushArchiver : IDisposable
             try
             {
                 string fileName = Path.GetFileName(job.TargetPath);
-                if (string.IsNullOrWhiteSpace(fileName)) continue;
+                if (string.IsNullOrWhiteSpace(fileName) || IsIgnoredNoiseFile(fileName)) continue;
 
-                // Check if we already have a complete, larger copy saved for this path
                 long existingSavedSize = _savedFileSizesByPath.TryGetValue(job.TargetPath, out long s) ? s : 0;
-                if (job.TriggerReason == "ShellReferenceVerify" && existingSavedSize > 65536)
-                {
-                    continue;
-                }
 
                 byte[] bestBytes = job.WireBytes ?? [];
                 string bestVector = "USB Wire Stream";
 
-                bool needsFullRecovery = job.HadTruncatedUrb ||
-                                         bestBytes.Length == 0 ||
-                                         (job.TotalDeclaredBytes > bestBytes.Length) ||
-                                         (job.TotalActualUrbBytes > bestBytes.Length + 512);
+                // If the wire capture was NOT truncated and matches the exact declared DATA size (e.g. 72-byte ASKSW.xml),
+                // wireBytes is already 100% complete! Only check Host Disk for an exact match, never overwrite with oversized RAM!
+                bool wireIsCompleteExact = !job.HadTruncatedUrb &&
+                                           bestBytes.Length > 0 &&
+                                           (job.TotalDeclaredBytes <= 0 || bestBytes.Length == job.TotalDeclaredBytes);
 
-                if (needsFullRecovery)
+                if (wireIsCompleteExact)
                 {
-                    // Run all 3 full-file recovery vectors in parallel and pick the most complete result!
-                    var diskTask = Task.Run(() => TryRecoverFromHostDisk(fileName, job.HeaderSignature), token);
-                    var pullTask = Task.Run(() => TryPullFullFileFromDevice(job.TargetPath), token);
-                    var ramTask = Task.Run(() => TryCarveFileFromTargetProcessRam(job.HeaderSignature, Math.Max(job.TotalDeclaredBytes, job.TotalActualUrbBytes)), token);
-
-                    await Task.WhenAll(diskTask, pullTask, ramTask);
-
-                    byte[]? diskBytes = diskTask.Result;
-                    byte[]? pulledBytes = pullTask.Result;
-                    byte[]? ramBytes = ramTask.Result;
-
-                    if (diskBytes != null && diskBytes.Length > bestBytes.Length)
+                    byte[]? diskExact = TryRecoverFromHostDisk(fileName, job.HeaderSignature);
+                    if (diskExact != null && diskExact.Length >= bestBytes.Length)
                     {
-                        bestBytes = diskBytes;
+                        bestBytes = diskExact;
                         bestVector = "Host Disk Snapshot";
                     }
-                    if (pulledBytes != null && pulledBytes.Length > bestBytes.Length)
+                }
+                else
+                {
+                    // 1. Check Eager Mid-Transfer Snapshot first
+                    if (job.EagerSnapshotTask != null)
                     {
-                        bestBytes = pulledBytes;
-                        bestVector = "Device Direct Mirror (adb pull)";
+                        try
+                        {
+                            byte[]? eagerBytes = await job.EagerSnapshotTask.ConfigureAwait(false);
+                            if (eagerBytes != null && eagerBytes.Length > bestBytes.Length)
+                            {
+                                bestBytes = eagerBytes;
+                                bestVector = "Eager Mid-Transfer RAM/Disk Snapshot";
+                            }
+                        }
+                        catch { }
                     }
-                    if (ramBytes != null && ramBytes.Length > bestBytes.Length)
+
+                    long expectedSize = job.TotalDeclaredBytes > 0
+                        ? job.TotalDeclaredBytes
+                        : job.TotalActualUrbBytes;
+
+                    bool needsFullRecovery = job.HadTruncatedUrb ||
+                                             bestBytes.Length == 0 ||
+                                             (job.TotalDeclaredBytes > bestBytes.Length);
+
+                    // 2. Run Host Disk + 64-bit/32-bit Target Process RAM carving in parallel
+                    if (needsFullRecovery && (expectedSize == 0 || bestBytes.Length < expectedSize))
                     {
-                        bestBytes = ramBytes;
-                        bestVector = "Process RAM Carve (64-Bit)";
+                        var diskTask = Task.Run(() => TryRecoverFromHostDisk(fileName, job.HeaderSignature), token);
+                        var ramTask = Task.Run(() => TryCarveFileFromTargetProcessRam(job.HeaderSignature, expectedSize), token);
+
+                        await Task.WhenAll(diskTask, ramTask).ConfigureAwait(false);
+
+                        byte[]? diskBytes = diskTask.Result;
+                        byte[]? ramBytes = ramTask.Result;
+
+                        if (diskBytes != null && diskBytes.Length > bestBytes.Length)
+                        {
+                            bestBytes = diskBytes;
+                            bestVector = "Host Disk Snapshot";
+                        }
+                        if (ramBytes != null && ramBytes.Length > bestBytes.Length)
+                        {
+                            bestBytes = ramBytes;
+                            bestVector = "Process RAM Carve (Passive)";
+                        }
                     }
                 }
 
+                // Allow saving any non-empty file >= 1 byte (including 72-byte ASKSW.xml and tiny trustedTime files!)
                 if (bestBytes.Length == 0 || bestBytes.Length <= existingSavedSize)
                 {
                     continue;
@@ -586,124 +769,22 @@ public sealed class SmartFilePushArchiver : IDisposable
     }
 
     /// <summary>
-    /// Pulls the exact full-size file (e.g. 15MB R2.zip or 480KB AT) directly from the connected phone
-    /// using the resolved path of the running adb.exe process.
+    /// Searches the active GSM tool's installation directory (all subdirectories) as well as %TEMP%
+    /// for either an exact filename match or a recent temporary file whose header matches HeaderSignature.
+    /// Supports files as small as 1 byte (e.g. 72-byte ASKSW.xml).
     /// </summary>
-    public static byte[]? TryPullFullFileFromDevice(string remoteDevicePath)
-    {
-        if (string.IsNullOrWhiteSpace(remoteDevicePath) || !remoteDevicePath.StartsWith("/"))
-            return null;
-
-        string adbExe = ResolveRunningAdbExecutablePath();
-        string fname = Path.GetFileName(remoteDevicePath);
-        string shadowRemotePath = $"/data/local/tmp/.phx_keep_{fname}";
-        string tempFile = Path.Combine(Path.GetTempPath(), $"phx_pull_{Guid.NewGuid():N}.tmp");
-
-        try
-        {
-            // Step 1: Create an instant hard-link (ln -f) on /data/local/tmp/ (< 2ms for 15MB!)
-            // so even if the GSM tool runs "rm -r /data/local/tmp/R2.zip" 100ms later, the 15MB inode remains intact!
-            var lnPsi = new ProcessStartInfo
-            {
-                FileName = adbExe,
-                Arguments = $"shell \"ln -f '{remoteDevicePath}' '{shadowRemotePath}' 2>/dev/null || cp -f '{remoteDevicePath}' '{shadowRemotePath}' 2>/dev/null\"",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            };
-            using (var lnProc = Process.Start(lnPsi))
-            {
-                lnProc?.WaitForExit(800);
-            }
-
-            // Step 2: Pull from the protected shadow link first, or fallback to original remoteDevicePath
-            foreach (string pullSource in new[] { shadowRemotePath, remoteDevicePath })
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = adbExe,
-                    Arguments = $"pull \"{pullSource}\" \"{tempFile}\"",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true
-                };
-
-                using var proc = Process.Start(psi);
-                if (proc != null)
-                {
-                    if (!proc.WaitForExit(8000))
-                    {
-                        try { proc.Kill(); } catch { }
-                    }
-                }
-
-                if (File.Exists(tempFile))
-                {
-                    byte[] data = File.ReadAllBytes(tempFile);
-                    try { File.Delete(tempFile); } catch { }
-                    if (data.Length > 0)
-                    {
-                        // Clean up shadow link on device asynchronously
-                        _ = Task.Run(() =>
-                        {
-                            try
-                            {
-                                using var rmProc = Process.Start(new ProcessStartInfo
-                                {
-                                    FileName = adbExe,
-                                    Arguments = $"shell \"rm -f '{shadowRemotePath}' 2>/dev/null\"",
-                                    UseShellExecute = false,
-                                    CreateNoWindow = true
-                                });
-                                rmProc?.WaitForExit(1000);
-                            }
-                            catch { }
-                        });
-                        return data;
-                    }
-                }
-            }
-        }
-        catch
-        {
-            try { if (File.Exists(tempFile)) File.Delete(tempFile); } catch { }
-        }
-
-        return null;
-    }
-
-    private static string ResolveRunningAdbExecutablePath()
-    {
-        try
-        {
-            foreach (var p in Process.GetProcessesByName("adb"))
-            {
-                try
-                {
-                    string? path = p.MainModule?.FileName;
-                    if (!string.IsNullOrEmpty(path) && File.Exists(path))
-                        return path;
-                }
-                catch { }
-                finally { p.Dispose(); }
-            }
-        }
-        catch { }
-
-        return "adb";
-    }
-
     private static byte[]? TryRecoverFromHostDisk(string fileName, byte[]? headerSig)
     {
-        if (string.IsNullOrWhiteSpace(fileName)) return null;
+        if (string.IsNullOrWhiteSpace(fileName) || IsIgnoredNoiseFile(fileName)) return null;
 
-        var dirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        var rootDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             Path.GetTempPath(),
             Environment.CurrentDirectory,
-            AppDomain.CurrentDomain.BaseDirectory
+            AppDomain.CurrentDomain.BaseDirectory,
+            @"C:\Program Files (x86)\KEY-Tool",
+            @"C:\Program Files\KEY-Tool",
+            @"C:\UnlockTool"
         };
 
         try
@@ -714,13 +795,15 @@ public sealed class SmartFilePushArchiver : IDisposable
                 {
                     if (p.Id <= 4 || p.Id == Environment.ProcessId) continue;
                     string pn = p.ProcessName.ToLowerInvariant();
-                    if (pn.Contains("adb") || pn.Contains("key") || pn.Contains("tool") || pn.Contains("samfw") || pn.Contains("chimera") || pn.Contains("unlock"))
+                    if (pn.Contains("key") || pn.Contains("tool") || pn.Contains("adb") ||
+                        pn.Contains("samfw") || pn.Contains("chimera") || pn.Contains("unlock") ||
+                        pn.Contains("odin") || pn.Contains("gsm"))
                     {
                         string? exe = p.MainModule?.FileName;
                         if (!string.IsNullOrEmpty(exe))
                         {
                             string? d = Path.GetDirectoryName(exe);
-                            if (!string.IsNullOrEmpty(d)) dirs.Add(d);
+                            if (!string.IsNullOrEmpty(d)) rootDirs.Add(d);
                         }
                     }
                 }
@@ -730,21 +813,64 @@ public sealed class SmartFilePushArchiver : IDisposable
         }
         catch { }
 
-        foreach (string dir in dirs)
+        // Pass 1: Recursive filename search across tool folders (finds retail\ASKSW.xml at any depth!)
+        foreach (string dir in rootDirs)
         {
             try
             {
                 if (!Directory.Exists(dir)) continue;
-                string candidate = Path.Combine(dir, fileName);
-                if (File.Exists(candidate))
+
+                string directCandidate = Path.Combine(dir, fileName);
+                byte[]? directBytes = TryReadSharedFile(directCandidate, headerSig);
+                if (directBytes != null) return directBytes;
+
+                var enumOpts = new EnumerationOptions
                 {
-                    using var fs = new FileStream(candidate, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                    if (fs.Length > 0 && fs.Length <= 128 * 1024 * 1024)
+                    IgnoreInaccessible = true,
+                    RecurseSubdirectories = true,
+                    MaxRecursionDepth = 4,
+                    MatchCasing = MatchCasing.CaseInsensitive
+                };
+
+                foreach (string matchPath in Directory.EnumerateFiles(dir, fileName, enumOpts))
+                {
+                    byte[]? subBytes = TryReadSharedFile(matchPath, headerSig);
+                    if (subBytes != null) return subBytes;
+                }
+            }
+            catch { }
+        }
+
+        // Pass 2: If the tool staged a randomly-named file in %TEMP% within the last 2 minutes, match by header signature (supports >= 4 bytes)
+        if (headerSig != null && headerSig.Length >= 4)
+        {
+            try
+            {
+                string tempDir = Path.GetTempPath();
+                DateTime cutoff = DateTime.UtcNow.AddMinutes(-2);
+                int sigCheckLen = Math.Min(headerSig.Length, 32);
+                byte[] headBuf = new byte[sigCheckLen];
+
+                foreach (string file in Directory.EnumerateFiles(tempDir))
+                {
+                    try
                     {
-                        byte[] buf = new byte[fs.Length];
-                        int read = fs.Read(buf, 0, buf.Length);
-                        if (read == buf.Length) return buf;
+                        if (IsIgnoredNoiseFile(file)) continue;
+                        var fi = new FileInfo(file);
+                        if (fi.LastWriteTimeUtc < cutoff || fi.Length < sigCheckLen || fi.Length > 128 * 1024 * 1024)
+                            continue;
+
+                        using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                        if (fs.Read(headBuf, 0, sigCheckLen) == sigCheckLen &&
+                            headBuf.AsSpan(0, sigCheckLen).SequenceEqual(headerSig.AsSpan(0, sigCheckLen)))
+                        {
+                            fs.Position = 0;
+                            byte[] full = new byte[fi.Length];
+                            if (fs.Read(full, 0, full.Length) == full.Length)
+                                return full;
+                        }
                     }
+                    catch { }
                 }
             }
             catch { }
@@ -753,19 +879,53 @@ public sealed class SmartFilePushArchiver : IDisposable
         return null;
     }
 
+    private static byte[]? TryReadSharedFile(string path, byte[]? expectedHeader)
+    {
+        try
+        {
+            if (!File.Exists(path)) return null;
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (fs.Length <= 0 || fs.Length > 128 * 1024 * 1024) return null;
+
+            byte[] buf = new byte[fs.Length];
+            int total = 0;
+            while (total < buf.Length)
+            {
+                int r = fs.Read(buf, total, buf.Length - total);
+                if (r <= 0) break;
+                total += r;
+            }
+            if (total != buf.Length) return null;
+
+            if (expectedHeader != null && expectedHeader.Length >= 4 && buf.Length >= 4)
+            {
+                int checkLen = Math.Min(8, Math.Min(expectedHeader.Length, buf.Length));
+                if (!buf.AsSpan(0, checkLen).SequenceEqual(expectedHeader.AsSpan(0, checkLen)))
+                {
+                    return null;
+                }
+            }
+
+            return buf;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     /// Fast, targeted 64-bit & 32-bit RAM carver.
-    /// ONLY scans the target GSM tool processes and adb.exe (never scans all 150 system processes!).
-    /// Supports 64-bit user address space up to 0x7FFFFFFF0000 and parses true ELF/ZIP/DEX sizes.
+    /// Supports small signatures (>= 4 bytes) and full 64-bit address space.
     /// </summary>
     public byte[]? TryCarveFileFromTargetProcessRam(byte[]? signature, long estimatedSize)
     {
-        if (signature == null || signature.Length < 16) return null;
+        if (signature == null || signature.Length < 4) return null;
 
-        int sigLen = Math.Min(signature.Length, 32);
-        byte[] sig32 = signature[..sigLen];
+        int sigLen = Math.Min(signature.Length, 64);
+        byte[] sigPattern = signature[..sigLen];
 
-        var targetPids = new HashSet<int>(_candidatePids.Keys);
+        var targetPids = new List<int>();
 
         try
         {
@@ -775,11 +935,15 @@ public sealed class SmartFilePushArchiver : IDisposable
                 {
                     if (p.Id <= 4 || p.Id == Environment.ProcessId) continue;
                     string pn = p.ProcessName.ToLowerInvariant();
-                    if (pn.Contains("key") || pn.Contains("tool") || pn.Contains("adb") ||
-                        pn.Contains("samfw") || pn.Contains("unlock") || pn.Contains("chimera") ||
-                        pn.Contains("odin") || pn.Contains("fastboot"))
+                    if (pn.Contains("key") || pn.Contains("tool") || pn.Contains("samfw") ||
+                        pn.Contains("unlock") || pn.Contains("chimera") || pn.Contains("odin") ||
+                        pn.Contains("fastboot") || pn.Contains("gsm"))
                     {
-                        targetPids.Add(p.Id);
+                        if (!targetPids.Contains(p.Id)) targetPids.Insert(0, p.Id);
+                    }
+                    else if (pn.Contains("adb"))
+                    {
+                        if (!targetPids.Contains(p.Id)) targetPids.Add(p.Id);
                     }
                 }
                 catch { }
@@ -788,18 +952,29 @@ public sealed class SmartFilePushArchiver : IDisposable
         }
         catch { }
 
+        foreach (int pid in _candidatePids.Keys)
+        {
+            if (!targetPids.Contains(pid)) targetPids.Add(pid);
+        }
+
+        byte[]? bestFound = null;
+
         foreach (int pid in targetPids)
         {
             IntPtr hProc = IntPtr.Zero;
             try
             {
                 hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
+                if (hProc == IntPtr.Zero)
+                {
+                    hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, false, pid);
+                }
                 if (hProc == IntPtr.Zero) continue;
 
                 long currentAddr = 0x10000;
                 long maxAddr = Environment.Is64BitOperatingSystem ? 0x00007FFFFFFF0000L : 0x7FFF0000L;
                 uint mbiSize = (uint)Marshal.SizeOf<MEMORY_BASIC_INFORMATION>();
-                byte[] chunkBuf = new byte[256 * 1024]; // 256KB scan window for fast sequential reads
+                byte[] chunkBuf = new byte[256 * 1024];
 
                 while (currentAddr < maxAddr)
                 {
@@ -817,7 +992,7 @@ public sealed class SmartFilePushArchiver : IDisposable
                                        mbi.Protect == PAGE_WRITECOPY || mbi.Protect == PAGE_EXECUTE_READ ||
                                        mbi.Protect == PAGE_EXECUTE_READWRITE);
 
-                    if (isReadable && regionSize >= sigLen && regionSize <= 64 * 1024 * 1024)
+                    if (isReadable && regionSize >= sigLen && regionSize <= 128 * 1024 * 1024)
                     {
                         long offset = 0;
                         while (offset < regionSize)
@@ -825,16 +1000,37 @@ public sealed class SmartFilePushArchiver : IDisposable
                             int toRead = (int)Math.Min(chunkBuf.Length, regionSize - offset);
                             if (ReadProcessMemory(hProc, (IntPtr)(baseAddr + offset), chunkBuf, toRead, out int bytesRead) && bytesRead >= sigLen)
                             {
-                                int foundIdx = IndexOfSequence(chunkBuf.AsSpan(0, bytesRead), sig32);
-                                if (foundIdx >= 0)
+                                int searchOffset = 0;
+                                while (searchOffset <= bytesRead - sigLen)
                                 {
+                                    int relIdx = IndexOfSequence(chunkBuf.AsSpan(searchOffset, bytesRead - searchOffset), sigPattern);
+                                    if (relIdx < 0) break;
+
+                                    int foundIdx = searchOffset + relIdx;
                                     long fileStartAddr = baseAddr + offset + foundIdx;
                                     long maxAvailableInRegion = regionSize - (offset + foundIdx);
-                                    byte[]? fullFile = ReadExactFileFromProcessMemory(hProc, fileStartAddr, maxAvailableInRegion, estimatedSize, sig32);
-                                    if (fullFile != null && fullFile.Length > signature.Length)
+
+                                    bool isWirePacketCopy = false;
+                                    if (foundIdx >= 8 &&
+                                        chunkBuf[foundIdx - 8] == (byte)'D' &&
+                                        chunkBuf[foundIdx - 7] == (byte)'A' &&
+                                        chunkBuf[foundIdx - 6] == (byte)'T' &&
+                                        chunkBuf[foundIdx - 5] == (byte)'A')
                                     {
-                                        return fullFile;
+                                        isWirePacketCopy = true;
                                     }
+
+                                    byte[]? carved = ReadExactFileFromProcessMemory(hProc, fileStartAddr, maxAvailableInRegion, estimatedSize, sigPattern);
+                                    if (carved != null && carved.Length > (bestFound?.Length ?? 0))
+                                    {
+                                        bestFound = carved;
+                                        if (!isWirePacketCopy && (estimatedSize <= 0 || bestFound.Length >= estimatedSize))
+                                        {
+                                            return bestFound;
+                                        }
+                                    }
+
+                                    searchOffset = foundIdx + sigLen;
                                 }
                             }
                             if (toRead <= sigLen) break;
@@ -854,24 +1050,20 @@ public sealed class SmartFilePushArchiver : IDisposable
             }
         }
 
-        return null;
+        return bestFound;
     }
 
-    /// <summary>
-    /// Determines the true file size in RAM by prioritizing format headers (ELF Program+Section headers,
-    /// ZIP End-of-Central-Directory up to 32MB, DEX file_size header) over the 64KB ADB DATA block size.
-    /// </summary>
     private static byte[]? ReadExactFileFromProcessMemory(
         IntPtr hProc,
         long fileStartAddr,
         long maxAvailableInRegion,
         long estimatedSize,
-        byte[] sig32)
+        byte[] sigPattern)
     {
         int targetSize = 0;
 
-        // 1. ELF Binary (0x7F 'E' 'L' 'F', e.g. AT = ~480 KB): compute max end across BOTH Program Headers and Section Headers!
-        if (sig32.Length >= 4 && sig32[0] == 0x7F && sig32[1] == 0x45 && sig32[2] == 0x4C && sig32[3] == 0x46)
+        // 1. ELF Binary (0x7F 'E' 'L' 'F')
+        if (sigPattern.Length >= 4 && sigPattern[0] == 0x7F && sigPattern[1] == 0x45 && sigPattern[2] == 0x4C && sigPattern[3] == 0x46)
         {
             byte[] elfHdr = new byte[64];
             if (ReadProcessMemory(hProc, (IntPtr)fileStartAddr, elfHdr, 64, out int hdrRead) && hdrRead >= 52)
@@ -888,12 +1080,13 @@ public sealed class SmartFilePushArchiver : IDisposable
                     ushort shentsize = BitConverter.ToUInt16(elfHdr, 58);
                     ushort shnum = BitConverter.ToUInt16(elfHdr, 60);
 
-                    if (shoff > 0 && shnum > 0 && shentsize > 0)
+                    if (shoff > 0 && shnum > 0 && shentsize > 0 && shnum <= 4096 && shentsize <= 256)
                     {
-                        maxEnd = Math.Max(maxEnd, (long)(shoff + (ulong)(shentsize * shnum)));
+                        long shEnd = (long)(shoff + (ulong)(shentsize * shnum));
+                        if (shEnd > 0 && shEnd <= 64 * 1024 * 1024) maxEnd = Math.Max(maxEnd, shEnd);
                     }
 
-                    if (phoff > 0 && phnum > 0 && phentsize >= 56 && phnum <= 64)
+                    if (phoff > 0 && phnum > 0 && phentsize >= 56 && phnum <= 128)
                     {
                         byte[] phTable = new byte[phentsize * phnum];
                         if (ReadProcessMemory(hProc, (IntPtr)(fileStartAddr + (long)phoff), phTable, phTable.Length, out int phRead) && phRead == phTable.Length)
@@ -919,12 +1112,13 @@ public sealed class SmartFilePushArchiver : IDisposable
                     ushort shentsize = BitConverter.ToUInt16(elfHdr, 46);
                     ushort shnum = BitConverter.ToUInt16(elfHdr, 48);
 
-                    if (shoff > 0 && shnum > 0 && shentsize > 0)
+                    if (shoff > 0 && shnum > 0 && shentsize > 0 && shnum <= 4096 && shentsize <= 256)
                     {
-                        maxEnd = Math.Max(maxEnd, shoff + (long)(shentsize * shnum));
+                        long shEnd = shoff + (long)(shentsize * shnum);
+                        if (shEnd > 0 && shEnd <= 64 * 1024 * 1024) maxEnd = Math.Max(maxEnd, shEnd);
                     }
 
-                    if (phoff > 0 && phnum > 0 && phentsize >= 32 && phnum <= 64)
+                    if (phoff > 0 && phnum > 0 && phentsize >= 32 && phnum <= 128)
                     {
                         byte[] phTable = new byte[phentsize * phnum];
                         if (ReadProcessMemory(hProc, (IntPtr)(fileStartAddr + phoff), phTable, phTable.Length, out int phRead) && phRead == phTable.Length)
@@ -948,8 +1142,8 @@ public sealed class SmartFilePushArchiver : IDisposable
                 }
             }
         }
-        // 2. DEX Header ("dex\n03"): exact uint32 file_size at offset 32
-        else if (sig32.Length >= 8 && sig32[0] == 0x64 && sig32[1] == 0x65 && sig32[2] == 0x78 && sig32[3] == 0x0A)
+        // 2. DEX Header ("dex\n03")
+        else if (sigPattern.Length >= 8 && sigPattern[0] == 0x64 && sigPattern[1] == 0x65 && sigPattern[2] == 0x78 && sigPattern[3] == 0x0A)
         {
             byte[] dexHdr = new byte[36];
             if (ReadProcessMemory(hProc, (IntPtr)fileStartAddr, dexHdr, 36, out int dRead) && dRead == 36)
@@ -961,11 +1155,11 @@ public sealed class SmartFilePushArchiver : IDisposable
                 }
             }
         }
-        // 3. ZIP / APK (0x50 0x4B 0x03 0x04, e.g. R2.zip = 15 MB): scan up to 32 MB for verified EOCD (0x50 0x4B 0x05 0x06)
-        else if (sig32.Length >= 4 && sig32[0] == 0x50 && sig32[1] == 0x4B && sig32[2] == 0x03 && sig32[3] == 0x04)
+        // 3. ZIP / APK (0x50 0x4B 0x03 0x04)
+        else if (sigPattern.Length >= 4 && sigPattern[0] == 0x50 && sigPattern[1] == 0x4B && sigPattern[2] == 0x03 && sigPattern[3] == 0x04)
         {
-            int maxScanBytes = (int)Math.Min(Math.Max(maxAvailableInRegion, 32 * 1024 * 1024L), 32 * 1024 * 1024L);
-            byte[] winBuf = new byte[1024 * 1024]; // 1MB sliding window up to 32MB
+            int maxScanBytes = (int)Math.Min(Math.Max(maxAvailableInRegion, 32 * 1024 * 1024L), 64 * 1024 * 1024L);
+            byte[] winBuf = new byte[512 * 1024];
             int scanned = 0;
 
             while (scanned < maxScanBytes)
@@ -996,6 +1190,28 @@ public sealed class SmartFilePushArchiver : IDisposable
                 scanned += r - 32;
             }
         }
+        // 4. XML / Text / Policy Files (e.g. ADP.xml, ASKSW.xml, trustedTime)
+        else if (sigPattern.Length >= 4 && (sigPattern[0] == (byte)'<' || IsMostlyPrintableAscii(sigPattern)))
+        {
+            int maxTextScan = (int)Math.Min(Math.Max(maxAvailableInRegion, 256 * 1024L), 2 * 1024 * 1024L);
+            byte[] textBuf = new byte[Math.Min(maxTextScan, 512 * 1024)];
+            if (ReadProcessMemory(hProc, (IntPtr)fileStartAddr, textBuf, textBuf.Length, out int tRead) && tRead > 0)
+            {
+                int endIdx = 0;
+                while (endIdx < tRead)
+                {
+                    byte b = textBuf[endIdx];
+                    if (b == 0) break;
+                    if (b < 0x09 || (b > 0x0D && b < 0x20)) break;
+                    endIdx++;
+                }
+
+                if (endIdx > 0)
+                {
+                    targetSize = (estimatedSize > 0 && estimatedSize <= endIdx) ? (int)estimatedSize : endIdx;
+                }
+            }
+        }
 
         if (targetSize <= 0 && estimatedSize > 0 && estimatedSize <= 64 * 1024 * 1024)
         {
@@ -1005,20 +1221,20 @@ public sealed class SmartFilePushArchiver : IDisposable
         if (targetSize > 0 && targetSize <= 64 * 1024 * 1024)
         {
             byte[] fullBytes = new byte[targetSize];
+            byte[] tempChunk = new byte[Math.Min(256 * 1024, targetSize)];
             int totalRead = 0;
+
             while (totalRead < targetSize)
             {
-                int chunkLen = Math.Min(1024 * 1024, targetSize - totalRead);
-                if (!ReadProcessMemory(hProc, (IntPtr)(fileStartAddr + totalRead), fullBytes, chunkLen, out int got) || got <= 0)
-                    break;
-                if (totalRead > 0)
+                int chunkLen = Math.Min(tempChunk.Length, targetSize - totalRead);
+                if (!ReadProcessMemory(hProc, (IntPtr)(fileStartAddr + totalRead), tempChunk, chunkLen, out int got) || got <= 0)
                 {
-                    // Read directly into offset via temp buffer when multi-MB
-                    byte[] tmp = new byte[chunkLen];
-                    if (!ReadProcessMemory(hProc, (IntPtr)(fileStartAddr + totalRead), tmp, chunkLen, out got) || got <= 0)
+                    int pageLen = Math.Min(4096, targetSize - totalRead);
+                    if (!ReadProcessMemory(hProc, (IntPtr)(fileStartAddr + totalRead), tempChunk, pageLen, out got) || got <= 0)
                         break;
-                    Buffer.BlockCopy(tmp, 0, fullBytes, totalRead, got);
                 }
+
+                Buffer.BlockCopy(tempChunk, 0, fullBytes, totalRead, got);
                 totalRead += got;
             }
 
@@ -1031,9 +1247,20 @@ public sealed class SmartFilePushArchiver : IDisposable
         return null;
     }
 
+    private static bool IsMostlyPrintableAscii(byte[] data)
+    {
+        if (data == null || data.Length == 0) return false;
+        int printable = 0;
+        foreach (byte b in data)
+        {
+            if (b == 9 || b == 10 || b == 13 || (b >= 32 && b <= 126)) printable++;
+        }
+        return printable >= (data.Length * 3) / 4;
+    }
+
     /// <summary>
-    /// Strictly saves ONLY ONE file per pushed artifact using its exact original filename
-    /// (NO duplicate .elf, NO .analysis.txt, NO Extracted_ folders).
+    /// Strictly saves ONLY ONE file per pushed artifact using its exact original filename.
+    /// Supports files of any size >= 1 byte (including 72-byte ASKSW.xml).
     /// </summary>
     public static CapturedPushedFileRecord? SaveSingleCleanFileToDisk(
         byte[] fileBytes,
@@ -1044,7 +1271,7 @@ public sealed class SmartFilePushArchiver : IDisposable
         if (fileBytes == null || fileBytes.Length == 0) return null;
 
         string fname = Path.GetFileName(targetPath);
-        if (string.IsNullOrWhiteSpace(fname)) fname = "pushed_file.bin";
+        if (string.IsNullOrWhiteSpace(fname) || IsIgnoredNoiseFile(fname)) return null;
 
         string artifactsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "CapturedArtifacts");
         try
@@ -1056,7 +1283,6 @@ public sealed class SmartFilePushArchiver : IDisposable
         string originalSavedPath = Path.Combine(artifactsDir, fname);
         try
         {
-            // If an older/smaller version exists, only overwrite if the new capture is >= existing size
             if (File.Exists(originalSavedPath))
             {
                 long existingLen = new FileInfo(originalSavedPath).Length;
@@ -1139,11 +1365,11 @@ public sealed class SmartFilePushArchiver : IDisposable
         return -1;
     }
 
-    public static int FindDataHeaderOffset(byte[] chunk)
+    public static int FindDataHeaderOffset(byte[] chunk, int startOffset = 0)
     {
-        if (chunk == null || chunk.Length < 8) return -1;
-        int maxSearch = Math.Min(chunk.Length - 8, 256);
-        for (int i = 0; i <= maxSearch; i++)
+        if (chunk == null || chunk.Length < startOffset + 8) return -1;
+        int maxSearch = chunk.Length - 8;
+        for (int i = Math.Max(0, startOffset); i <= maxSearch; i++)
         {
             if (chunk[i] == 'D' && chunk[i + 1] == 'A' && chunk[i + 2] == 'T' && chunk[i + 3] == 'A')
             {
@@ -1157,7 +1383,6 @@ public sealed class SmartFilePushArchiver : IDisposable
     {
         if (chunk == null || chunk.Length < minOffset + 8) return -1;
 
-        // Exact 8-byte DONE trailer at the end of the packet ("DONE" + 4-byte mtime)
         int exactPos = chunk.Length - 8;
         if (exactPos >= minOffset &&
             chunk[exactPos] == 'D' && chunk[exactPos + 1] == 'O' &&
@@ -1166,8 +1391,7 @@ public sealed class SmartFilePushArchiver : IDisposable
             return exactPos;
         }
 
-        int searchStart = Math.Max(minOffset, chunk.Length - 16);
-        for (int i = chunk.Length - 8; i >= searchStart; i--)
+        for (int i = chunk.Length - 8; i >= minOffset; i--)
         {
             if (chunk[i] == 'D' && chunk[i + 1] == 'O' && chunk[i + 2] == 'N' && chunk[i + 3] == 'E')
             {
