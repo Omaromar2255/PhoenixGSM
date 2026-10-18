@@ -467,13 +467,21 @@ public static partial class Program
     }
 
     /// <summary>
-    /// TEST 86: Smart File Push Archiver Multi-Vector Recovery.
+    /// TEST 86: Smart File Push Archiver Multi-Vector Recovery & Single-File Preservation.
     /// Verifies wire stream reassembly with split headers, DATA/DONE stripping,
-    /// auto-extension naming, zip auto-extraction, and inline base64 decoding.
+    /// asynchronous background processing, and strictly saving ONE clean file with original name.
     /// </summary>
     public static bool Test86_SmartFilePushArchiverMultiVector()
     {
-        var archiver = new SmartFilePushArchiver();
+        using var archiver = new SmartFilePushArchiver();
+        var capturedRecords = new System.Collections.Concurrent.ConcurrentBag<CapturedPushedFileRecord>();
+        var captureWait = new AutoResetEvent(false);
+
+        archiver.OnFileArchivedAsync += (rec, ep) =>
+        {
+            capturedRecords.Add(rec);
+            captureWait.Set();
+        };
 
         // 1. Test Split SEND Header across two packets with mode 33206 (e.g. R2.zip)
         // Packet 1: Partial SEND command
@@ -500,15 +508,16 @@ public static partial class Program
         p2Ms.Write(BitConverter.GetBytes(1700000000u)); // mtime
         byte[] p2 = p2Ms.ToArray();
 
-        bool res2 = archiver.ProcessOutboundSyncOrBulkChunk(p2, "OUT", "0x01", (uint)p2.Length, out var rec2);
-        if (!res2 || rec2 == null) return false;
-        if (rec2.FileName != "R2.zip" || rec2.FileSizeBytes != zipPayload.Length) return false;
-        if (!File.Exists(rec2.LocalSavedPath)) return false;
-        if (string.IsNullOrEmpty(rec2.ExtractedZipDirectory) || !Directory.Exists(rec2.ExtractedZipDirectory)) return false;
-        string extractedFile = Path.Combine(rec2.ExtractedZipDirectory, "payload.sh");
-        if (!File.Exists(extractedFile)) return false;
+        bool res2 = archiver.ProcessOutboundSyncOrBulkChunk(p2, "OUT", "0x01", (uint)p2.Length, out _);
+        if (!res2) return false;
 
-        // 2. Test Auto-Extension on Extensionless APK (/data/local/tmp/SRV4)
+        // Wait for background worker to save R2.zip
+        if (!captureWait.WaitOne(3000)) return false;
+        var rec2 = capturedRecords.FirstOrDefault(r => r.FileName == "R2.zip");
+        if (rec2 == null || rec2.FileSizeBytes != zipPayload.Length) return false;
+        if (!File.Exists(rec2.LocalSavedPath)) return false;
+
+        // 2. Test Single Clean File Preservation on Extensionless APK (/data/local/tmp/SRV4)
         byte[] apkPayload = CreateSyntheticApkPayload();
         using var apkMs = new MemoryStream();
         apkMs.Write(Encoding.ASCII.GetBytes("SEND /data/local/tmp/SRV4,33188"));
@@ -519,9 +528,12 @@ public static partial class Program
         apkMs.Write(BitConverter.GetBytes(1700000000u));
         byte[] apkPacket = apkMs.ToArray();
 
-        bool resApk = archiver.ProcessOutboundSyncOrBulkChunk(apkPacket, "OUT", "0x01", (uint)apkPacket.Length, out var recApk);
-        if (!resApk || recApk == null) return false;
-        if (recApk.AutoExtFileName != "SRV4.apk" || !File.Exists(recApk.AutoExtSavedPath)) return false;
+        bool resApk = archiver.ProcessOutboundSyncOrBulkChunk(apkPacket, "OUT", "0x01", (uint)apkPacket.Length, out _);
+        if (!resApk) return false;
+
+        if (!captureWait.WaitOne(3000)) return false;
+        var recApk = capturedRecords.FirstOrDefault(r => r.FileName == "SRV4");
+        if (recApk == null || !File.Exists(recApk.LocalSavedPath) || recApk.FileSizeBytes != apkPayload.Length) return false;
 
         // 3. Test Auto-Flush on Shell command (e.g. chmod before DONE arrives)
         using var flushMs = new MemoryStream();
@@ -536,19 +548,22 @@ public static partial class Program
         if (!archiver.IsInsideTransfer) return false;
 
         // Simulating immediate chmod command
-        bool chmodFlush = archiver.CheckShellCommandForInlineFileOrFlush(
-            "shell:chmod 777 /data/local/tmp/AT", 1234, "SamFW.exe", out var recChmod);
-        if (!chmodFlush || recChmod == null) return false;
-        if (recChmod.FileName != "AT" || recChmod.AutoExtFileName != "AT.elf") return false;
+        archiver.CheckShellCommandForInlineFileOrFlush("shell:chmod 777 /data/local/tmp/AT", 1234, "SamFW.exe", out _);
         if (archiver.IsInsideTransfer) return false;
+
+        if (!captureWait.WaitOne(3000)) return false;
+        var recChmod = capturedRecords.FirstOrDefault(r => r.FileName == "AT");
+        if (recChmod == null || recChmod.FileName != "AT" || !File.Exists(recChmod.LocalSavedPath)) return false;
 
         // 4. Test Inline Base64 File Push (echo '...' | base64 -d > /data/local/tmp/script.sh)
         string testScript = "#!/bin/sh\nid\n";
         string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(testScript));
         string b64Cmd = $"echo '{b64}' | base64 -d > /data/local/tmp/script.sh";
-        bool b64Ok = archiver.CheckShellCommandForInlineFileOrFlush(b64Cmd, 5678, "adb.exe", out var recB64);
-        if (!b64Ok || recB64 == null) return false;
-        if (recB64.TargetDevicePath != "/data/local/tmp/script.sh" || recB64.CaptureVector != "Base64 Inline Stream") return false;
+        archiver.CheckShellCommandForInlineFileOrFlush(b64Cmd, 5678, "adb.exe", out _);
+
+        if (!captureWait.WaitOne(3000)) return false;
+        var recB64 = capturedRecords.FirstOrDefault(r => r.FileName == "script.sh");
+        if (recB64 == null || recB64.TargetDevicePath != "/data/local/tmp/script.sh" || recB64.CaptureVector != "Base64 Inline Stream") return false;
 
         return true;
     }

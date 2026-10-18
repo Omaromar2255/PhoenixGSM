@@ -30,6 +30,8 @@ public partial class MonitoringEngine
     #region USB Driver Capture Loop
     private async Task DriverCaptureLoop(CancellationToken token)
     {
+        _smartFileArchiver.OnFileArchivedAsync -= EmitCapturedPushedFile;
+        _smartFileArchiver.OnFileArchivedAsync += EmitCapturedPushedFile;
         bool driverAvailable = false;
         while (!token.IsCancellationRequested)
         {
@@ -74,6 +76,7 @@ public partial class MonitoringEngine
 
                     string epHex = $"0x{pkt.EndpointAddress:X2}";
                     var pDir = pkt.Direction == 0 ? PhoenixGSM.OmniTrace.Models.PacketDirection.HOST_TO_DEVICE : PhoenixGSM.OmniTrace.Models.PacketDirection.DEVICE_TO_HOST;
+                    bool isUpperFilterPort = (pkt.TransferType == 4);
 
                     bool isAdbHeader = chunk.Length >= 24 && PhoenixGSM.UsbMonitor.Protocol.AdbProtocolParser.ValidateHeader(chunk, 0, out _, out _, out _, out _, out _);
                     bool isSahara = chunk.Length >= 8 && PhoenixGSM.OmniTrace.Decoders.QualcommEdlDecoder.EvaluateSahara(chunk) >= 0.8;
@@ -125,12 +128,33 @@ public partial class MonitoringEngine
                                           cleanLineTrimmed.Contains(",33188DATA", StringComparison.Ordinal) ||
                                           cleanLineTrimmed.Contains(",33261DATA", StringComparison.Ordinal);
 
+                    // تجاهل أوامر الحفظ الخلفية الخاصة بالراصد (.phx_keep_) حتى لا تظهر في سجل الأوامر
+                    if (rawAsciiPreview.Contains(".phx_keep_", StringComparison.OrdinalIgnoreCase) ||
+                        cleanLineTrimmed.Contains(".phx_keep_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
                     if (isSyncOpen || rawAsciiPreview.StartsWith("STAT", StringComparison.Ordinal) ||
                         rawAsciiPreview.StartsWith("SEND", StringComparison.Ordinal) ||
-                        cleanLineTrimmed.Contains(",33188DATA", StringComparison.Ordinal))
+                        cleanLineTrimmed.Contains(",33188", StringComparison.Ordinal) ||
+                        cleanLineTrimmed.Contains(",33206", StringComparison.Ordinal) ||
+                        cleanLineTrimmed.Contains(",33261", StringComparison.Ordinal) ||
+                        cleanLineTrimmed.Contains(",33279", StringComparison.Ordinal))
                     {
                         _isInsideFileSyncTransfer = true;
                         _activeInteractiveShellCommand = string.Empty;
+                    }
+
+                    // تمرير حزم رفع الملفات في البداية قبل فحص isAdbInteractiveCmd و isAdbStream
+                    if (dir == "OUT" && !isUpperFilterPort && !isAdbHeader &&
+                        !cleanLineTrimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _smartFileArchiver.ProcessOutboundSyncOrBulkChunk(chunk, dir, epHex, pkt.ActualLength, out _);
+                        if (_smartFileArchiver.IsInsideTransfer)
+                        {
+                            _isInsideFileSyncTransfer = true;
+                        }
                     }
 
                     // Track channel state transitions for explicit shell commands
@@ -331,7 +355,7 @@ public partial class MonitoringEngine
                                        rawAsciiPreview.Contains("<<")
                     );
 
-                    bool isUpperFilterPort = (pkt.TransferType == 4);
+                    isUpperFilterPort = (pkt.TransferType == 4);
                     bool isNonAtUsbProtocol = isAdbHeader || isAdbStream || isAdbRilIpc || isAdbInteractiveCmd || isAdbSync || isSahara || isFirehose || isFastboot || isSocketBridgeChannel;
 
                     double atConf = chunk.Length > 0 
@@ -694,14 +718,6 @@ public partial class MonitoringEngine
                     }
                     else
                     {
-                        if (dir == "OUT" && !isUpperFilterPort && !cleanLineTrimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
-                        {
-                            if (_smartFileArchiver.ProcessOutboundSyncOrBulkChunk(chunk, dir, epHex, pkt.ActualLength, out var completedPushRec) && completedPushRec != null)
-                            {
-                                EmitCapturedPushedFile(completedPushRec, epHex);
-                            }
-                        }
-
                         var frames = _adbParser.ProcessChunk(chunk, dir, "Android Phone", "", "", 1, epHex);
 
                         if (frames != null && frames.Count > 0)
@@ -711,10 +727,10 @@ public partial class MonitoringEngine
                             {
                                 if (frame.Command == "CLSE")
                                 {
-                                    _isInsideFileSyncTransfer = false;
-                                    if (_smartFileArchiver.FlushIfActive(out var flushedRec) && flushedRec != null)
+                                    _smartFileArchiver.FlushIfActive(out _, isClseSignal: true);
+                                    if (!_smartFileArchiver.IsInsideTransfer)
                                     {
-                                        EmitCapturedPushedFile(flushedRec, epHex);
+                                        _isInsideFileSyncTransfer = false;
                                     }
                                     continue;
                                 }
@@ -725,6 +741,10 @@ public partial class MonitoringEngine
                                 }
 
                                 string payloadPreview = frame.PayloadPreview ?? "";
+                                if (payloadPreview.Contains(".phx_keep_", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    continue;
+                                }
 
                                 if (frame.Command == "OPEN")
                                 {
@@ -1076,19 +1096,7 @@ public partial class MonitoringEngine
         string vector = rec.CaptureVector;
         string classification = rec.FileClassification;
 
-        string summary = $"[ADB-PUSH] Completed: {targetPath} ({size:N0} bytes) | Classification: {classification} | Vector: {vector} | Saved: {rec.LocalSavedPath}";
-        if (!string.IsNullOrEmpty(rec.AutoExtSavedPath))
-        {
-            summary += $" | AutoExt: {rec.AutoExtFileName}";
-        }
-        if (!string.IsNullOrEmpty(rec.ExtractedZipDirectory))
-        {
-            summary += $" | Extracted: Extracted_{Path.GetFileNameWithoutExtension(fname)}";
-        }
-        if (!string.IsNullOrEmpty(rec.AnalysisReportPath))
-        {
-            summary += $" | Analysis: {Path.GetFileName(rec.AnalysisReportPath)}";
-        }
+        string summary = $"[ADB-PUSH] Completed: {targetPath} ({size:N0} bytes) | Classification: {classification} | Vector: {vector} | Saved: CapturedArtifacts/{fname}";
 
         EmitEvent(new LiveEventItem
         {
@@ -1103,10 +1111,7 @@ public partial class MonitoringEngine
             RawPayload = rec.FileBytes.Take(128).ToArray(),
             PayloadAscii = summary,
             PayloadHex = LiveEventItem.FormatHexDump(rec.FileBytes.Take(64).ToArray()),
-            AdditionalDetails = $"Target Path: {targetPath}\nMode: {rec.FilePermissionMode}\nTotal Bytes: {size:N0}\nClassification: {classification}\nVector: {vector}\nSHA256: {rec.Sha256}\nMD5: {rec.Md5}\nSaved: {rec.LocalSavedPath}" +
-                (!string.IsNullOrEmpty(rec.AutoExtSavedPath) ? $"\nAuto-Ext Saved: {rec.AutoExtSavedPath}" : "") +
-                (!string.IsNullOrEmpty(rec.ExtractedZipDirectory) ? $"\nExtracted Zip: {rec.ExtractedZipDirectory}" : "") +
-                (!string.IsNullOrEmpty(rec.AnalysisReportPath) ? $"\nAnalysis Report: {rec.AnalysisReportPath}" : "")
+            AdditionalDetails = $"Target Path: {targetPath}\nMode: {rec.FilePermissionMode}\nTotal Bytes: {size:N0}\nClassification: {classification}\nVector: {vector}\nSHA256: {rec.Sha256}\nMD5: {rec.Md5}\nSaved: {rec.LocalSavedPath}"
         });
 
         if (_omniService?.ArtifactSensor?.Vault != null)
