@@ -317,8 +317,111 @@ public partial class MainViewModel
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Builds a comprehensive, human-readable forensic text log of all events.
+    /// Includes timestamps, categories, source tags, direction, target/port, protocol, command, summary, payloads, and technical details.
+    /// </summary>
+    public static string BuildFullEventsExportText(
+        IReadOnlyList<LiveEventItem> sourceEvents,
+        string categoryName,
+        bool includeResponses)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("================================================================================");
+        sb.AppendLine("         PHOENIX GSM MONITORING STUDIO — COMPREHENSIVE FORENSIC LOG             ");
+        sb.AppendLine("================================================================================");
+        sb.AppendLine($" التاريخ / Export Date      : {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        sb.AppendLine($" إجمالي السجلات / Records    : {sourceEvents.Count}");
+        sb.AppendLine($" التصنيف المحدد / Category   : {categoryName}");
+        sb.AppendLine($" تضمين الردود / Phone Replies: {(includeResponses ? "مفعّل (Enabled)" : "معطّل (Disabled)")}");
+        sb.AppendLine("================================================================================");
+        sb.AppendLine();
+
+        for (int i = 0; i < sourceEvents.Count; i++)
+        {
+            var ev = sourceEvents[i];
+            if (ev == null) continue;
+
+            sb.AppendLine($"#{i + 1:D5} [{ev.TimeFormatted}] [{ev.Category}] [{ev.SourceTag}] [{ev.Direction}] [{ev.Protocol}]");
+            sb.AppendLine($"  Target / Port : {ev.EndpointOrTarget}");
+            sb.AppendLine($"  Command       : {ev.Command}");
+            if (!string.IsNullOrWhiteSpace(ev.Summary))
+            {
+                sb.AppendLine($"  Summary       : {ev.Summary}");
+            }
+            if (!string.IsNullOrWhiteSpace(ev.PayloadAscii))
+            {
+                sb.AppendLine($"  ASCII Payload : {ev.PayloadAscii}");
+            }
+            if (!string.IsNullOrWhiteSpace(ev.PayloadHex) && ev.PayloadHex != "(Empty Payload)")
+            {
+                sb.AppendLine($"  HEX Payload   : {ev.PayloadHex}");
+            }
+            if (!string.IsNullOrWhiteSpace(ev.AdditionalDetails))
+            {
+                sb.AppendLine($"  Details       : {ev.AdditionalDetails.Replace("\n", "\n                  ")}");
+            }
+            sb.AppendLine(new string('-', 80));
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Builds a comma-separated values (CSV) representation of all events, compatible with Excel.
+    /// </summary>
+    public static string BuildEventsCsv(IReadOnlyList<LiveEventItem> sourceEvents)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("ID,Time,Category,SourceTag,Direction,EndpointOrTarget,Protocol,Command,Summary,AdditionalDetails,PayloadHex");
+
+        for (int i = 0; i < sourceEvents.Count; i++)
+        {
+            var ev = sourceEvents[i];
+            if (ev == null) continue;
+
+            sb.AppendLine(string.Join(",",
+                EscapeCsv(ev.Id.ToString()),
+                EscapeCsv(ev.TimeFormatted),
+                EscapeCsv(ev.Category.ToString()),
+                EscapeCsv(ev.SourceTag),
+                EscapeCsv(ev.Direction),
+                EscapeCsv(ev.EndpointOrTarget),
+                EscapeCsv(ev.Protocol),
+                EscapeCsv(ev.Command),
+                EscapeCsv(ev.Summary),
+                EscapeCsv(ev.AdditionalDetails),
+                EscapeCsv(ev.PayloadHex)
+            ));
+        }
+
+        return sb.ToString();
+    }
+
+    private static string EscapeCsv(string? field)
+    {
+        if (string.IsNullOrEmpty(field)) return "\"\"";
+        string clean = field.Replace("\"", "\"\"").Replace("\r", " ").Replace("\n", " ");
+        return $"\"{clean}\"";
+    }
+
     private void ExportLogs()
     {
+        // 1. If currently in the dedicated Technician-to-Phone Audit tab, export its records
+        if (IsTechnicianAuditViewActive)
+        {
+            ExportTechnicianAuditRecords();
+            return;
+        }
+
+        // 2. If currently in the dedicated Tool-Source Interception tab, export its records
+        if (IsToolSourceInterceptionViewActive)
+        {
+            ExportToolSourceRecords();
+            return;
+        }
+
+        // 3. We are in the General Forensic Stream
         var visibleEvents = FilteredEvents.Cast<LiveEventItem>().ToList();
         if (visibleEvents.Count == 0)
         {
@@ -330,82 +433,142 @@ public partial class MainViewModel
             return;
         }
 
-        if (SelectedCategory == EventSourceCategory.PhoneCommands)
+        string timeStr = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        bool isPhoneCommandsCategory = (SelectedCategory == EventSourceCategory.PhoneCommands);
+
+        var dialog = new Microsoft.Win32.SaveFileDialog
         {
-            var phoneChoice = MessageBox.Show(
-                "أنت حالياً في تبويب أوامر الهاتف (Phone Cmds).\n\n" +
-                "- اختر 'Yes' لتصدير الأوامر المنظمة (نوع الأمر + الأمر من بداية السطر + رد الهاتف إن كان مفعلاً).\n" +
-                "- اختر 'No' لتصدير السجل الكامل بملف JSON.\n" +
-                "- اختر 'Cancel' للإلغاء.",
-                "خيارات تصدير أوامر الهاتف",
-                MessageBoxButton.YesNoCancel,
-                MessageBoxImage.Question);
+            InitialDirectory = Directory.Exists(desktopPath) ? desktopPath : string.Empty,
+            DefaultExt = ".txt"
+        };
 
-            if (phoneChoice == MessageBoxResult.Yes)
-            {
-                ExportPurePhoneCommandsOnly();
-                return;
-            }
-            if (phoneChoice == MessageBoxResult.Cancel)
-            {
-                return;
-            }
-        }
-
-        int totalCount = Events.Count;
-        int excludedCount = totalCount - visibleEvents.Count;
-
-        string exclusionMsg = excludedCount > 0 
-            ? $"\n\nملاحظة: سيتم استثناء وتخطي {excludedCount} سجلاً مستبعداً ومخفياً بناءً على فلاتر الاستثناء المحددة."
-            : "";
-
-        var resType = MessageBox.Show(
-            $"هل تريد تصدير الأوامر المنظمة (ملف نصي TXT) أم السجلات الكاملة (ملف JSON)؟{exclusionMsg}\n\n- اختر 'Yes' لتصدير الأوامر بشكل منظم (نوع الأمر -> الأمر من بداية السطر -> رد الهاتف).\n- اختر 'No' لتصدير السجلات كاملة (ملف JSON مفصل).\n- اختر 'Cancel' للإلغاء.",
-            "خيارات التصدير المنظم",
-            MessageBoxButton.YesNoCancel,
-            MessageBoxImage.Question);
-
-        if (resType == MessageBoxResult.Cancel)
-            return;
-
-        var reportDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "PhoenixGSM", "Reports");
-        Directory.CreateDirectory(reportDir);
-
-        var timeStr = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-        string filePath;
-
-        if (resType == MessageBoxResult.Yes)
+        if (isPhoneCommandsCategory)
         {
-            filePath = Path.Combine(reportDir, $"commands_export_{timeStr}.txt");
-            bool includeReplies = IsCaptureDeviceResponsesEnabled ||
-                                  visibleEvents.Any(IsPhoneDeviceResponse);
-
-            string structuredBody = BuildStructuredCommandsExportText(
-                visibleEvents,
-                includeDeviceResponses: includeReplies,
-                out int exportedCmdCount);
-
-            var sb = new StringBuilder();
-            sb.AppendLine("=== سجل الأوامر المنظم (Structured Phone Commands Log) ===");
-            sb.AppendLine($"تاريخ التصدير: {DateTime.Now}");
-            sb.AppendLine($"إجمالي الأوامر الصافية المصدرة: {exportedCmdCount}");
-            sb.AppendLine($"حالة تضمين رد الهاتف: {(includeReplies ? "مفعّل (ON)" : "معطّل (OFF)")}");
-            sb.AppendLine(new string('=', 60));
-            sb.AppendLine();
-            sb.Append(structuredBody);
-
-            File.WriteAllText(filePath, sb.ToString(), Encoding.UTF8);
+            dialog.Title = "تصدير أوامر الهاتف المنظمة (Phone Commands Export)";
+            dialog.FileName = $"Phone_Commands_Structured_{timeStr}";
+            dialog.Filter = "أوامر الهاتف الصافية المنظمة (*.txt)|*.txt|سجل جنائي للأوامر مفصل (*.json)|*.json|جدول بيانات إكسل (*.csv)|*.csv|جميع الملفات (*.*)|*.*";
         }
         else
         {
-            filePath = Path.Combine(reportDir, $"gui_export_{timeStr}.json");
-            var json = JsonSerializer.Serialize(visibleEvents, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(filePath, json, Encoding.UTF8);
+            string categoryLabel = SelectedCategory == EventSourceCategory.All ? "All_Logs" : $"{SelectedCategory}_Logs";
+            string titleArabic = SelectedCategory == EventSourceCategory.All 
+                ? "تصدير السجلات الشاملة (All Forensic Events)" 
+                : $"تصدير سجلات التصنيف ({SelectedCategory})";
+
+            dialog.Title = titleArabic;
+            dialog.FileName = $"PhoenixGSM_{categoryLabel}_{timeStr}";
+            dialog.Filter = "سجل نصي شامل لكافة الأحداث والسجلات (*.txt)|*.txt|جدول بيانات إكسل (*.csv)|*.csv|ملف بيانات جنائي كامل مفصل (*.json)|*.json|أوامر الهاتف المنظمة فقط (*.txt)|*.txt|جميع الملفات (*.*)|*.*";
         }
 
-        string exportSummary = $"تم تصدير السجلات بشكل منظم بنجاح إلى:\n{filePath}\n\nهل تريد فتح الملف الآن؟";
+        if (dialog.ShowDialog() != true)
+            return;
+
+        string targetFile = dialog.FileName;
+        bool includeReplies = IsCaptureDeviceResponsesEnabled || visibleEvents.Any(IsPhoneDeviceResponse);
+
+        try
+        {
+            if (isPhoneCommandsCategory)
+            {
+                if (targetFile.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                {
+                    string json = JsonSerializer.Serialize(visibleEvents, new JsonSerializerOptions { WriteIndented = true });
+                    File.WriteAllText(targetFile, json, Encoding.UTF8);
+                }
+                else if (targetFile.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+                {
+                    string csv = BuildEventsCsv(visibleEvents);
+                    File.WriteAllText(targetFile, csv, Encoding.UTF8);
+                }
+                else
+                {
+                    string structuredBody = BuildStructuredCommandsExportText(
+                        visibleEvents,
+                        includeDeviceResponses: includeReplies,
+                        out int exportedCmdCount);
+
+                    var sb = new StringBuilder();
+                    sb.AppendLine("=== سجل أوامر الهاتف المنظم (Structured Phone Commands Log) ===");
+                    sb.AppendLine($"تاريخ التصدير: {DateTime.Now}");
+                    sb.AppendLine($"إجمالي الأوامر الصافية المصدرة: {exportedCmdCount}");
+                    sb.AppendLine($"حالة تضمين رد الهاتف: {(includeReplies ? "مفعّل (ON)" : "معطّل (OFF)")}");
+                    sb.AppendLine(new string('=', 60));
+                    sb.AppendLine();
+                    sb.Append(structuredBody);
+
+                    File.WriteAllText(targetFile, sb.ToString(), Encoding.UTF8);
+
+                    try
+                    {
+                        Clipboard.SetText(structuredBody);
+                    }
+                    catch { }
+                }
+            }
+            else
+            {
+                // In "All" tab (الكل) or sensor categories
+                if (dialog.FilterIndex == 4)
+                {
+                    // User explicitly chose "أوامر الهاتف المنظمة فقط (*.txt)"
+                    string structuredBody = BuildStructuredCommandsExportText(
+                        visibleEvents,
+                        includeDeviceResponses: includeReplies,
+                        out int exportedCmdCount);
+
+                    var sb = new StringBuilder();
+                    sb.AppendLine("=== سجل أوامر الهاتف المنظم (Phone Commands Extracted from All Events) ===");
+                    sb.AppendLine($"تاريخ التصدير: {DateTime.Now}");
+                    sb.AppendLine($"إجمالي الأوامر المصدرة: {exportedCmdCount}");
+                    sb.AppendLine($"حالة تضمين رد الهاتف: {(includeReplies ? "مفعّل (ON)" : "معطّل (OFF)")}");
+                    sb.AppendLine(new string('=', 60));
+                    sb.AppendLine();
+                    sb.Append(structuredBody);
+
+                    File.WriteAllText(targetFile, sb.ToString(), Encoding.UTF8);
+                }
+                else if (targetFile.EndsWith(".json", StringComparison.OrdinalIgnoreCase) || dialog.FilterIndex == 3)
+                {
+                    string json = JsonSerializer.Serialize(visibleEvents, new JsonSerializerOptions { WriteIndented = true });
+                    File.WriteAllText(targetFile, json, Encoding.UTF8);
+                }
+                else if (targetFile.EndsWith(".csv", StringComparison.OrdinalIgnoreCase) || dialog.FilterIndex == 2)
+                {
+                    string csv = BuildEventsCsv(visibleEvents);
+                    File.WriteAllText(targetFile, csv, Encoding.UTF8);
+                }
+                else
+                {
+                    // Default .txt (FilterIndex 1): Comprehensive forensic text log of ALL events
+                    string catDisplay = SelectedCategory == EventSourceCategory.All ? "الكل (All Forensic Events)" : SelectedCategory.ToString();
+                    string fullText = BuildFullEventsExportText(visibleEvents, catDisplay, includeReplies);
+                    File.WriteAllText(targetFile, fullText, Encoding.UTF8);
+                }
+            }
+
+            // Save backup in Reports folder
+            try
+            {
+                var reportDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "PhoenixGSM", "Reports");
+                Directory.CreateDirectory(reportDir);
+                string backupPath = Path.Combine(reportDir, Path.GetFileName(targetFile));
+                if (!string.Equals(targetFile, backupPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Copy(targetFile, backupPath, overwrite: true);
+                }
+            }
+            catch { }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"تعذر إتمام عملية التصدير: {ex.Message}", "خطأ في التصدير", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        string exportSummary = $"✅ تم تصدير {visibleEvents.Count} سجلاً بنجاح إلى:\n{targetFile}\n\nهل تريد فتح الملف الآن؟";
 
         var res = MessageBox.Show(
             exportSummary,
@@ -417,7 +580,7 @@ public partial class MainViewModel
         {
             try
             {
-                Process.Start(new ProcessStartInfo { FileName = filePath, UseShellExecute = true });
+                Process.Start(new ProcessStartInfo { FileName = targetFile, UseShellExecute = true });
             }
             catch { }
         }

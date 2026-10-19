@@ -19,7 +19,7 @@
     CTL_CODE(FILE_DEVICE_PHOENIX_MONITOR, 0x803, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
 #define PHOENIX_MAX_PAYLOAD_CAPTURE     1024
-#define PHOENIX_MAX_QUEUE_CAPACITY      512
+#define PHOENIX_MAX_QUEUE_CAPACITY      4096
 
 #define PHOENIX_DIR_OUT                 0 // Host to Device
 #define PHOENIX_DIR_IN                  1 // Device to Host

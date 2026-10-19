@@ -372,7 +372,8 @@ VOID FilterEvtIoInternalDeviceControl(WDFQUEUE Queue, WDFREQUEST Request, size_t
                         }
 
                         if (buffer != NULL && len > 0) {
-                            ULONG maxTotalSlice = (len > 65536) ? 65536 : len;
+                            // Allow full 64KB ADB DATA block + 8B SYNC header + 24B ADB WRTE header (65,568 bytes) without losing the last 8 bytes!
+                            ULONG maxTotalSlice = (len > 262144) ? 262144 : len;
                             ULONG offset = 0;
                             do {
                                 PHOENIX_USB_PACKET pkt;

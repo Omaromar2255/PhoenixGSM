@@ -16,6 +16,12 @@ public partial class MonitoringEngine
         PhoenixGSM.OmniTrace.Models.PacketDirection pDir,
         bool isUpperFilterPort)
     {
+        // Fast-drop periodic 15-byte binary telemetry / interrupt noise on EP 0x8D so it never floods the log or _adbParser
+        if (dir == "IN" && epHex.Equals("0x8D", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
         bool isAdbHeader = chunk.Length >= 24 && PhoenixGSM.UsbMonitor.Protocol.AdbProtocolParser.ValidateHeader(chunk, 0, out _, out _, out _, out _, out _);
         bool isSahara = chunk.Length >= 8 && PhoenixGSM.OmniTrace.Decoders.QualcommEdlDecoder.EvaluateSahara(chunk) >= 0.8;
         bool isFirehose = chunk.Length >= 5 && (Encoding.ASCII.GetString(chunk[..Math.Min(chunk.Length, 64)]).StartsWith("<?xml", StringComparison.OrdinalIgnoreCase) || Encoding.ASCII.GetString(chunk[..Math.Min(chunk.Length, 64)]).Contains("<data>"));
@@ -89,10 +95,7 @@ public partial class MonitoringEngine
             !cleanLineTrimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
         {
             _smartFileArchiver.ProcessOutboundSyncOrBulkChunk(chunk, dir, epHex, pkt.ActualLength, out _);
-            if (_smartFileArchiver.IsInsideTransfer)
-            {
-                _isInsideFileSyncTransfer = true;
-            }
+            _isInsideFileSyncTransfer = _smartFileArchiver.IsInsideTransfer;
         }
 
         // Track channel state transitions for explicit shell commands
@@ -110,7 +113,7 @@ public partial class MonitoringEngine
             if (sCmd.Contains("/data/local/tmp/AT", StringComparison.OrdinalIgnoreCase) &&
                 !sCmd.Contains("chmod ", StringComparison.OrdinalIgnoreCase))
             {
-                _lastActiveAtBinaryCommand = sCmd;
+                _lastActiveAtBinaryCommand = _smartFileArchiver.GetActiveArtifactInstanceLabel("/data/local/tmp/AT");
             }
 
             if (_smartFileArchiver.CheckShellCommandForInlineFileOrFlush(sCmd, 0, "adb.exe", out var shellRec) && shellRec != null)
@@ -187,7 +190,6 @@ public partial class MonitoringEngine
         bool isInteractiveShellActive = !string.IsNullOrEmpty(_activeInteractiveShellCommand) || !string.IsNullOrEmpty(_lastActiveAtBinaryCommand);
 
         // Clean Interactive / Shell Command Rule in OUT direction:
-        // Strictly excludes binary ELF chunks, ADB Sync tokens (STAT/SEND/DATA/DONE), and bare '/data/local/tmp/AT' path from STAT
         bool isBareSyncPath = _isInsideFileSyncTransfer && cleanLineTrimmed.Equals("/data/local/tmp/AT", StringComparison.OrdinalIgnoreCase);
         bool isAdbInteractiveCmd = dir == "OUT" &&
                                    !isAdbHeader &&
@@ -342,8 +344,6 @@ public partial class MonitoringEngine
             isExplicitModemCmd ||
             (isUpperFilterPort && atConf >= 0.70 && !cleanLineTrimmed.Contains("]: [") && cleanLineTrimmed != "]")
         );
-
-        KernelDiagLog($"PKT {dir} EP={epHex} TT={pkt.TransferType} len={pkt.ActualLength} cap={chunk.Length} isMtk={isMtk}({mtkConf:F2}) isAt={isAt} isUF={isUpperFilterPort} atConf={atConf:F2} ascii={isAsciiText} adb={isAdbHeader} sahara={isSahara} fh={isFirehose} fb={isFastboot} isShell={isInteractiveShellActive} | {Encoding.ASCII.GetString(chunk[..Math.Min(chunk.Length, 64)].Select(b => b >= 32 && b < 127 ? b : (byte)'.').ToArray())}");
 
         // Protocol Dispatching
         if (chunk.Length > 0 && isMtk)

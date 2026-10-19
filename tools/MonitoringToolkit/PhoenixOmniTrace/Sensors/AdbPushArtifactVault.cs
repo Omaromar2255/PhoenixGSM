@@ -11,14 +11,13 @@ using PhoenixGSM.OmniTrace.Models;
 namespace PhoenixGSM.OmniTrace.Sensors;
 
 /// <summary>
-/// LAYER 12B — Content-Addressable Artifact Vault & Storage Manager
-/// Securely stores, classifies, and indexes pushed files and exploit payloads with SHA-256 deduplication.
-/// Generates JSON forensics manifests and provides micro-retry snapshotting before tools delete staged files.
+/// LAYER 12B — Content-Addressable Artifact Vault &amp; Storage Manager
+/// Waits for file size stability before reading local staged files, and uses atomic writes to persist artifacts.
 /// </summary>
 public sealed class AdbPushArtifactVault
 {
-    public const long DefaultMaxFullCaptureBytes = 64 * 1024 * 1024; // 64 MB full dump limit
-    public const int MaxHeaderDumpBytes = 4 * 1024 * 1024; // 4 MB header dump for gigantic partitions
+    public const long DefaultMaxFullCaptureBytes = 64 * 1024 * 1024;
+    public const int MaxHeaderDumpBytes = 4 * 1024 * 1024;
 
     private static readonly Regex InvalidCharsRegex = new(@"[^\w\.\-\+]", RegexOptions.Compiled);
 
@@ -60,10 +59,6 @@ public sealed class AdbPushArtifactVault
         catch { }
     }
 
-    /// <summary>
-    /// Captures a local file from host disk (e.g. from an intercepted "adb push <local> <remote>" command)
-    /// using micro-retry with non-exclusive FileShare permissions before the tool can delete it.
-    /// </summary>
     public PushedArtifactInfo? TryCaptureLocalFile(
         string localPath,
         string targetDevicePath,
@@ -74,11 +69,10 @@ public sealed class AdbPushArtifactVault
     {
         if (string.IsNullOrWhiteSpace(localPath)) return null;
 
-        // Clean quotes or whitespace around path
         localPath = localPath.Trim(' ', '"', '\'');
         if (!File.Exists(localPath)) return null;
 
-        byte[]? fileBytes = ReadFileWithMicroRetry(localPath, maxRetries: 5, delayMs: 15);
+        byte[]? fileBytes = ReadStableFileWithRetry(localPath, maxRetries: 8, delayMs: 40);
         if (fileBytes == null || fileBytes.Length == 0) return null;
 
         string fileName = Path.GetFileName(localPath);
@@ -101,9 +95,6 @@ public sealed class AdbPushArtifactVault
         );
     }
 
-    /// <summary>
-    /// Stores an artifact from byte content (used by in-flight ADB wire sync stream reassembly or memory buffers).
-    /// </summary>
     public PushedArtifactInfo StoreArtifact(
         byte[] content,
         string fileName,
@@ -119,14 +110,10 @@ public sealed class AdbPushArtifactVault
         if (string.IsNullOrWhiteSpace(fileName)) fileName = "pushed_artifact.bin";
         string safeFileName = SanitizeFileName(fileName);
 
-        // 1. Compute Cryptographic Hashes
         string sha256 = Convert.ToHexString(SHA256.HashData(content));
         string md5 = Convert.ToHexString(MD5.HashData(content));
-
-        // 2. Classify content with SmartContentClassifier
         var classification = SmartContentClassifier.Classify(content);
 
-        // 3. Deduplication Check via SHA-256
         if (_artifactsBySha256.TryGetValue(sha256, out var existing))
         {
             Interlocked.Increment(ref _deduplicatedCount);
@@ -165,30 +152,27 @@ public sealed class AdbPushArtifactVault
             return dedupCopy;
         }
 
-        // 4. Determine file persistence paths
         string fileStorageName = $"{sha256[..16]}_{safeFileName}";
         string vaultFilePath = Path.Combine(_vaultDirectory, fileStorageName);
         string manifestPath = Path.Combine(_vaultDirectory, $"{fileStorageName}.manifest.json");
 
-        // 5. Write Physical File (with size limit tiering)
         try
         {
-            if (content.Length <= _maxFullCaptureBytes)
+            Directory.CreateDirectory(_vaultDirectory);
+            byte[] toWrite = content;
+            if (content.Length > _maxFullCaptureBytes)
             {
-                File.WriteAllBytes(vaultFilePath, content);
-            }
-            else
-            {
-                // Large partition image: store header chunk
                 vaultFilePath += ".head.bin";
-                byte[] headChunk = new byte[Math.Min(content.Length, MaxHeaderDumpBytes)];
-                Array.Copy(content, headChunk, headChunk.Length);
-                File.WriteAllBytes(vaultFilePath, headChunk);
+                toWrite = new byte[Math.Min(content.Length, MaxHeaderDumpBytes)];
+                Array.Copy(content, toWrite, toWrite.Length);
             }
+
+            string tmpPath = vaultFilePath + $".{Guid.NewGuid():N}.tmp";
+            File.WriteAllBytes(tmpPath, toWrite);
+            File.Move(tmpPath, vaultFilePath, overwrite: true);
         }
         catch { }
 
-        // 6. Build Manifest Model
         var info = new PushedArtifactInfo
         {
             ArtifactId = Guid.NewGuid().ToString("N"),
@@ -217,14 +201,12 @@ public sealed class AdbPushArtifactVault
             foreach (var kvp in extraAttrs) info.Attributes[kvp.Key] = kvp.Value;
         }
 
-        // 7. Write JSON Manifest
         try
         {
             File.WriteAllText(manifestPath, info.ToJson());
         }
         catch { }
 
-        // 8. Update Metrics and Cache
         Interlocked.Increment(ref _totalArtifactsCaptured);
         Interlocked.Add(ref _totalBytesSaved, content.Length);
         _artifactsBySha256[sha256] = info;
@@ -251,16 +233,59 @@ public sealed class AdbPushArtifactVault
         return info;
     }
 
-    private static byte[]? ReadFileWithMicroRetry(string path, int maxRetries, int delayMs)
+    /// <summary>
+    /// Ensures the file size has stabilized across consecutive checks (and has valid EOCD if ZIP)
+    /// before reading, preventing partial captures while a tool is still writing to disk.
+    /// </summary>
+    private static byte[]? ReadStableFileWithRetry(string path, int maxRetries, int delayMs)
     {
+        long lastSeenLength = -1;
         for (int i = 0; i < maxRetries; i++)
         {
             try
             {
+                var fi = new FileInfo(path);
+                if (!fi.Exists) return null;
+                if (fi.Length == 0 || fi.Length != lastSeenLength)
+                {
+                    lastSeenLength = fi.Length;
+                    Thread.Sleep(delayMs);
+                    continue;
+                }
+
                 using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                using var ms = new MemoryStream();
-                fs.CopyTo(ms);
-                return ms.ToArray();
+                if (fs.Length != lastSeenLength || fs.Length == 0)
+                {
+                    lastSeenLength = fs.Length;
+                    Thread.Sleep(delayMs);
+                    continue;
+                }
+
+                byte[] data = new byte[fs.Length];
+                int read = 0;
+                while (read < data.Length)
+                {
+                    int r = fs.Read(data, read, data.Length - read);
+                    if (r <= 0) break;
+                    read += r;
+                }
+
+                if (read != data.Length)
+                {
+                    Thread.Sleep(delayMs);
+                    continue;
+                }
+
+                if (data.Length >= 4 && data[0] == 0x50 && data[1] == 0x4B && data[2] == 0x03 && data[3] == 0x04)
+                {
+                    if (!SmartFilePushArchiver.HasValidZipEocd(data) && i < maxRetries - 1)
+                    {
+                        Thread.Sleep(delayMs * 2);
+                        continue;
+                    }
+                }
+
+                return data;
             }
             catch (IOException)
             {

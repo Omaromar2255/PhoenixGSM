@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace PhoenixGSM.OmniTrace.Sensors;
@@ -18,6 +20,9 @@ public sealed partial class SmartFilePushArchiver
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, int dwSize, out int lpNumberOfBytesRead);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool QueryFullProcessImageName(IntPtr hProcess, uint dwFlags, StringBuilder lpExeName, ref uint lpdwSize);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr hObject);
@@ -48,8 +53,8 @@ public sealed partial class SmartFilePushArchiver
     #endregion
 
     /// <summary>
-    /// Starts an immediate, non-blocking background snapshot from Host Disk & Target Tool RAM
-    /// at the exact moment the first DATA chunk starts flowing over USB.
+    /// Starts an immediate, non-blocking background snapshot from BOTH Host Disk &amp; Target Tool RAM
+    /// at the exact moment the first DATA chunk starts flowing over USB (before the tool frees its buffer!).
     /// </summary>
     private void StartEagerMidTransferSnapshot(string targetPath, byte[]? signature, long estimatedSize)
     {
@@ -78,12 +83,34 @@ public sealed partial class SmartFilePushArchiver
         });
     }
 
+    private static string? TryGetProcessExecutablePath(int pid)
+    {
+        IntPtr hProc = IntPtr.Zero;
+        try
+        {
+            hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            if (hProc == IntPtr.Zero) return null;
+
+            var sb = new StringBuilder(1024);
+            uint size = (uint)sb.Capacity;
+            if (QueryFullProcessImageName(hProc, 0, sb, ref size) && size > 0)
+            {
+                return sb.ToString();
+            }
+        }
+        catch { }
+        finally
+        {
+            if (hProc != IntPtr.Zero) CloseHandle(hProc);
+        }
+        return null;
+    }
+
     /// <summary>
-    /// Searches the active GSM tool's installation directory (all subdirectories) as well as %TEMP%
-    /// for either an exact filename match or a recent temporary file whose header matches HeaderSignature.
-    /// Supports files as small as 1 byte (e.g. 72-byte ASKSW.xml).
+    /// Searches the active GSM tool's installation directory (discovered via Process.GetProcesses + QueryFullProcessImageName)
+    /// as well as %TEMP% for either an exact filename match or a recent temporary file matching headerSig.
     /// </summary>
-    private static byte[]? TryRecoverFromHostDisk(string fileName, byte[]? headerSig)
+    public byte[]? TryRecoverFromHostDisk(string fileName, byte[]? headerSig)
     {
         if (string.IsNullOrWhiteSpace(fileName) || IsIgnoredNoiseFile(fileName)) return null;
 
@@ -109,7 +136,11 @@ public sealed partial class SmartFilePushArchiver
                         pn.Contains("samfw") || pn.Contains("chimera") || pn.Contains("unlock") ||
                         pn.Contains("odin") || pn.Contains("gsm"))
                     {
-                        string? exe = p.MainModule?.FileName;
+                        string? exe = TryGetProcessExecutablePath(p.Id);
+                        if (string.IsNullOrEmpty(exe))
+                        {
+                            try { exe = p.MainModule?.FileName; } catch { }
+                        }
                         if (!string.IsNullOrEmpty(exe))
                         {
                             string? d = Path.GetDirectoryName(exe);
@@ -123,16 +154,32 @@ public sealed partial class SmartFilePushArchiver
         }
         catch { }
 
-        // Pass 1: Recursive filename search across tool folders (finds retail\ASKSW.xml at any depth!)
+        foreach (int candidatePid in _candidatePids.Keys)
+        {
+            string? exePath = TryGetProcessExecutablePath(candidatePid);
+            if (!string.IsNullOrEmpty(exePath))
+            {
+                string? dir = Path.GetDirectoryName(exePath);
+                if (!string.IsNullOrEmpty(dir)) rootDirs.Add(dir);
+            }
+        }
+
+        byte[]? bestMatch = null;
+
+        // Pass 1: Recursive filename search across tool folders
         foreach (string dir in rootDirs)
         {
             try
             {
-                if (!Directory.Exists(dir)) continue;
+                if (!Directory.Exists(dir) || dir.Contains("CapturedArtifacts", StringComparison.OrdinalIgnoreCase))
+                    continue;
 
                 string directCandidate = Path.Combine(dir, fileName);
                 byte[]? directBytes = TryReadSharedFile(directCandidate, headerSig);
-                if (directBytes != null) return directBytes;
+                if (directBytes != null && directBytes.Length > (bestMatch?.Length ?? 0))
+                {
+                    bestMatch = directBytes;
+                }
 
                 var enumOpts = new EnumerationOptions
                 {
@@ -144,22 +191,27 @@ public sealed partial class SmartFilePushArchiver
 
                 foreach (string matchPath in Directory.EnumerateFiles(dir, fileName, enumOpts))
                 {
+                    if (matchPath.Contains("CapturedArtifacts", StringComparison.OrdinalIgnoreCase)) continue;
                     byte[]? subBytes = TryReadSharedFile(matchPath, headerSig);
-                    if (subBytes != null) return subBytes;
+                    if (subBytes != null && subBytes.Length > (bestMatch?.Length ?? 0))
+                    {
+                        bestMatch = subBytes;
+                    }
                 }
             }
             catch { }
         }
 
-        // Pass 2: If the tool staged a randomly-named file in %TEMP% within the last 2 minutes, match by header signature (supports >= 4 bytes)
+        if (bestMatch != null) return bestMatch;
+
+        // Pass 2: Recent temporary file in %TEMP% matching header signature
         if (headerSig != null && headerSig.Length >= 4)
         {
             try
             {
                 string tempDir = Path.GetTempPath();
-                DateTime cutoff = DateTime.UtcNow.AddMinutes(-2);
-                int sigCheckLen = Math.Min(headerSig.Length, 32);
-                byte[] headBuf = new byte[sigCheckLen];
+                DateTime cutoff = DateTime.UtcNow.AddMinutes(-3);
+                int sigCheckLen = Math.Min(headerSig.Length, 64);
 
                 foreach (string file in Directory.EnumerateFiles(tempDir))
                 {
@@ -170,14 +222,10 @@ public sealed partial class SmartFilePushArchiver
                         if (fi.LastWriteTimeUtc < cutoff || fi.Length < sigCheckLen || fi.Length > 128 * 1024 * 1024)
                             continue;
 
-                        using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                        if (fs.Read(headBuf, 0, sigCheckLen) == sigCheckLen &&
-                            headBuf.AsSpan(0, sigCheckLen).SequenceEqual(headerSig.AsSpan(0, sigCheckLen)))
+                        byte[]? full = TryReadSharedFile(file, headerSig);
+                        if (full != null && full.Length > (bestMatch?.Length ?? 0))
                         {
-                            fs.Position = 0;
-                            byte[] full = new byte[fi.Length];
-                            if (fs.Read(full, 0, full.Length) == full.Length)
-                                return full;
+                            bestMatch = full;
                         }
                     }
                     catch { }
@@ -186,7 +234,7 @@ public sealed partial class SmartFilePushArchiver
             catch { }
         }
 
-        return null;
+        return bestMatch;
     }
 
     private static byte[]? TryReadSharedFile(string path, byte[]? expectedHeader)
@@ -209,7 +257,8 @@ public sealed partial class SmartFilePushArchiver
 
             if (expectedHeader != null && expectedHeader.Length >= 4 && buf.Length >= 4)
             {
-                int checkLen = Math.Min(8, Math.Min(expectedHeader.Length, buf.Length));
+                // Compare up to 64 bytes so XML files with identical <?xml...?> prologues are accurately distinguished
+                int checkLen = Math.Min(64, Math.Min(expectedHeader.Length, buf.Length));
                 if (!buf.AsSpan(0, checkLen).SequenceEqual(expectedHeader.AsSpan(0, checkLen)))
                 {
                     return null;
@@ -225,8 +274,8 @@ public sealed partial class SmartFilePushArchiver
     }
 
     /// <summary>
-    /// Fast, targeted 64-bit & 32-bit RAM carver.
-    /// Supports small signatures (>= 4 bytes) and full 64-bit address space.
+    /// Fast, targeted 64-bit &amp; 32-bit RAM carver.
+    /// Carves ELF, DEX, ZIP/APK (with EOCD verification), XML/Text, and raw binary files from KEY-Tool.exe / adb.exe.
     /// </summary>
     public byte[]? TryCarveFileFromTargetProcessRam(byte[]? signature, long estimatedSize)
     {
@@ -334,7 +383,8 @@ public sealed partial class SmartFilePushArchiver
                                     if (carved != null && carved.Length > (bestFound?.Length ?? 0))
                                     {
                                         bestFound = carved;
-                                        if (!isWirePacketCopy && (estimatedSize <= 0 || bestFound.Length >= estimatedSize))
+                                        bool zipComplete = !IsZipHeader(bestFound) || HasValidZipEocd(bestFound);
+                                        if (!isWirePacketCopy && zipComplete && (estimatedSize <= 0 || bestFound.Length >= estimatedSize))
                                         {
                                             return bestFound;
                                         }
@@ -474,7 +524,8 @@ public sealed partial class SmartFilePushArchiver
 
             while (scanned < maxScanBytes)
             {
-                int toRead = Math.Min(winBuf.Length, maxScanBytes - scanned);
+                int toRead = (int)Math.Min((long)winBuf.Length, Math.Min(maxScanBytes - scanned, Math.Max(maxAvailableInRegion - scanned, 65536L)));
+                if (toRead < 22) break;
                 if (!ReadProcessMemory(hProc, (IntPtr)(fileStartAddr + scanned), winBuf, toRead, out int r) || r < 22)
                     break;
 

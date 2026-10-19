@@ -8,38 +8,52 @@ using System.Threading.Tasks;
 namespace PhoenixGSM.OmniTrace.Sensors;
 
 /// <summary>
-/// LAYER 12C — 100% Passive High-Speed Parallel Smart File Push Archiver.
-/// - ZERO USB interruption: Never spawns adb.exe, never runs "adb pull" or "adb shell ln -f",
-///   and never competes with direct WinUSB tools (such as KEY-Tool.exe) for the USB handle.
-/// - Captures files of ALL sizes from 1 byte (e.g. 72-byte ASKSW.xml, trustedTime) up to 64 MB (15MB R2.zip, 480KB AT).
-/// - Handles multi-file coalesced USB buffers where a small file (like ASKSW.xml) starts at offset > 160
-///   immediately after the previous file's DONE token in the same USB Bulk transfer.
-/// - Strictly saves ONLY ONE file per pushed item with its exact original name and full size.
+/// LAYER 12C — High-Integrity Passive Parallel Smart File Push Archiver.
+/// - Creates a dedicated per-session folder under CapturedArtifacts/ every time the monitor starts.
+/// - Recovers full files from Host Disk and Process RAM whenever USB packets are truncated to 1KB (1024B).
+/// - Automatically numbers repeated uploads of the same target path (AT, AT_2, AT_3 or ADP.xml, ADP_2.xml).
 /// </summary>
 public sealed partial class SmartFilePushArchiver : IDisposable
 {
     private readonly object _transferLock = new();
+    private static readonly object _diskWriteLock = new();
+
     private readonly MemoryStream _activeUploadStream = new();
     private string _activeTargetPath = string.Empty;
     private string _pendingStatPath = string.Empty;
     private string _activeMode = "33188";
     private long _declaredDataSize = 0;
     private long _totalActualUrbBytes = 0;
+    private int _activeDataBlockCount = 0;
+    private int _remainingInCurrentDataBlock = 0;
     private byte[]? _firstHeaderSignature = null;
     private Task<byte[]?>? _eagerSnapshotTask = null;
     private bool _hadTruncatedUrb = false;
+    private bool _sawExplicitDone = false;
+    private bool _doneAlreadyStripped = false;
     private bool _isInsideTransfer = false;
     private string _pendingHeaderBuffer = string.Empty;
     private DateTime _lastChunkTime = DateTime.MinValue;
 
+    private long _latestKnownKernelDroppedPackets = 0;
+    private long _kernelDroppedAtTransferStart = 0;
+
+    private long _transferSequenceCounter = 0;
+    private long _activeTransferSequenceId = 0;
+    private int _activeUploadSequenceNumber = 1;
+
+    private string _currentSessionDirectory = string.Empty;
+    private string _currentSessionFolderName = string.Empty;
+
     private readonly ConcurrentDictionary<int, string> _candidatePids = new();
-    private readonly ConcurrentDictionary<string, long> _savedFileSizesByPath = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _uploadCountByTargetPath = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _uploadCountByFileName = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<long, (string LocalSavedPath, string SavedFileName, long SavedSize, int UploadNumber, bool IsComplete)> _savedTransfersById = new();
+    private readonly ConcurrentDictionary<string, (string SavedFileName, int UploadNumber, long FileSize, string LocalSavedPath)> _latestInstanceByPath = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly Channel<PendingFileArchiveJob> _jobChannel;
     private readonly CancellationTokenSource _cts = new();
 
-    /// <summary>
-    /// Fired asynchronously from the background worker whenever a pushed file is saved or upgraded to full size.
-    /// </summary>
     public event Action<CapturedPushedFileRecord, string>? OnFileArchivedAsync;
 
     public bool IsInsideTransfer
@@ -57,8 +71,43 @@ public sealed partial class SmartFilePushArchiver : IDisposable
         get { lock (_transferLock) return _lastChunkTime; }
     }
 
+    public string CurrentSessionDirectory
+    {
+        get
+        {
+            lock (_transferLock)
+            {
+                if (string.IsNullOrWhiteSpace(_currentSessionDirectory))
+                {
+                    InitializeNewSessionFolderLocked();
+                }
+                return _currentSessionDirectory;
+            }
+        }
+    }
+
+    public string CurrentSessionFolderName
+    {
+        get
+        {
+            lock (_transferLock)
+            {
+                if (string.IsNullOrWhiteSpace(_currentSessionFolderName))
+                {
+                    InitializeNewSessionFolderLocked();
+                }
+                return _currentSessionFolderName;
+            }
+        }
+    }
+
     public SmartFilePushArchiver()
     {
+        lock (_transferLock)
+        {
+            InitializeNewSessionFolderLocked();
+        }
+
         _jobChannel = Channel.CreateUnbounded<PendingFileArchiveJob>(new UnboundedChannelOptions
         {
             SingleReader = false,
@@ -69,6 +118,89 @@ public sealed partial class SmartFilePushArchiver : IDisposable
         {
             _ = Task.Run(() => ProcessArchiveJobsLoopAsync(_cts.Token));
         }
+    }
+
+    public void UpdateKernelDroppedPacketsCount(ulong totalDropped)
+    {
+        Interlocked.Exchange(ref _latestKnownKernelDroppedPackets, (long)totalDropped);
+    }
+
+    public string StartNewSession()
+    {
+        lock (_transferLock)
+        {
+            if (_isInsideTransfer && _activeUploadStream.Length > 0 && !string.IsNullOrWhiteSpace(_activeTargetPath))
+            {
+                EnqueueCurrentTransferForBackgroundSave("0x01", "SessionRestartFlush");
+            }
+
+            _uploadCountByTargetPath.Clear();
+            _uploadCountByFileName.Clear();
+            _savedTransfersById.Clear();
+            _latestInstanceByPath.Clear();
+            _activeUploadStream.SetLength(0);
+            _isInsideTransfer = false;
+            _activeTargetPath = string.Empty;
+            _pendingStatPath = string.Empty;
+            _declaredDataSize = 0;
+            _activeDataBlockCount = 0;
+            _remainingInCurrentDataBlock = 0;
+
+            InitializeNewSessionFolderLocked();
+            return _currentSessionDirectory;
+        }
+    }
+
+    private void InitializeNewSessionFolderLocked()
+    {
+        string baseRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "CapturedArtifacts");
+        string timestampName = $"Session_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}";
+        string candidateDir = Path.Combine(baseRoot, timestampName);
+
+        int suffix = 2;
+        while (Directory.Exists(candidateDir) && Directory.GetFileSystemEntries(candidateDir).Length > 0)
+        {
+            timestampName = $"Session_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}_{suffix}";
+            candidateDir = Path.Combine(baseRoot, timestampName);
+            suffix++;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(candidateDir);
+        }
+        catch { }
+
+        _currentSessionFolderName = timestampName;
+        _currentSessionDirectory = candidateDir;
+    }
+
+    public string GetActiveArtifactInstanceLabel(string targetDevicePath)
+    {
+        if (string.IsNullOrWhiteSpace(targetDevicePath)) return string.Empty;
+
+        if (_latestInstanceByPath.TryGetValue(targetDevicePath.Trim(), out var info))
+        {
+            return info.UploadNumber > 1
+                ? $"{targetDevicePath} [Saved: {info.SavedFileName} | Upload #{info.UploadNumber}]"
+                : $"{targetDevicePath} [Saved: {info.SavedFileName}]";
+        }
+
+        string fileName = Path.GetFileName(targetDevicePath.Trim());
+        if (!string.IsNullOrWhiteSpace(fileName))
+        {
+            foreach (var kvp in _latestInstanceByPath)
+            {
+                if (string.Equals(Path.GetFileName(kvp.Key), fileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return kvp.Value.UploadNumber > 1
+                        ? $"{targetDevicePath} [Saved: {kvp.Value.SavedFileName} | Upload #{kvp.Value.UploadNumber}]"
+                        : $"{targetDevicePath} [Saved: {kvp.Value.SavedFileName}]";
+                }
+            }
+        }
+
+        return targetDevicePath;
     }
 
     public void RegisterCandidateProcess(int pid, string name)
@@ -83,6 +215,13 @@ public sealed partial class SmartFilePushArchiver : IDisposable
     {
         try
         {
+            lock (_transferLock)
+            {
+                if (_isInsideTransfer && _activeUploadStream.Length > 0 && !string.IsNullOrWhiteSpace(_activeTargetPath))
+                {
+                    EnqueueCurrentTransferForBackgroundSave("0x01", "DisposeFlush");
+                }
+            }
             _cts.Cancel();
             _jobChannel.Writer.TryComplete();
         }

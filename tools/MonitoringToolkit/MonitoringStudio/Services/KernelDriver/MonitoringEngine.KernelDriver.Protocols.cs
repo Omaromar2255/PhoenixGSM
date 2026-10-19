@@ -130,10 +130,10 @@ public partial class MonitoringEngine
         string protoTag = isAdbRilIpc ? "ADB-RIL-IPC" : "ADB-INTERACTIVE-CMD";
         string sourceTag = isAdbRilIpc ? "ADB-RIL" : "ADB-SHELL";
 
-        // Attribute RIL IPC hex payloads directly to the active AT binary (/data/local/tmp/AT) rather than a transient logcat command
-        string targetTool = isAdbRilIpc && !string.IsNullOrEmpty(_lastActiveAtBinaryCommand)
-            ? _lastActiveAtBinaryCommand
-            : (!string.IsNullOrEmpty(_activeInteractiveShellCommand) ? _activeInteractiveShellCommand : "/data/local/tmp/AT");
+        string activeAtInstance = _smartFileArchiver.GetActiveArtifactInstanceLabel("/data/local/tmp/AT");
+        string targetTool = isAdbRilIpc
+            ? (!string.IsNullOrEmpty(activeAtInstance) ? activeAtInstance : (!string.IsNullOrEmpty(_lastActiveAtBinaryCommand) ? _lastActiveAtBinaryCommand : "/data/local/tmp/AT"))
+            : (!string.IsNullOrEmpty(_activeInteractiveShellCommand) ? _activeInteractiveShellCommand : activeAtInstance);
 
         string rilCmdText = cleanLineTrimmed.Length > 0 ? cleanLineTrimmed : $"[{protoTag}] ({chunk.Length}B): {Convert.ToHexString(chunk)}";
         string decodedEmbedded = isAdbRilIpc ? DecodeEmbeddedRilOrAtHex(rilCmdText) : string.Empty;
@@ -154,7 +154,7 @@ public partial class MonitoringEngine
             RawPayload = chunk,
             PayloadAscii = !string.IsNullOrEmpty(decodedEmbedded) ? $"{cleanLine}\nDecoded Embedded Payload: {decodedEmbedded}" : cleanLine,
             PayloadHex = LiveEventItem.FormatHexDump(chunk),
-            AdditionalDetails = $"Active Interactive Shell: {targetTool}\nDecoded Payload: {decodedEmbedded}\nTransferType: {pkt.TransferType}\nDirection: {dir}\nActualLength: {pkt.ActualLength} B\nSource: KernelDriver ADB Interactive Sniff"
+            AdditionalDetails = $"Active Interactive Target: {targetTool}\nDecoded Payload: {decodedEmbedded}\nTransferType: {pkt.TransferType}\nDirection: {dir}\nActualLength: {pkt.ActualLength} B\nSource: KernelDriver ADB Interactive Sniff"
         });
 
         if (_omniService != null)
@@ -195,7 +195,6 @@ public partial class MonitoringEngine
                     Timestamp = DateTime.UtcNow
                 };
                 logicalCmd.Details["ProtocolName"] = protoTag;
-                // Prevent HandleOmniCommand from emitting a duplicate UI event!
                 logicalCmd.Details["EmittedByKernelDriver"] = "true";
                 _omniService.EventBus.ReportLogicalCommand(logicalCmd);
             }
@@ -372,6 +371,44 @@ public partial class MonitoringEngine
         }
     }
 
+    /// <summary>
+    /// Checks whether a PayloadPreview string from AdbProtocolParser is a fallback hex dump of binary bytes
+    /// (e.g. "00 00 00 01 59 4D 91 A7 00 00 00 03 FC FF FE").
+    /// </summary>
+    private static bool IsHexDumpPreview(string preview, byte[]? rawPayload)
+    {
+        if (rawPayload != null && rawPayload.Length > 0)
+        {
+            int nonPrintable = 0;
+            foreach (byte b in rawPayload)
+            {
+                if (b < 32 && b != 9 && b != 10 && b != 13 && b != 0) nonPrintable++;
+                else if (b > 126) nonPrintable++;
+            }
+            if (nonPrintable > rawPayload.Length / 5) return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(preview)) return true;
+        string trimmed = preview.Trim();
+        if (trimmed.StartsWith("00 00 ", StringComparison.Ordinal) ||
+            trimmed.EndsWith("bytes total)", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        // Check if string consists of space-separated 2-character hex pairs ("00 00 00 01 59 4D ...")
+        if (trimmed.Length >= 8 && trimmed.IndexOf(' ') == 2)
+        {
+            string[] parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 3 && parts.All(p => p.Length == 2 && Uri.IsHexDigit(p[0]) && Uri.IsHexDigit(p[1])))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void HandleAdbFrameOrRawUsbPacket(
         PhoenixGSM.UsbMonitor.UsbDriverClient.KernelUsbPacket pkt,
         byte[] chunk,
@@ -429,7 +466,7 @@ public partial class MonitoringEngine
                             if (_activeInteractiveShellCommand.Contains("/data/local/tmp/AT", StringComparison.OrdinalIgnoreCase) &&
                                 !_activeInteractiveShellCommand.Contains("chmod ", StringComparison.OrdinalIgnoreCase))
                             {
-                                _lastActiveAtBinaryCommand = _activeInteractiveShellCommand;
+                                _lastActiveAtBinaryCommand = _smartFileArchiver.GetActiveArtifactInstanceLabel("/data/local/tmp/AT");
                             }
 
                             if (_smartFileArchiver.CheckShellCommandForInlineFileOrFlush(_activeInteractiveShellCommand, 0, "adb.exe", out var shellRec) && shellRec != null)
@@ -445,9 +482,16 @@ public partial class MonitoringEngine
                     }
                 }
 
-                if (frame.Command == "WRTE" && (_isInsideFileSyncTransfer || _smartFileArchiver.IsInsideTransfer))
+                // Suppress WRTE frames during file sync OR whenever WRTE payload is binary/hex telemetry (such as EP 0x8D 00 00 00 01 59 4D...)
+                if (frame.Command == "WRTE")
                 {
-                    continue;
+                    if (_isInsideFileSyncTransfer ||
+                        _smartFileArchiver.IsInsideTransfer ||
+                        epHex.Equals("0x8D", StringComparison.OrdinalIgnoreCase) ||
+                        IsHexDumpPreview(payloadPreview, frame.Payload))
+                    {
+                        continue;
+                    }
                 }
 
                 string pTrim = payloadPreview.Trim();

@@ -186,7 +186,7 @@
                                 Command="{Binding ExportLogsCommand}" 
                                 Style="{StaticResource ModernBtn}" 
                                 Height="26" FontSize="10.5" Padding="8,2" Margin="0,0,5,0"
-                                ToolTip="تصدير السجلات الحالية كملف نصي TXT أو ملف JSON جنائي مفصل" />
+                                ToolTip="تصدير السجلات الحالية المعروضة (كافة السجلات الشاملة عند اختيار الكل) كملف نصي TXT أو CSV أو JSON" />
 
                         <!-- تصدير أوامر الهاتف الصافية فقط -->
                         <Button Content="📱 أوامر الهاتف الصافية (Pure Cmds)" 

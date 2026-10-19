@@ -28,9 +28,26 @@ public partial class MonitoringEngine
     {
         try { PhoenixGSM.UsbMonitor.DriverManager.SanitizeWinUsbAndAndroidStack(); } catch { }
         _ = Task.Run(() => AutoDismissMinGwAssertionLoopAsync(token), token);
+
+        // Create a dedicated new session folder inside CapturedArtifacts/ every time monitoring starts
+        string sessionFolder = _smartFileArchiver.StartNewSession();
+
         _smartFileArchiver.OnFileArchivedAsync -= EmitCapturedPushedFile;
         _smartFileArchiver.OnFileArchivedAsync += EmitCapturedPushedFile;
+
+        EmitEvent(new LiveEventItem
+        {
+            Category = EventSourceCategory.ArtifactVault,
+            SourceTag = "SESSION-DIR",
+            Protocol = "ARCHIVE",
+            Command = "NEW SESSION FOLDER",
+            Summary = $"Created new session artifacts directory: CapturedArtifacts/{_smartFileArchiver.CurrentSessionFolderName}",
+            AdditionalDetails = $"Full Session Folder Path: {sessionFolder}"
+        });
+
         bool driverAvailable = false;
+        int statsPollCounter = 0;
+
         while (!token.IsCancellationRequested)
         {
             try
@@ -41,6 +58,10 @@ public partial class MonitoringEngine
                     {
                         driverAvailable = true;
                         var stats = _driverClient.GetStats();
+                        if (stats.HasValue)
+                        {
+                            _smartFileArchiver.UpdateKernelDroppedPacketsCount(stats.Value.TotalPacketsDropped);
+                        }
                         OnDriverStatusChanged?.Invoke(true, $"Active (v{(stats?.DriverVersion >> 16) ?? 1}.0)");
                         EmitEvent(new LiveEventItem
                         {
@@ -49,7 +70,7 @@ public partial class MonitoringEngine
                             Protocol = "KMDF",
                             Command = "ATTACHED",
                             Summary = $"Connected to \\\\.\\PhoenixUsbMonitor kernel device. Bulk filter active.",
-                            AdditionalDetails = $"Queue Capacity: {stats?.MaxQueueCapacity ?? 512} packets"
+                            AdditionalDetails = $"Queue Capacity: {stats?.MaxQueueCapacity ?? 512} packets\nSession Artifacts Folder: {sessionFolder}"
                         });
                     }
                     else
@@ -60,10 +81,14 @@ public partial class MonitoringEngine
                     }
                 }
 
-                // Dequeue packets from kernel ring buffer
-                var kPacket = _driverClient.DequeuePacket();
-                if (kPacket.HasValue)
+                // Drain queued packets in a burst loop so 15MB+ file transfers minimize ring-buffer pressure
+                int drainedCount = 0;
+                while (!token.IsCancellationRequested && drainedCount < 512)
                 {
+                    var kPacket = _driverClient.DequeuePacket();
+                    if (!kPacket.HasValue) break;
+
+                    drainedCount++;
                     var pkt = kPacket.Value;
                     string dir = pkt.Direction == 0 ? "OUT" : "IN";
                     byte[] chunk = new byte[pkt.CapturedLength];
@@ -80,14 +105,25 @@ public partial class MonitoringEngine
 
                     ProcessCapturedKernelPacket(pkt, chunk, dir, epHex, pDir, isUpperFilterPort);
                 }
-                else
+
+                // Sync kernel TotalPacketsDropped counter so SmartFilePushArchiver detects any dropped URB slices immediately
+                if (drainedCount > 0 || (++statsPollCounter % 25 == 0))
+                {
+                    var currentStats = _driverClient.GetStats();
+                    if (currentStats.HasValue)
+                    {
+                        _smartFileArchiver.UpdateKernelDroppedPacketsCount(currentStats.Value.TotalPacketsDropped);
+                    }
+                }
+
+                if (drainedCount == 0)
                 {
                     if (_isAggregatingGetprop && (DateTime.UtcNow - _lastGetpropChunkTime).TotalMilliseconds > 300)
                     {
                         FlushGetpropSummary("0x81", "IN");
                     }
 
-                    await Task.Delay(10, token);
+                    await Task.Delay(4, token);
                 }
             }
             catch (OperationCanceledException) { break; }

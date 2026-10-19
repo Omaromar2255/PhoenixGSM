@@ -19,6 +19,15 @@ public partial class MonitoringEngine
         {
             try
             {
+                // Avoid sending hardware IOCTL_USB_GET_DESCRIPTOR_FROM_NODE_CONNECTION to the USB hub
+                // while an active ADB/WinUSB file transfer or interactive session is running!
+                if ((_isAdbSessionActive || _isInsideFileSyncTransfer || _smartFileArchiver.IsInsideTransfer) &&
+                    _seenDeviceInstances.Count > 0)
+                {
+                    await Task.Delay(3000, token);
+                    continue;
+                }
+
                 var devices = _usbScanner.ScanAllDevices();
                 OnTopologyChanged?.Invoke(devices);
 
@@ -73,10 +82,10 @@ public partial class MonitoringEngine
                     });
                 }
 
-                await Task.Delay(2000, token);
+                await Task.Delay(2500, token);
             }
             catch (OperationCanceledException) { break; }
-            catch { await Task.Delay(2500, token); }
+            catch { await Task.Delay(3000, token); }
         }
     }
     #endregion
@@ -91,7 +100,6 @@ public partial class MonitoringEngine
                 var currentPorts = SerialPort.GetPortNames().OrderBy(p => p).ToArray();
                 var currentSet = new HashSet<string>(currentPorts, StringComparer.OrdinalIgnoreCase);
 
-                // Include any ports from OmniTrace SerialSensor
                 if (_omniService?.SerialSensor != null)
                 {
                     foreach (var p in _omniService.SerialSensor.AllDiscoveredPortNames)
@@ -100,7 +108,6 @@ public partial class MonitoringEngine
                     }
                 }
 
-                // Scan Modem Class in registry: {4D36E96D-E325-11CE-BFC1-08002BE10318}
                 try
                 {
                     using var modemKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Class\{4D36E96D-E325-11CE-BFC1-08002BE10318}");
@@ -122,7 +129,6 @@ public partial class MonitoringEngine
                 }
                 catch { }
 
-                // Scan Ports Class in registry: {4D36E978-E325-11CE-BFC1-08002BE10318}
                 try
                 {
                     using var portsKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Class\{4D36E978-E325-11CE-BFC1-08002BE10318}");
@@ -150,7 +156,6 @@ public partial class MonitoringEngine
 
                 lock (_knownComPorts)
                 {
-                    // Detect newly plugged COM ports
                     foreach (var port in currentSet)
                     {
                         if (!_knownComPorts.Contains(port))
@@ -160,7 +165,6 @@ public partial class MonitoringEngine
                         }
                     }
 
-                    // Detect removed COM ports
                     var removed = _knownComPorts.Where(p => !currentSet.Contains(p)).ToList();
                     foreach (var port in removed)
                     {

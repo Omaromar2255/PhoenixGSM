@@ -10,6 +10,8 @@ namespace PhoenixGSM.MonitoringStudio.Services;
 
 public partial class MonitoringEngine
 {
+    public static bool EnableKernelPacketFileLogging { get; set; } = false;
+
     public static string CleanInboundPhoneResponse(byte[] chunk)
     {
         if (chunk == null || chunk.Length == 0) return string.Empty;
@@ -106,6 +108,7 @@ public partial class MonitoringEngine
 
     private static void KernelDiagLog(string line)
     {
+        if (!EnableKernelPacketFileLogging) return;
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(KernelDiagFile)!);
@@ -187,13 +190,23 @@ public partial class MonitoringEngine
     {
         if (rec == null) return;
 
-        string fname = rec.FileName;
+        string fname = !string.IsNullOrWhiteSpace(rec.SavedFileName) ? rec.SavedFileName : rec.FileName;
         string targetPath = rec.TargetDevicePath;
         long size = rec.FileSizeBytes;
         string vector = rec.CaptureVector;
         string classification = rec.FileClassification;
+        string sessionSubFolder = !string.IsNullOrWhiteSpace(rec.SessionFolderName)
+            ? $"CapturedArtifacts/{rec.SessionFolderName}/{fname}"
+            : $"CapturedArtifacts/{fname}";
+        string instanceBadge = rec.UploadSequenceNumber > 1 ? $" [Upload #{rec.UploadSequenceNumber}]" : string.Empty;
 
-        string summary = $"[ADB-PUSH] Completed: {targetPath} ({size:N0} bytes) | Classification: {classification} | Vector: {vector} | Saved: CapturedArtifacts/{fname}";
+        if (targetPath.Contains("/data/local/tmp/AT", StringComparison.OrdinalIgnoreCase))
+        {
+            _lastActiveAtBinaryCommand = _smartFileArchiver.GetActiveArtifactInstanceLabel(targetPath);
+        }
+
+        string statusText = rec.IsCompleteCapture ? "Completed" : $"PARTIAL-WIRE (Dropped: {rec.KernelPacketsDroppedDelta} pkts)";
+        string summary = $"[ADB-PUSH]{instanceBadge} {statusText}: {targetPath} ({size:N0} bytes) | Classification: {classification} | Vector: {vector} | Saved: {sessionSubFolder}";
 
         EmitEvent(new LiveEventItem
         {
@@ -203,12 +216,12 @@ public partial class MonitoringEngine
             Direction = "OUT",
             EndpointOrTarget = $"EP {epHex}",
             Protocol = "ADB-SYNC",
-            Command = $"PUSH {targetPath}",
+            Command = rec.UploadSequenceNumber > 1 ? $"PUSH {targetPath} (#{rec.UploadSequenceNumber} -> {fname})" : $"PUSH {targetPath}",
             Summary = summary,
             RawPayload = rec.FileBytes.Take(128).ToArray(),
             PayloadAscii = summary,
             PayloadHex = LiveEventItem.FormatHexDump(rec.FileBytes.Take(64).ToArray()),
-            AdditionalDetails = $"Target Path: {targetPath}\nMode: {rec.FilePermissionMode}\nTotal Bytes: {size:N0}\nClassification: {classification}\nVector: {vector}\nSHA256: {rec.Sha256}\nMD5: {rec.Md5}\nSaved: {rec.LocalSavedPath}"
+            AdditionalDetails = $"Target Path: {targetPath}\nSaved File Name: {fname} (Upload #{rec.UploadSequenceNumber})\nSession Folder: {rec.SessionFolderName}\nMode: {rec.FilePermissionMode}\nTotal Bytes: {size:N0}\nClassification: {classification}\nVector: {vector}\nSHA256: {rec.Sha256}\nMD5: {rec.Md5}\nSaved Path: {rec.LocalSavedPath}"
         });
 
         if (_omniService?.ArtifactSensor?.Vault != null)
@@ -229,7 +242,9 @@ public partial class MonitoringEngine
                         ["Classification"] = classification,
                         ["Sha256"] = rec.Sha256,
                         ["Md5"] = rec.Md5,
-                        ["Mode"] = rec.FilePermissionMode
+                        ["Mode"] = rec.FilePermissionMode,
+                        ["UploadSequenceNumber"] = rec.UploadSequenceNumber.ToString(),
+                        ["SessionFolder"] = rec.SessionFolderName
                     });
             }
             catch { }

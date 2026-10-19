@@ -183,9 +183,9 @@
                         </Style>
                     </Border.Style>
                     <Button Command="{Binding SelectCategoryCommand}" CommandParameter="All"
-                            Style="{StaticResource ChipCategoryBtn}" ToolTip="Show all forensic events">
+                            Style="{StaticResource ChipCategoryBtn}" ToolTip="عرض كافة السجلات الجنائية الشاملة (Show all forensic events)">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="2,0,2,0">
-                            <TextBlock Text="🌐 All" Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center" />
+                            <TextBlock Text="🌐 الكل (All)" Foreground="#FFFFFF" FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center" />
                             <Border Background="#0E121D" BorderBrush="#252E42" BorderThickness="1" CornerRadius="3" Padding="4,1" Margin="5,0,0,0" VerticalAlignment="Center">
                                 <TextBlock Text="{Binding TotalEventsCount}" FontSize="10" FontWeight="Bold" Foreground="#FFFFFF" />
                             </Border>
@@ -215,7 +215,7 @@
                     <Button Command="{Binding SelectCategoryCommand}" CommandParameter="PhoneCommands"
                             Style="{StaticResource ChipCategoryBtn}" ToolTip="عرض الأوامر الموجهة للهاتف فقط (Host ➔ Device Pure Pipeline)">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="2,0,2,0">
-                            <TextBlock Text="📱 Phone Cmds" Foreground="#00FFC2" FontWeight="Bold" FontSize="11" VerticalAlignment="Center" />
+                            <TextBlock Text="📱 أوامر الهاتف (Phone)" Foreground="#00FFC2" FontWeight="Bold" FontSize="11" VerticalAlignment="Center" />
                             <Border Background="#0E121D" BorderBrush="#00FFC2" BorderThickness="1" CornerRadius="3" Padding="4,1" Margin="5,0,0,0" VerticalAlignment="Center">
                                 <TextBlock Text="{Binding PhoneCommandsCount}" FontSize="10" FontWeight="Bold" Foreground="#00FFC2" />
                             </Border>
