@@ -29,11 +29,7 @@ public partial class MonitoringEngine
         try { PhoenixGSM.UsbMonitor.DriverManager.SanitizeWinUsbAndAndroidStack(); } catch { }
         _ = Task.Run(() => AutoDismissMinGwAssertionLoopAsync(token), token);
 
-        // Create a dedicated new session folder inside CapturedArtifacts/ every time monitoring starts
-        string sessionFolder = _smartFileArchiver.StartNewSession();
-
-        _smartFileArchiver.OnFileArchivedAsync -= EmitCapturedPushedFile;
-        _smartFileArchiver.OnFileArchivedAsync += EmitCapturedPushedFile;
+        string sessionFolder = _smartFileArchiver.CurrentSessionDirectory;
 
         EmitEvent(new LiveEventItem
         {
@@ -75,7 +71,7 @@ public partial class MonitoringEngine
                     }
                     else
                     {
-                        OnDriverStatusChanged?.Invoke(false, "Service Stopped / Pending Reboot");
+                        OnDriverStatusChanged?.Invoke(false, "Filter Off (ETW & CLI Capture Active)");
                         await Task.Delay(2000, token);
                         continue;
                     }
@@ -106,7 +102,6 @@ public partial class MonitoringEngine
                     ProcessCapturedKernelPacket(pkt, chunk, dir, epHex, pDir, isUpperFilterPort);
                 }
 
-                // Sync kernel TotalPacketsDropped counter so SmartFilePushArchiver detects any dropped URB slices immediately
                 if (drainedCount > 0 || (++statsPollCounter % 25 == 0))
                 {
                     var currentStats = _driverClient.GetStats();

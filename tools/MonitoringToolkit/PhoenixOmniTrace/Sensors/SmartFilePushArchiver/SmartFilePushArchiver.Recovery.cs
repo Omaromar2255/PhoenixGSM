@@ -11,7 +11,7 @@ namespace PhoenixGSM.OmniTrace.Sensors;
 
 public sealed partial class SmartFilePushArchiver
 {
-    #region P/Invoke Definitions for 64-Bit & 32-Bit Process RAM Carving
+    #region P/Invoke Definitions for Process PEB CWD/CommandLine & 64-Bit/32-Bit RAM Carving
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
 
@@ -24,8 +24,27 @@ public sealed partial class SmartFilePushArchiver
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern bool QueryFullProcessImageName(IntPtr hProcess, uint dwFlags, StringBuilder lpExeName, ref uint lpdwSize);
 
+    [DllImport("ntdll.dll")]
+    private static extern int NtQueryInformationProcess(
+        IntPtr processHandle,
+        int processInformationClass,
+        out PROCESS_BASIC_INFORMATION processInformation,
+        int processInformationLength,
+        out int returnLength);
+
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr hObject);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PROCESS_BASIC_INFORMATION
+    {
+        public IntPtr Reserved1;
+        public IntPtr PebBaseAddress;
+        public IntPtr Reserved2_0;
+        public IntPtr Reserved2_1;
+        public IntPtr UniqueProcessId;
+        public IntPtr InheritedFromUniqueProcessId;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MEMORY_BASIC_INFORMATION
@@ -53,9 +72,185 @@ public sealed partial class SmartFilePushArchiver
     #endregion
 
     /// <summary>
-    /// Starts an immediate, non-blocking background snapshot from BOTH Host Disk &amp; Target Tool RAM
-    /// at the exact moment the first DATA chunk starts flowing over USB (before the tool frees its buffer!).
+    /// Reads the live Current Working Directory (CWD) directly from a process's Win32 PEB
+    /// (`PebBaseAddress + 0x20` -> `RTL_USER_PROCESS_PARAMETERS + 0x38` -> `CurrentDirectory.DosPath`).
+    /// Allows instant discovery of the exact folder where `cmd.exe`, `powershell.exe`, or `adb.exe` is running `adb push AT ...`!
     /// </summary>
+    public static string? TryGetProcessCurrentDirectory(int pid)
+    {
+        if (pid <= 4 || !Environment.Is64BitOperatingSystem) return null;
+
+        IntPtr hProc = IntPtr.Zero;
+        try
+        {
+            hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
+            if (hProc == IntPtr.Zero)
+            {
+                hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, false, pid);
+            }
+            if (hProc == IntPtr.Zero) return null;
+
+            int status = NtQueryInformationProcess(hProc, 0, out var pbi, Marshal.SizeOf<PROCESS_BASIC_INFORMATION>(), out _);
+            if (status != 0 || pbi.PebBaseAddress == IntPtr.Zero) return null;
+
+            // Read ProcessParameters pointer at PEB + 0x20
+            byte[] ptrBuf = new byte[8];
+            if (!ReadProcessMemory(hProc, pbi.PebBaseAddress + 0x20, ptrBuf, 8, out int got) || got != 8)
+                return null;
+
+            long procParamsAddr = BitConverter.ToInt64(ptrBuf, 0);
+            if (procParamsAddr == 0) return null;
+
+            // Read UNICODE_STRING CurrentDirectory.DosPath at ProcessParameters + 0x38 (16 bytes: ushort Length, ushort MaxLen, 4B pad, IntPtr Buffer)
+            byte[] ustrBuf = new byte[16];
+            if (!ReadProcessMemory(hProc, (IntPtr)(procParamsAddr + 0x38), ustrBuf, 16, out got) || got != 16)
+                return null;
+
+            ushort byteLen = BitConverter.ToUInt16(ustrBuf, 0);
+            long strPtr = BitConverter.ToInt64(ustrBuf, 8);
+            if (byteLen == 0 || byteLen > 2048 || strPtr == 0) return null;
+
+            byte[] charBytes = new byte[byteLen];
+            if (!ReadProcessMemory(hProc, (IntPtr)strPtr, charBytes, byteLen, out got) || got != byteLen)
+                return null;
+
+            string cwd = Encoding.Unicode.GetString(charBytes).Trim('\0', ' ');
+            return Directory.Exists(cwd) ? cwd : null;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            if (hProc != IntPtr.Zero) CloseHandle(hProc);
+        }
+    }
+
+    /// <summary>
+    /// Reads the live CommandLine directly from a process's Win32 PEB (`ProcessParameters + 0x70`) in &lt; 50 microseconds.
+    /// </summary>
+    public static string? TryGetProcessCommandLineFast(int pid, out int parentPid)
+    {
+        parentPid = 0;
+        if (pid <= 4 || !Environment.Is64BitOperatingSystem) return null;
+
+        IntPtr hProc = IntPtr.Zero;
+        try
+        {
+            hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
+            if (hProc == IntPtr.Zero)
+            {
+                hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, false, pid);
+            }
+            if (hProc == IntPtr.Zero) return null;
+
+            int status = NtQueryInformationProcess(hProc, 0, out var pbi, Marshal.SizeOf<PROCESS_BASIC_INFORMATION>(), out _);
+            if (status != 0 || pbi.PebBaseAddress == IntPtr.Zero) return null;
+
+            parentPid = (int)pbi.InheritedFromUniqueProcessId.ToInt64();
+
+            byte[] ptrBuf = new byte[8];
+            if (!ReadProcessMemory(hProc, pbi.PebBaseAddress + 0x20, ptrBuf, 8, out int got) || got != 8)
+                return null;
+
+            long procParamsAddr = BitConverter.ToInt64(ptrBuf, 0);
+            if (procParamsAddr == 0) return null;
+
+            // UNICODE_STRING CommandLine is at ProcessParameters + 0x70
+            byte[] ustrBuf = new byte[16];
+            if (!ReadProcessMemory(hProc, (IntPtr)(procParamsAddr + 0x70), ustrBuf, 16, out got) || got != 16)
+                return null;
+
+            ushort byteLen = BitConverter.ToUInt16(ustrBuf, 0);
+            long strPtr = BitConverter.ToInt64(ustrBuf, 8);
+            if (byteLen == 0 || byteLen > 16384 || strPtr == 0) return null;
+
+            byte[] charBytes = new byte[byteLen];
+            if (!ReadProcessMemory(hProc, (IntPtr)strPtr, charBytes, byteLen, out got) || got != byteLen)
+                return null;
+
+            return Encoding.Unicode.GetString(charBytes).Trim('\0', ' ');
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            if (hProc != IntPtr.Zero) CloseHandle(hProc);
+        }
+    }
+
+    private string? ResolveCliPushLocalFile(string localSource, string? pidCwd, string? parentCwd, string? exeDir)
+    {
+        if (string.IsNullOrWhiteSpace(localSource)) return null;
+        string cleanSource = localSource.Trim('"', '\'', ' ');
+
+        if (Path.IsPathRooted(cleanSource) && File.Exists(cleanSource))
+        {
+            return cleanSource;
+        }
+
+        string?[] candidateBaseDirs =
+        [
+            pidCwd,
+            parentCwd,
+            exeDir,
+            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"),
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            Path.GetTempPath(),
+            Environment.CurrentDirectory,
+            AppDomain.CurrentDomain.BaseDirectory
+        ];
+
+        foreach (string? baseDir in candidateBaseDirs)
+        {
+            if (string.IsNullOrWhiteSpace(baseDir)) continue;
+            try
+            {
+                string combined = Path.Combine(baseDir, cleanSource);
+                if (File.Exists(combined)) return combined;
+
+                string byFileName = Path.Combine(baseDir, Path.GetFileName(cleanSource));
+                if (File.Exists(byFileName)) return byFileName;
+            }
+            catch { }
+        }
+
+        // Also check the live PEB CurrentDirectory of all open cmd.exe / powershell.exe / adb.exe processes
+        try
+        {
+            foreach (var p in Process.GetProcesses())
+            {
+                try
+                {
+                    if (p.Id <= 4 || p.Id == Environment.ProcessId) continue;
+                    string pn = p.ProcessName.ToLowerInvariant();
+                    if (pn is "cmd" or "powershell" or "pwsh" or "windowsterminal" or "adb" ||
+                        pn.Contains("key") || pn.Contains("tool") || pn.Contains("unlock"))
+                    {
+                        string? cwd = TryGetProcessCurrentDirectory(p.Id);
+                        if (!string.IsNullOrWhiteSpace(cwd))
+                        {
+                            string c1 = Path.Combine(cwd, cleanSource);
+                            if (File.Exists(c1)) return c1;
+                            string c2 = Path.Combine(cwd, Path.GetFileName(cleanSource));
+                            if (File.Exists(c2)) return c2;
+                        }
+                    }
+                }
+                catch { }
+                finally { p.Dispose(); }
+            }
+        }
+        catch { }
+
+        return null;
+    }
+
     private void StartEagerMidTransferSnapshot(string targetPath, byte[]? signature, long estimatedSize)
     {
         if (string.IsNullOrWhiteSpace(targetPath) || _eagerSnapshotTask != null) return;
@@ -107,21 +302,38 @@ public sealed partial class SmartFilePushArchiver
     }
 
     /// <summary>
-    /// Searches the active GSM tool's installation directory (discovered via Process.GetProcesses + QueryFullProcessImageName)
-    /// as well as %TEMP% for either an exact filename match or a recent temporary file matching headerSig.
+    /// Searches:
+    /// 1. Recent CLI `adb push` local paths
+    /// 2. Live PEB CurrentDirectory of all running `cmd.exe`, `powershell.exe`, `adb.exe`, and GSM tools
+    /// 3. Tool installation directories, Desktop, Downloads, Documents, and %TEMP%
     /// </summary>
     public byte[]? TryRecoverFromHostDisk(string fileName, byte[]? headerSig)
     {
         if (string.IsNullOrWhiteSpace(fileName) || IsIgnoredNoiseFile(fileName)) return null;
 
+        // 0. Check if we already resolved this file from a recent `adb push` command line
+        if (_recentCliPushByTarget.TryGetValue(fileName, out var cachedCli) &&
+            (DateTime.UtcNow - cachedCli.CapturedAtUtc).TotalSeconds < 60 &&
+            cachedCli.FileBytes.Length > 0 &&
+            IsCandidateMatchingPrefix(cachedCli.FileBytes, headerSig))
+        {
+            return cachedCli.FileBytes;
+        }
+
+        string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var rootDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             Path.GetTempPath(),
             Environment.CurrentDirectory,
             AppDomain.CurrentDomain.BaseDirectory,
+            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+            Path.Combine(userProfile, "Downloads"),
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
             @"C:\Program Files (x86)\KEY-Tool",
             @"C:\Program Files\KEY-Tool",
-            @"C:\UnlockTool"
+            @"C:\UnlockTool",
+            @"C:\platform-tools",
+            @"C:\adb"
         };
 
         try
@@ -132,10 +344,18 @@ public sealed partial class SmartFilePushArchiver
                 {
                     if (p.Id <= 4 || p.Id == Environment.ProcessId) continue;
                     string pn = p.ProcessName.ToLowerInvariant();
-                    if (pn.Contains("key") || pn.Contains("tool") || pn.Contains("adb") ||
-                        pn.Contains("samfw") || pn.Contains("chimera") || pn.Contains("unlock") ||
-                        pn.Contains("odin") || pn.Contains("gsm"))
+
+                    // Read live PEB CurrentDirectory of cmd.exe, powershell.exe, pwsh.exe, WindowsTerminal, adb.exe, and GSM tools!
+                    if (pn is "cmd" or "powershell" or "pwsh" or "windowsterminal" or "adb" ||
+                        pn.Contains("key") || pn.Contains("tool") || pn.Contains("samfw") ||
+                        pn.Contains("chimera") || pn.Contains("unlock") || pn.Contains("odin") || pn.Contains("gsm"))
                     {
+                        string? cwd = TryGetProcessCurrentDirectory(p.Id);
+                        if (!string.IsNullOrWhiteSpace(cwd))
+                        {
+                            rootDirs.Add(cwd);
+                        }
+
                         string? exe = TryGetProcessExecutablePath(p.Id);
                         if (string.IsNullOrEmpty(exe))
                         {
@@ -144,7 +364,13 @@ public sealed partial class SmartFilePushArchiver
                         if (!string.IsNullOrEmpty(exe))
                         {
                             string? d = Path.GetDirectoryName(exe);
-                            if (!string.IsNullOrEmpty(d)) rootDirs.Add(d);
+                            // Do not recursively enumerate C:\Windows\System32 when cmd.exe is inspected!
+                            if (!string.IsNullOrEmpty(d) &&
+                                !d.Contains(@"\Windows\System32", StringComparison.OrdinalIgnoreCase) &&
+                                !d.Contains(@"\Windows\SysWOW64", StringComparison.OrdinalIgnoreCase))
+                            {
+                                rootDirs.Add(d);
+                            }
                         }
                     }
                 }
@@ -156,22 +382,29 @@ public sealed partial class SmartFilePushArchiver
 
         foreach (int candidatePid in _candidatePids.Keys)
         {
+            string? cwd = TryGetProcessCurrentDirectory(candidatePid);
+            if (!string.IsNullOrWhiteSpace(cwd)) rootDirs.Add(cwd);
+
             string? exePath = TryGetProcessExecutablePath(candidatePid);
             if (!string.IsNullOrEmpty(exePath))
             {
                 string? dir = Path.GetDirectoryName(exePath);
-                if (!string.IsNullOrEmpty(dir)) rootDirs.Add(dir);
+                if (!string.IsNullOrEmpty(dir) && !dir.Contains(@"\Windows\System32", StringComparison.OrdinalIgnoreCase))
+                {
+                    rootDirs.Add(dir);
+                }
             }
         }
 
         byte[]? bestMatch = null;
 
-        // Pass 1: Recursive filename search across tool folders
+        // Pass 1: Direct & recursive filename search across discovered CWD and tool folders
         foreach (string dir in rootDirs)
         {
             try
             {
-                if (!Directory.Exists(dir) || dir.Contains("CapturedArtifacts", StringComparison.OrdinalIgnoreCase))
+                if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir) ||
+                    dir.Contains("CapturedArtifacts", StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 string directCandidate = Path.Combine(dir, fileName);
@@ -185,7 +418,7 @@ public sealed partial class SmartFilePushArchiver
                 {
                     IgnoreInaccessible = true,
                     RecurseSubdirectories = true,
-                    MaxRecursionDepth = 4,
+                    MaxRecursionDepth = 3,
                     MatchCasing = MatchCasing.CaseInsensitive
                 };
 
@@ -257,7 +490,6 @@ public sealed partial class SmartFilePushArchiver
 
             if (expectedHeader != null && expectedHeader.Length >= 4 && buf.Length >= 4)
             {
-                // Compare up to 64 bytes so XML files with identical <?xml...?> prologues are accurately distinguished
                 int checkLen = Math.Min(64, Math.Min(expectedHeader.Length, buf.Length));
                 if (!buf.AsSpan(0, checkLen).SequenceEqual(expectedHeader.AsSpan(0, checkLen)))
                 {

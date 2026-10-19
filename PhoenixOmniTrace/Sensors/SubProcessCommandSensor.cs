@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
@@ -13,8 +14,8 @@ namespace PhoenixGSM.OmniTrace.Sensors;
 
 /// <summary>
 /// LAYER 18 — Sub-Process Execution Command Sensor
-/// Captures commands directly from tool execution when a child process (like irecovery.exe) 
-/// is executed with arguments, ensuring commands are captured natively even if the device is not connected.
+/// Captures commands in real-time via Kernel ETW ProcessStart (&lt; 1ms latency) when any child process
+/// (such as adb.exe push, fastboot.exe, irecovery.exe) is executed, even when the USB Filter is OFF.
 /// </summary>
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public sealed class SubProcessCommandSensor : IDisposable
@@ -71,20 +72,20 @@ public sealed class SubProcessCommandSensor : IDisposable
         }
         catch 
         {
-            // Fail-open: if ETW tracing fails (e.g. non-admin or session in use), fallback or ignore
+            // Fail-open: if ETW tracing fails, fallback sensors continue
         }
     }
 
     private static readonly HashSet<string> IgnoredNoiseProcesses = new(StringComparer.OrdinalIgnoreCase)
     {
         "MicrosoftEdgeUpdate.exe", "GoogleUpdate.exe", "svchost.exe", "services.exe",
-        "chrome.exe", "msedge.exe", "firefox.exe", "explorer.exe", "conhost.exe",
+        "chrome.exe", "msedge.exe", "firefox.exe",
         "git.exe", "SearchHost.exe", "RuntimeBroker.exe", "taskhostw.exe", "WmiPrvSE.exe",
         "attrib.exe",
         "MicrosoftEdgeUpdate", "GoogleUpdate", "svchost", "services",
-        "chrome", "msedge", "firefox", "explorer", "conhost",
+        "chrome", "msedge", "firefox",
         "git", "SearchHost", "RuntimeBroker", "taskhostw", "WmiPrvSE", "attrib",
-        "WMIC", "Unknown Caller"
+        "WMIC"
     };
 
     private static bool IsNoiseProcess(string? nameOrPath)
@@ -110,7 +111,7 @@ public sealed class SubProcessCommandSensor : IDisposable
             if (string.IsNullOrWhiteSpace(cmdLine))
                 cmdLine = executablePath;
 
-            string callerName = "Unknown Caller";
+            string callerName = "CMD/User";
             try
             {
                 var parentProc = Process.GetProcessById(ppid);
@@ -118,13 +119,17 @@ public sealed class SubProcessCommandSensor : IDisposable
             }
             catch { }
 
-            // Filter out blacklisted background noise processes
-            if (IsNoiseProcess(processName) || IsNoiseProcess(executablePath) || IsNoiseProcess(callerName))
+            bool isExplicitTargetTool = processName.Equals("adb", StringComparison.OrdinalIgnoreCase) ||
+                                        processName.Equals("adb.exe", StringComparison.OrdinalIgnoreCase) ||
+                                        processName.Equals("fastboot", StringComparison.OrdinalIgnoreCase) ||
+                                        processName.Equals("fastboot.exe", StringComparison.OrdinalIgnoreCase);
+
+            // Never drop adb.exe or fastboot.exe even if launched from explorer.exe or cmd.exe!
+            if (!isExplicitTargetTool && (IsNoiseProcess(processName) || IsNoiseProcess(executablePath) || IsNoiseProcess(callerName)))
             {
                 return;
             }
 
-            // Reject empty or bare executable commands
             string trimmedCmd = cmdLine.Trim(' ', '"');
             if (string.IsNullOrWhiteSpace(cmdLine) ||
                 trimmedCmd.Equals(processName, StringComparison.OrdinalIgnoreCase) ||
@@ -134,7 +139,6 @@ public sealed class SubProcessCommandSensor : IDisposable
             }
 
             ReportSubProcessCommandEvent(processName, pid, executablePath, cmdLine, ppid, callerName);
-            
         }
         catch { }
     }
@@ -187,8 +191,11 @@ public sealed class SubProcessCommandSensor : IDisposable
         cmd.Details["ExecutablePath"] = executablePath;
         cmd.Details["OperationType"] = operationType;
         cmd.Details["Caller"] = $"{callerName} (PID {ppid})";
+        cmd.Details["PID"] = pid.ToString();
+        cmd.Details["ParentPID"] = ppid.ToString();
         
         if (pid > 0) cmd.Attribution.ProcessId = pid;
+        if (ppid > 0) cmd.Attribution.ParentProcessId = ppid;
         cmd.Attribution.ImageName = processName;
         cmd.Attribution.CommandLine = commandLine;
 

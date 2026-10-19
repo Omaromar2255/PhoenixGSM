@@ -10,8 +10,8 @@ namespace PhoenixGSM.OmniTrace.Sensors;
 public sealed partial class SmartFilePushArchiver
 {
     /// <summary>
-    /// Fast, non-blocking packet ingestion on the USB capture thread.
-    /// Marks any packet where actualUrbLength > chunk.Length (e.g. > 1024B) as truncated so full Disk/RAM recovery runs.
+    /// Fast, non-blocking packet ingestion on the USB capture thread (or USB ETW / Proxy stream).
+    /// Properly strips embedded 64KB DATA headers in multi-URB adb.exe transfers and triggers full Disk/RAM recovery.
     /// </summary>
     public bool ProcessOutboundSyncOrBulkChunk(
         byte[] chunk,
@@ -27,6 +27,161 @@ public sealed partial class SmartFilePushArchiver
         {
             return ProcessChunkInternalLocked(chunk, epHex, actualUrbLength, depth: 0);
         }
+    }
+
+    /// <summary>
+    /// Direct CLI / Process interception hook for `adb push &lt;localSource&gt; &lt;remoteTarget&gt;`.
+    /// - Resolves the exact local source file using the PEB CurrentDirectory of `adb.exe` and its parent (`cmd.exe` / tool).
+    /// - Caches the full original bytes so USB Filter wire jobs ALWAYS get 100% of the file.
+    /// - When the USB Filter is OFF (or if no wire transfer occurs within 450ms), saves the full file directly to CapturedArtifacts/Session_...
+    /// </summary>
+    public void NotifyAdbPushCommandLine(
+        string? commandLine,
+        int pid,
+        int parentPid,
+        string? executablePath,
+        bool isKernelDriverActive)
+    {
+        if (string.IsNullOrWhiteSpace(commandLine)) return;
+        if (!AdbPushArtifactSensor.TryParseAdbPushCommand(commandLine, out string localSource, out string remoteTarget))
+            return;
+
+        if (IsIgnoredNoiseFile(localSource)) return;
+
+        // Normalize target path if user specified a directory like `/data/local/tmp/` or `/sdcard`
+        string localFileName = Path.GetFileName(localSource.Trim('"', '\'', ' '));
+        remoteTarget = remoteTarget.Trim('"', '\'', ' ').Replace('\\', '/');
+        if (remoteTarget.EndsWith("/") ||
+            remoteTarget.Equals("/data/local/tmp", StringComparison.OrdinalIgnoreCase) ||
+            remoteTarget.Equals("/sdcard", StringComparison.OrdinalIgnoreCase) ||
+            remoteTarget.Equals("/tmp", StringComparison.OrdinalIgnoreCase))
+        {
+            remoteTarget = remoteTarget.TrimEnd('/') + "/" + localFileName;
+        }
+
+        if (IsIgnoredNoiseFile(remoteTarget)) return;
+
+        // Deduplicate identical CLI notifications within 1.5 seconds (since ETW, WMI, and 4688 may all report the same process start)
+        string dedupeKey = $"{pid}:{localSource}->{remoteTarget}";
+        DateTime now = DateTime.UtcNow;
+        if (_recentCliPushDedupe.TryGetValue(dedupeKey, out var prevTime) && (now - prevTime).TotalMilliseconds < 1500)
+        {
+            return;
+        }
+        _recentCliPushDedupe[dedupeKey] = now;
+
+        // Capture process working directories IMMEDIATELY before short-lived `adb.exe` exits
+        string? pidCwd = pid > 4 ? TryGetProcessCurrentDirectory(pid) : null;
+        string? parentCwd = parentPid > 4 ? TryGetProcessCurrentDirectory(parentPid) : null;
+        string? exeDir = !string.IsNullOrWhiteSpace(executablePath) ? Path.GetDirectoryName(executablePath) : null;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                string? resolvedPath = ResolveCliPushLocalFile(localSource, pidCwd, parentCwd, exeDir);
+                byte[]? fullBytes = null;
+
+                if (!string.IsNullOrEmpty(resolvedPath) && File.Exists(resolvedPath))
+                {
+                    fullBytes = TryReadSharedFile(resolvedPath, expectedHeader: null);
+                }
+
+                if (fullBytes == null || fullBytes.Length == 0)
+                {
+                    fullBytes = TryRecoverFromHostDisk(localFileName, headerSig: null);
+                }
+
+                if (fullBytes != null && fullBytes.Length > 0)
+                {
+                    var entry = (resolvedPath ?? localSource, fullBytes, DateTime.UtcNow);
+                    _recentCliPushByTarget[remoteTarget] = entry;
+                    if (!string.IsNullOrWhiteSpace(localFileName))
+                    {
+                        _recentCliPushByTarget[localFileName] = entry;
+                    }
+                }
+
+                // If the USB Kernel Filter is OFF, or if no wire transfer captured this push within 500ms, archive it directly!
+                int waitMs = isKernelDriverActive ? 550 : 50;
+                await Task.Delay(waitMs).ConfigureAwait(false);
+
+                if (fullBytes == null || fullBytes.Length == 0) return;
+
+                // Check if the wire archiver is currently transferring or already saved this full file within the last 2 seconds
+                bool alreadyHandledByWire = false;
+                lock (_transferLock)
+                {
+                    if (_isInsideTransfer && string.Equals(_activeTargetPath, remoteTarget, StringComparison.OrdinalIgnoreCase))
+                    {
+                        alreadyHandledByWire = true;
+                    }
+                }
+
+                if (alreadyHandledByWire) return;
+
+                if (_latestInstanceByPath.TryGetValue(remoteTarget, out var latest) &&
+                    latest.FileSize >= fullBytes.Length &&
+                    File.Exists(latest.LocalSavedPath) &&
+                    (DateTime.UtcNow - File.GetLastWriteTimeUtc(latest.LocalSavedPath)).TotalSeconds < 2.5)
+                {
+                    return;
+                }
+
+                long seqId;
+                int uploadNum;
+                string sessionDir;
+                string sessionFolder;
+
+                lock (_transferLock)
+                {
+                    seqId = Interlocked.Increment(ref _transferSequenceCounter);
+                    int pCount = _uploadCountByTargetPath.AddOrUpdate(remoteTarget, 1, (_, prev) => prev + 1);
+                    int nCount = !string.IsNullOrWhiteSpace(localFileName)
+                        ? _uploadCountByFileName.AddOrUpdate(localFileName, 1, (_, prev) => prev + 1)
+                        : pCount;
+                    uploadNum = Math.Max(pCount, nCount);
+                    sessionDir = CurrentSessionDirectory;
+                    sessionFolder = CurrentSessionFolderName;
+                }
+
+                string vector = isKernelDriverActive
+                    ? "Host CLI Push Snapshot (Full Verified)"
+                    : "Host CLI Push (Filter-Free Direct Capture)";
+
+                var savedRecord = SaveSingleCleanFileToDisk(
+                    fullBytes,
+                    remoteTarget,
+                    "0777",
+                    vector,
+                    sessionDir,
+                    sessionFolder,
+                    uploadNum,
+                    seqId,
+                    isCompleteCapture: true,
+                    declaredSize: fullBytes.Length,
+                    kernelDroppedDelta: 0);
+
+                if (savedRecord != null)
+                {
+                    _savedTransfersById[seqId] = (
+                        savedRecord.LocalSavedPath,
+                        savedRecord.SavedFileName,
+                        savedRecord.FileSizeBytes,
+                        savedRecord.UploadSequenceNumber,
+                        true);
+
+                    _latestInstanceByPath[remoteTarget] = (
+                        savedRecord.SavedFileName,
+                        savedRecord.UploadSequenceNumber,
+                        savedRecord.FileSizeBytes,
+                        savedRecord.LocalSavedPath);
+
+                    OnFileArchivedAsync?.Invoke(savedRecord, "ADB-CLI");
+                }
+            }
+            catch { }
+        });
     }
 
     private bool ProcessChunkInternalLocked(byte[] chunk, string epHex, uint actualUrbLength, int depth)
@@ -53,14 +208,22 @@ public sealed partial class SmartFilePushArchiver
         string fullChunkAscii = Encoding.ASCII.GetString(chunk);
         string cleanLineTrimmed = fullChunkAscii.Trim('\r', '\n', '\0', ' ');
 
-        // Never treat shell commands or host commands as raw file push chunks
-        if (cleanLineTrimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
-            cleanLineTrimmed.StartsWith("host:", StringComparison.OrdinalIgnoreCase) ||
-            cleanLineTrimmed.StartsWith("chmod ", StringComparison.OrdinalIgnoreCase) ||
-            cleanLineTrimmed.StartsWith("rm ", StringComparison.OrdinalIgnoreCase) ||
-            cleanLineTrimmed.StartsWith("ln ", StringComparison.OrdinalIgnoreCase) ||
-            cleanLineTrimmed.StartsWith("cp ", StringComparison.OrdinalIgnoreCase))
+        // Only filter out shell/host commands when NOT inside an active binary transfer (or if the packet literally starts at offset 0 with "shell:" / "host:")
+        if (!_isInsideTransfer)
         {
+            if (cleanLineTrimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
+                cleanLineTrimmed.StartsWith("host:", StringComparison.OrdinalIgnoreCase) ||
+                cleanLineTrimmed.StartsWith("chmod ", StringComparison.OrdinalIgnoreCase) ||
+                cleanLineTrimmed.StartsWith("rm ", StringComparison.OrdinalIgnoreCase) ||
+                cleanLineTrimmed.StartsWith("ln ", StringComparison.OrdinalIgnoreCase) ||
+                cleanLineTrimmed.StartsWith("cp ", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+        else if (StartsWithAscii(chunk, "shell:") || StartsWithAscii(chunk, "host:"))
+        {
+            EnqueueCurrentTransferForBackgroundSave(epHex, "ShellCommandPacketFlush");
             return false;
         }
 
@@ -246,8 +409,9 @@ public sealed partial class SmartFilePushArchiver
             _lastChunkTime = DateTime.UtcNow;
             _totalActualUrbBytes += Math.Max(actualUrbLength, (uint)chunk.Length);
 
-            // Check for standalone DONE packet ("DONE" + 4-byte mtime)
-            if (chunk.Length >= 8 && StartsWithAscii(chunk, "DONE"))
+            // Check for standalone DONE packet ("DONE" + 4-byte mtime) — only when packet is 8 bytes or valid trailer!
+            if (chunk.Length >= 8 && StartsWithAscii(chunk, "DONE") &&
+                (chunk.Length == 8 || FindDoneTrailerOffset(chunk, 0) == 0))
             {
                 _sawExplicitDone = true;
                 _doneAlreadyStripped = true;
@@ -277,6 +441,28 @@ public sealed partial class SmartFilePushArchiver
                 }
                 payloadStart = 8;
             }
+            else if (_remainingInCurrentDataBlock > 0 &&
+                     _remainingInCurrentDataBlock + 8 <= chunk.Length &&
+                     chunk[_remainingInCurrentDataBlock] == (byte)'D' &&
+                     chunk[_remainingInCurrentDataBlock + 1] == (byte)'A' &&
+                     chunk[_remainingInCurrentDataBlock + 2] == (byte)'T' &&
+                     chunk[_remainingInCurrentDataBlock + 3] == (byte)'A')
+            {
+                // In adb.exe, the 2nd+ DATA header lands at offset `_remainingInCurrentDataBlock` (e.g. offset 40) because URB #1 started with SEND (32B)!
+                int preLen = _remainingInCurrentDataBlock;
+                _activeUploadStream.Write(chunk, 0, preLen);
+
+                uint dLen = BitConverter.ToUInt32(chunk, preLen + 4);
+                if (dLen > 0 && dLen <= 64 * 1024 * 1024)
+                {
+                    _declaredDataSize += dLen;
+                    _activeDataBlockCount++;
+                    _remainingInCurrentDataBlock = (int)dLen;
+                    currentBlockDeclaredLen = dLen;
+                    _hadTruncatedUrb = true;
+                }
+                payloadStart = preLen + 8;
+            }
 
             bool isTruncatedPacket = actualUrbLength > chunk.Length;
             int exactDataEnd = (currentBlockDeclaredLen > 0 && payloadStart + (long)currentBlockDeclaredLen <= chunk.Length)
@@ -290,7 +476,7 @@ public sealed partial class SmartFilePushArchiver
             {
                 doneIdx = exactDataEnd;
             }
-            else if (!isTruncatedPacket)
+            else if (!isTruncatedPacket || chunk.Length < 1024)
             {
                 doneIdx = FindDoneTrailerOffset(chunk, payloadStart);
             }
@@ -428,7 +614,7 @@ public sealed partial class SmartFilePushArchiver
             });
         }
 
-        // 2. Auto-flush active transfer if a shell command starts (chmod, unzip, pm install, etc.)
+        // 2. Auto-flush active transfer if a genuine shell command starts (chmod, unzip, pm install, etc.)
         lock (_transferLock)
         {
             if (_isInsideTransfer && !string.IsNullOrEmpty(_activeTargetPath))
@@ -569,7 +755,7 @@ public sealed partial class SmartFilePushArchiver
             cleanWire = cleanWire[..(int)declared];
         }
 
-        if (declared > cleanWire.Length)
+        if (declared > cleanWire.Length || blockCount > 1)
         {
             truncated = true;
         }

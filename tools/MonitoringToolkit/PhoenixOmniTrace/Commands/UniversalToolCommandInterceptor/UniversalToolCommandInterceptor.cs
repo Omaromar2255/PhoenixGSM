@@ -10,14 +10,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using PhoenixGSM.OmniTrace.Bus;
 using PhoenixGSM.OmniTrace.Models;
+using PhoenixGSM.OmniTrace.Sensors;
 
 namespace PhoenixGSM.OmniTrace.Commands;
 
 /// <summary>
 /// Dedicated Multi-Layer GSM Tool Command Interception Engine.
-/// Intercepts raw and formatted commands issued by GSM servicing tools (UnlockTool, Chimera, Miracle, DFT Pro, etc.)
-/// across all operating execution mechanisms (CMD, PowerShell, Shell, WMIC, DevCon, PnPUtil, CLI binaries, child processes).
-/// Guaranteed to function even if USB or COM port detection fails or is delayed.
+/// Intercepts raw and formatted commands issued by GSM servicing tools and CMD/ADB invocations
+/// across WMI, Security Audit 4688, and Fast PEB Delta Polling.
 /// </summary>
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public sealed partial class UniversalToolCommandInterceptor : IDisposable
@@ -110,8 +110,7 @@ public sealed partial class UniversalToolCommandInterceptor : IDisposable
     {
         try
         {
-            // Universal process creation query with 250ms polling resolution
-            var query = new WqlEventQuery("__InstanceCreationEvent", TimeSpan.FromMilliseconds(250),
+            var query = new WqlEventQuery("__InstanceCreationEvent", TimeSpan.FromMilliseconds(150),
                 "TargetInstance ISA 'Win32_Process'");
 
             _wmiWatcher = new ManagementEventWatcher(query);
@@ -188,7 +187,7 @@ public sealed partial class UniversalToolCommandInterceptor : IDisposable
     }
     #endregion
 
-    #region Engine 3: High-Frequency Process Polling Delta Fallback
+    #region Engine 3: High-Frequency PEB Process Polling Delta Fallback
     private void StartHierarchyPollingLoop(CancellationToken token)
     {
         _hierarchyPollingTask = Task.Run(async () =>
@@ -208,48 +207,53 @@ public sealed partial class UniversalToolCommandInterceptor : IDisposable
                             currentPids.Add(p.Id);
                             string pNameLower = p.ProcessName.ToLowerInvariant();
 
-                            // Track running GSM tools
                             bool isGsm = KnownGsmToolKeywords.Any(k => pNameLower.Contains(k));
                             if (isGsm)
                             {
                                 RegisterToolPid(p.Id);
                             }
 
-                            // If new process appeared
                             if (!seenPids.Contains(p.Id) && seenPids.Count > 0)
                             {
-                                string exePath = "";
-                                try { exePath = p.MainModule?.FileName ?? ""; } catch { }
-
-                                // Quick inspect if relevant utility or GSM child
                                 if (IsPotentiallyRelevantUtility(p.ProcessName) || isGsm)
                                 {
-                                    // Try reading command line via WMI if needed
-                                    string cmdLine = exePath;
-                                    try
+                                    string exePath = "";
+                                    try { exePath = p.MainModule?.FileName ?? ""; } catch { }
+
+                                    // Fast 50-microsecond PEB CommandLine + ParentPID read (with WMI fallback)
+                                    string? cmdLine = SmartFilePushArchiver.TryGetProcessCommandLineFast(p.Id, out int parentId);
+                                    if (string.IsNullOrWhiteSpace(cmdLine))
                                     {
-                                        using var searcher = new ManagementObjectSearcher(
-                                            $"SELECT CommandLine, ParentProcessId FROM Win32_Process WHERE ProcessId = {p.Id}");
-                                        foreach (ManagementObject mo in searcher.Get())
+                                        try
                                         {
-                                            cmdLine = mo["CommandLine"]?.ToString() ?? exePath;
-                                            int parentId = Convert.ToInt32(mo["ParentProcessId"]);
-                                            ProcessIncomingProcessEvent(p.ProcessName + ".exe", p.Id, parentId, cmdLine, exePath, "DELTA-POLLER", DateTime.UtcNow);
-                                            break;
+                                            using var searcher = new ManagementObjectSearcher(
+                                                $"SELECT CommandLine, ParentProcessId FROM Win32_Process WHERE ProcessId = {p.Id}");
+                                            foreach (ManagementObject mo in searcher.Get())
+                                            {
+                                                cmdLine = mo["CommandLine"]?.ToString() ?? exePath;
+                                                parentId = Convert.ToInt32(mo["ParentProcessId"]);
+                                                break;
+                                            }
                                         }
+                                        catch { }
                                     }
-                                    catch { }
+
+                                    if (!string.IsNullOrWhiteSpace(cmdLine))
+                                    {
+                                        ProcessIncomingProcessEvent(p.ProcessName + ".exe", p.Id, parentId, cmdLine, exePath, "DELTA-POLLER", DateTime.UtcNow);
+                                    }
                                 }
                             }
                         }
                         catch { }
+                        finally { p.Dispose(); }
                     }
 
                     seenPids = currentPids;
-                    await Task.Delay(400, token);
+                    await Task.Delay(120, token);
                 }
                 catch (OperationCanceledException) { break; }
-                catch { await Task.Delay(1000, token); }
+                catch { await Task.Delay(500, token); }
             }
         }, token);
     }
@@ -271,7 +275,6 @@ public sealed partial class UniversalToolCommandInterceptor : IDisposable
         string cleanExe = Path.GetFileName(exeName).ToLowerInvariant();
         if (!cleanExe.EndsWith(".exe") && !cleanExe.Contains('.')) cleanExe += ".exe";
 
-        // Resolve parent name
         string parentName = "System";
         if (!string.IsNullOrEmpty(parentPathOverride))
         {
@@ -281,24 +284,26 @@ public sealed partial class UniversalToolCommandInterceptor : IDisposable
         {
             try
             {
-                var parent = Process.GetProcessById(parentPid);
+                using var parent = Process.GetProcessById(parentPid);
                 parentName = parent.ProcessName + ".exe";
             }
             catch { }
         }
 
-        // Strict Noise Exclusion
-        if (IsStrictlyExcludedProcess(cleanExe) || IsStrictlyExcludedProcess(exeName) ||
-            IsStrictlyExcludedProcess(parentName) || IsStrictlyExcludedProcess(parentPathOverride) ||
-            HasNoiseKeywords(exeName) || HasNoiseKeywords(cleanExe) || HasNoiseKeywords(cmdLine) ||
-            HasNoiseKeywords(parentName) || HasNoiseKeywords(exePath) || HasNoiseKeywords(parentPathOverride))
+        bool isExplicitTargetBinary = cleanExe is "adb.exe" or "fastboot.exe";
+
+        // Strict Noise Exclusion (never exclude adb.exe or fastboot.exe even if parent is explorer.exe or cmd.exe!)
+        if (!isExplicitTargetBinary &&
+            (IsStrictlyExcludedProcess(cleanExe) || IsStrictlyExcludedProcess(exeName) ||
+             IsStrictlyExcludedProcess(parentName) || IsStrictlyExcludedProcess(parentPathOverride) ||
+             HasNoiseKeywords(exeName) || HasNoiseKeywords(cleanExe) || HasNoiseKeywords(cmdLine) ||
+             HasNoiseKeywords(parentName) || HasNoiseKeywords(exePath) || HasNoiseKeywords(parentPathOverride)))
         {
             return;
         }
 
         string parentLower = parentName.ToLowerInvariant();
 
-        // Check if parent is a known GSM tool
         bool parentIsTool = false;
         lock (_pidLock)
         {
@@ -310,20 +315,17 @@ public sealed partial class UniversalToolCommandInterceptor : IDisposable
             if (parentIsTool && parentPid > 0) RegisterToolPid(parentPid);
         }
 
-        // Noise suppression: drop non-relevant background Windows processes
-        if (!parentIsTool && IsBenignNoiseProcess(cleanExe, cmdLine))
+        if (!parentIsTool && !isExplicitTargetBinary && IsBenignNoiseProcess(cleanExe, cmdLine))
         {
             return;
         }
 
-        // Filter out empty bare cmd.exe / conhost with no parameters
         if ((cleanExe == "cmd.exe" || cleanExe == "conhost.exe") &&
             (string.IsNullOrWhiteSpace(cmdLine) || cmdLine.Trim().Equals(cleanExe, StringComparison.OrdinalIgnoreCase)))
         {
             return;
         }
 
-        // Check relevance
         bool isToolBinary = KnownGsmToolKeywords.Any(k => cleanExe.Contains(k));
         bool isUtility = IsPotentiallyRelevantUtility(cleanExe);
         bool hasDeviceKeywords = HasHardwareOrGsmKeywords(cmdLine);
@@ -333,11 +335,9 @@ public sealed partial class UniversalToolCommandInterceptor : IDisposable
             return;
         }
 
-        // Deduplication using sliding window (3 seconds)
         string dedupeKey = $"{pid}_{cleanExe}_{cmdLine.Trim()}";
         DateTime now = DateTime.UtcNow;
 
-        // Clean expired deduplication entries older than 5 seconds
         if (_recentDeduplicationMap.Count > 100)
         {
             var expired = _recentDeduplicationMap.Where(kv => (now - kv.Value).TotalSeconds > 5).Select(kv => kv.Key).ToList();
@@ -346,26 +346,22 @@ public sealed partial class UniversalToolCommandInterceptor : IDisposable
 
         if (_recentDeduplicationMap.TryGetValue(dedupeKey, out var prevTime))
         {
-            if ((now - prevTime).TotalSeconds < 3.0)
+            if ((now - prevTime).TotalSeconds < 2.0)
             {
-                return; // Duplicate
+                return;
             }
         }
         _recentDeduplicationMap[dedupeKey] = now;
 
-        // Perform deep domain analysis of the command
         var analyzed = AnalyzeCommand(cleanExe, exePath, cmdLine, parentName, parentPid, pid, engine, timestamp);
 
-        // Reject empty WMIC query or duplicate BIOS/Baseboard query
         if (analyzed.CommandAction == "WMIC QUERY: \"\"" || analyzed.CommandAction == "WMIC QUERY: SUPPRESSED_DUPLICATE")
         {
             return;
         }
 
-        // Dispatch to internal subscribers
         OnCommandCaptured?.Invoke(analyzed);
 
-        // Dispatch to OmniTrace EventBus if connected
         if (_bus != null)
         {
             DispatchToEventBus(analyzed);
@@ -408,6 +404,7 @@ public sealed partial class UniversalToolCommandInterceptor : IDisposable
         _bus.Correlation.RegisterProcess(new Models.ProcessAttributionMetadata
         {
             ProcessId = cmd.ProcessId,
+            ParentProcessId = cmd.ParentProcessId,
             ImageName = cmd.ProcessName,
             CommandLine = cmd.CommandLine
         });

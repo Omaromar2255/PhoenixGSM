@@ -9,8 +9,9 @@ namespace PhoenixGSM.OmniTrace.Sensors;
 
 /// <summary>
 /// LAYER 12C — High-Integrity Passive Parallel Smart File Push Archiver.
+/// - Works both WITH the USB Kernel Filter enabled AND WITHOUT the USB Filter (via ETW/WMI/CLI process interception + PEB CWD resolution).
+/// - Resolves exact local source files from CMD / PowerShell / ADB working directories (via Win32 PEB CurrentDirectory).
 /// - Creates a dedicated per-session folder under CapturedArtifacts/ every time the monitor starts.
-/// - Recovers full files from Host Disk and Process RAM whenever USB packets are truncated to 1KB (1024B).
 /// - Automatically numbers repeated uploads of the same target path (AT, AT_2, AT_3 or ADP.xml, ADP_2.xml).
 /// </summary>
 public sealed partial class SmartFilePushArchiver : IDisposable
@@ -50,6 +51,10 @@ public sealed partial class SmartFilePushArchiver : IDisposable
     private readonly ConcurrentDictionary<string, int> _uploadCountByFileName = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<long, (string LocalSavedPath, string SavedFileName, long SavedSize, int UploadNumber, bool IsComplete)> _savedTransfersById = new();
     private readonly ConcurrentDictionary<string, (string SavedFileName, int UploadNumber, long FileSize, string LocalSavedPath)> _latestInstanceByPath = new(StringComparer.OrdinalIgnoreCase);
+
+    // Maps remote TargetDevicePath (or FileName) -> recently resolved local file bytes from CLI `adb push <local> <remote>`
+    private readonly ConcurrentDictionary<string, (string LocalPath, byte[] FileBytes, DateTime CapturedAtUtc)> _recentCliPushByTarget = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DateTime> _recentCliPushDedupe = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly Channel<PendingFileArchiveJob> _jobChannel;
     private readonly CancellationTokenSource _cts = new();
@@ -138,6 +143,8 @@ public sealed partial class SmartFilePushArchiver : IDisposable
             _uploadCountByFileName.Clear();
             _savedTransfersById.Clear();
             _latestInstanceByPath.Clear();
+            _recentCliPushByTarget.Clear();
+            _recentCliPushDedupe.Clear();
             _activeUploadStream.SetLength(0);
             _isInsideTransfer = false;
             _activeTargetPath = string.Empty;

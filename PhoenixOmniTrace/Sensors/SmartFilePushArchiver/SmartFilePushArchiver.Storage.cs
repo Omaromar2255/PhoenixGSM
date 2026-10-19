@@ -11,8 +11,8 @@ public sealed partial class SmartFilePushArchiver
 {
     /// <summary>
     /// Dedicated background worker loop:
-    /// - Recovers full files from Host Disk and Process RAM whenever USB wire capture is truncated (e.g. 1KB / 1024B).
-    /// - Never uses TotalActualUrbBytes (which includes USB protocol overhead) to reject valid Disk/RAM files.
+    /// 1. Checks _recentCliPushByTarget (populated from `adb push &lt;local&gt; &lt;remote&gt;`) first so CMD pushes are 100% full size.
+    /// 2. Recovers full files from Host Disk (including CMD/PowerShell/ADB PEB working directories) and Process RAM.
     /// </summary>
     private async Task ProcessArchiveJobsLoopAsync(CancellationToken token)
     {
@@ -31,14 +31,23 @@ public sealed partial class SmartFilePushArchiver
                     ? wireBytes[..Math.Min(wireBytes.Length, 256)]
                     : job.HeaderSignature;
 
+                // 0. Check if we already captured the exact local source file from an `adb push <local> <remote>` CLI command!
+                byte[]? cliPushBytes = TryGetRecentCliPushBytes(job.TargetPath, fileName, verifyPrefix);
+                if (cliPushBytes != null && cliPushBytes.Length >= bestBytes.Length)
+                {
+                    bestBytes = cliPushBytes;
+                    bestVector = "Host CLI Push Snapshot (Full Original)";
+                }
+
                 // Wire is only complete on its own for tiny single-packet files (< 1KB) where no URB truncation occurred
                 bool wireIsCompleteExact = !job.HadTruncatedUrb &&
                                            job.KernelDroppedDelta == 0 &&
+                                           job.DataBlockCount <= 1 &&
                                            wireBytes.Length > 0 &&
                                            job.TotalDeclaredBytes > 0 &&
                                            wireBytes.Length == job.TotalDeclaredBytes;
 
-                bool isCompleteCapture = wireIsCompleteExact;
+                bool isCompleteCapture = wireIsCompleteExact || (cliPushBytes != null && cliPushBytes.Length > 0);
 
                 if (wireIsCompleteExact)
                 {
@@ -50,7 +59,7 @@ public sealed partial class SmartFilePushArchiver
                         bestVector = "Host Disk Snapshot";
                     }
                 }
-                else
+                else if (cliPushBytes == null)
                 {
                     // 1. Check Eager Mid-Transfer Snapshot (taken at the exact millisecond the first DATA packet arrived)
                     if (job.EagerSnapshotTask != null)
@@ -74,7 +83,7 @@ public sealed partial class SmartFilePushArchiver
                         ? job.TotalDeclaredBytes
                         : wireBytes.Length;
 
-                    // 2. Run Host Disk + 64-bit/32-bit Target Process RAM carving in parallel
+                    // 2. Run Host Disk (including CMD/ADB PEB CurrentDirectory) + Target Process RAM carving in parallel
                     var diskTask = Task.Run(() => TryRecoverFromHostDisk(fileName, verifyPrefix), token);
                     var ramTask = Task.Run(() => TryCarveFileFromTargetProcessRam(verifyPrefix, expectedFileSize), token);
 
@@ -94,7 +103,6 @@ public sealed partial class SmartFilePushArchiver
                     if (ramBytes != null && ramBytes.Length > bestBytes.Length &&
                         IsCandidateMatchingPrefix(ramBytes, verifyPrefix))
                     {
-                        // If bestBytes is already a valid complete ZIP from Disk, don't overwrite unless RAM also has valid EOCD
                         bool ramZipValid = !IsZipHeader(ramBytes) || HasValidZipEocd(ramBytes);
                         if (ramZipValid || !isCompleteCapture)
                         {
@@ -106,6 +114,17 @@ public sealed partial class SmartFilePushArchiver
                 }
 
                 if (bestBytes.Length == 0)
+                {
+                    continue;
+                }
+
+                // If NotifyAdbPushCommandLine already saved this exact transfer < 2 seconds ago at full size, avoid duplicate save
+                if (_latestInstanceByPath.TryGetValue(job.TargetPath, out var recentSaved) &&
+                    recentSaved.FileSize >= bestBytes.Length &&
+                    File.Exists(recentSaved.LocalSavedPath) &&
+                    (DateTime.UtcNow - File.GetLastWriteTimeUtc(recentSaved.LocalSavedPath)).TotalSeconds < 1.5 &&
+                    job.UploadSequenceNumber > 1 &&
+                    recentSaved.UploadNumber == job.UploadSequenceNumber)
                 {
                     continue;
                 }
@@ -157,6 +176,28 @@ public sealed partial class SmartFilePushArchiver
             }
             catch { }
         }
+    }
+
+    private byte[]? TryGetRecentCliPushBytes(string targetPath, string fileName, byte[]? verifyPrefix)
+    {
+        DateTime cutoff = DateTime.UtcNow.AddSeconds(-30);
+        if (!string.IsNullOrWhiteSpace(targetPath) &&
+            _recentCliPushByTarget.TryGetValue(targetPath, out var byTarget) &&
+            byTarget.CapturedAtUtc >= cutoff &&
+            IsCandidateMatchingPrefix(byTarget.FileBytes, verifyPrefix))
+        {
+            return byTarget.FileBytes;
+        }
+
+        if (!string.IsNullOrWhiteSpace(fileName) &&
+            _recentCliPushByTarget.TryGetValue(fileName, out var byName) &&
+            byName.CapturedAtUtc >= cutoff &&
+            IsCandidateMatchingPrefix(byName.FileBytes, verifyPrefix))
+        {
+            return byName.FileBytes;
+        }
+
+        return null;
     }
 
     private static bool IsCandidateMatchingPrefix(byte[]? candidate, byte[]? verifyPrefix)

@@ -19,7 +19,7 @@ namespace PhoenixGSM.MonitoringStudio.Services;
 
 /// <summary>
 /// Unified Multi-Layer Monitoring Engine.
-/// Coordinates Kernel USB driver capture, PnP topology, WMI & Security 4688 process tracing,
+/// Coordinates Kernel USB driver capture, PnP topology, WMI &amp; Security 4688 process tracing,
 /// ADB proxy logging, Serial/COM ports, and the Phoenix Omni-Trace engine fabric.
 /// </summary>
 public partial class MonitoringEngine : IDisposable
@@ -106,6 +106,11 @@ public partial class MonitoringEngine : IDisposable
         _cts = new CancellationTokenSource();
         var token = _cts.Token;
 
+        // 0. Initialize per-session CapturedArtifacts folder immediately so file archiving works even if USB Filter is OFF!
+        string sessionFolder = _smartFileArchiver.StartNewSession();
+        _smartFileArchiver.OnFileArchivedAsync -= EmitCapturedPushedFile;
+        _smartFileArchiver.OnFileArchivedAsync += EmitCapturedPushedFile;
+
         // 1. Phoenix Omni-Trace Engine & IPC Server (Universal Interceptors, Bus & Sensors)
         try
         {
@@ -120,6 +125,14 @@ public partial class MonitoringEngine : IDisposable
             _omniService.ToolSessionSensor.OnToolSessionCaptured += HandleToolSessionCaptured;
             _omniService.TechnicianAuditLayer.OnCommandAudited += HandleTechnicianAudit;
             _omniService.ToolSourceOrchestrator.OnCommandCaptured += HandleToolSourceCommandCaptured;
+            _omniService.CommandLineSniffer.OnProcessCommandCaptured += (_, cmdInfo) =>
+            {
+                if (!string.IsNullOrWhiteSpace(cmdInfo.CommandLine) &&
+                    cmdInfo.CommandLine.Contains("push", StringComparison.OrdinalIgnoreCase))
+                {
+                    _smartFileArchiver.NotifyAdbPushCommandLine(cmdInfo.CommandLine, cmdInfo.ProcessId, 0, null, IsDriverConnected);
+                }
+            };
             _omniService.TechnicianAuditEnabled = _isTechnicianAuditEnabled;
             _omniService.Start();
         }
@@ -150,8 +163,8 @@ public partial class MonitoringEngine : IDisposable
             SourceTag = "SYSTEM",
             Protocol = "ENGINE",
             Command = "STARTED",
-            Summary = "Unified Multi-Layer Monitoring Engine started (Real-Time Process, USB & Omni-Trace Active).",
-            AdditionalDetails = "Zero-CMD dependency active. Phoenix Omni-Trace transport-agnostic engine active."
+            Summary = $"Unified Multi-Layer Monitoring Engine started (Session Folder: CapturedArtifacts/{_smartFileArchiver.CurrentSessionFolderName}).",
+            AdditionalDetails = $"Zero-CMD dependency active. Session Folder: {sessionFolder}"
         });
     }
 

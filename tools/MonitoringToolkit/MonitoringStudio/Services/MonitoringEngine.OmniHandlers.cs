@@ -11,6 +11,21 @@ public partial class MonitoringEngine
 {
     private void HandleOmniCommand(LogicalCommandEvent cmd)
     {
+        // Forward any `adb push` CLI command immediately to SmartFilePushArchiver (works with USB Filter ON or OFF!)
+        string? candidateCli = cmd.Details.TryGetValue("CommandLine", out var dCli) && !string.IsNullOrWhiteSpace(dCli)
+            ? dCli
+            : cmd.Command;
+        if (!string.IsNullOrWhiteSpace(candidateCli) && candidateCli.Contains("push", StringComparison.OrdinalIgnoreCase))
+        {
+            int.TryParse(cmd.Details.TryGetValue("PID", out var pidStr) ? pidStr : "0", out int pushPid);
+            int.TryParse(cmd.Details.TryGetValue("ParentPID", out var ppidStr) ? ppidStr : "0", out int pushPpid);
+            if (pushPid == 0 && cmd.Attribution != null) pushPid = cmd.Attribution.ProcessId;
+            if (pushPpid == 0 && cmd.Attribution != null) pushPpid = cmd.Attribution.ParentProcessId;
+            cmd.Details.TryGetValue("ExecutablePath", out var pushExePath);
+
+            _smartFileArchiver.NotifyAdbPushCommandLine(candidateCli, pushPid, pushPpid, pushExePath, IsDriverConnected);
+        }
+
         // 0. Prevent duplicate UI emission for commands already emitted directly by KernelDriver
         if (cmd.Details.TryGetValue("EmittedByKernelDriver", out var emittedByKd) && emittedByKd == "true")
         {
@@ -33,7 +48,10 @@ public partial class MonitoringEngine
         if (cmd.Protocol == KnownProtocol.InProcess)
         {
             string caller = cmd.Details.TryGetValue("Caller", out var clr) ? clr : (cmd.Attribution?.ImageName ?? "");
-            if (ExcludedNoiseProcesses.Any(np => caller.Contains(np, StringComparison.OrdinalIgnoreCase)))
+            string imageName = cmd.Attribution?.ImageName ?? "";
+            bool isTargetUtility = imageName.Contains("adb", StringComparison.OrdinalIgnoreCase) ||
+                                   imageName.Contains("fastboot", StringComparison.OrdinalIgnoreCase);
+            if (!isTargetUtility && ExcludedNoiseProcesses.Any(np => caller.Contains(np, StringComparison.OrdinalIgnoreCase)))
             {
                 return;
             }
@@ -287,6 +305,26 @@ public partial class MonitoringEngine
 
     private void HandleOmniRaw(RawCaptureEvent raw)
     {
+        // When the USB Kernel Filter is OFF, feed outbound USB ETW / VirtualProxy chunks into SmartFilePushArchiver!
+        if (!IsDriverConnected &&
+            raw.Direction == PacketDirection.HOST_TO_DEVICE &&
+            raw.RawPayload != null && raw.RawPayload.Length > 0 &&
+            (raw.Sensor == SensorType.ETW || raw.Sensor == SensorType.VirtualProxy || raw.Sensor == SensorType.USB))
+        {
+            bool fromKernelDriver = raw.Metadata != null &&
+                                    raw.Metadata.TryGetValue("Source", out var kdSrc) &&
+                                    kdSrc.StartsWith("KernelDriver", StringComparison.OrdinalIgnoreCase);
+            if (!fromKernelDriver)
+            {
+                _smartFileArchiver.ProcessOutboundSyncOrBulkChunk(
+                    raw.RawPayload,
+                    "OUT",
+                    !string.IsNullOrWhiteSpace(raw.Endpoint) ? raw.Endpoint : "ETW",
+                    (uint)raw.RawPayload.Length,
+                    out _);
+            }
+        }
+
         if (raw.Sensor == SensorType.VirtualProxy) return;
         if (raw.Sensor == SensorType.Serial) return;
         if (raw.Metadata != null && raw.Metadata.TryGetValue("Source", out var src) && src.StartsWith("KernelDriver", StringComparison.OrdinalIgnoreCase)) return;
