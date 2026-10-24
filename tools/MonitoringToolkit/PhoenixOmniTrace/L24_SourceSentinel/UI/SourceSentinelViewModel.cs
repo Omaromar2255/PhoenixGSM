@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -6,6 +7,8 @@ using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Input;
@@ -18,8 +21,30 @@ namespace PhoenixOmniTrace.L24_SourceSentinel.UI;
 public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly SourceSentinelOrchestrator _orchestrator;
+    public SourceSentinelOrchestrator Orchestrator => _orchestrator;
     private readonly object _lockObj = new();
 
+    // 1. الأوامر الفعلية المنفذة للجهاز (معزول 100% عن الرام)
+    public ObservableCollection<SourceTelemetryEvent> ExecutedDeviceEvents { get; } = [];
+    public ICollectionView FilteredExecutedEvents { get; }
+
+    // 2. أوامر الهاتف الصافية للتجربة المباشرة
+    public ObservableCollection<SourceTelemetryEvent> PurePhoneTestableEvents { get; } = [];
+    public ICollectionView FilteredPurePhoneEvents { get; }
+
+    // 3. الأوامر المكتشفة في الذاكرة (مع فلترة الـ 10 فئات شاملة الروابط وتسجيل الدخول وأبل وMTK وكوالكوم)
+    public ObservableCollection<SourceTelemetryEvent> DiscoveredRamEvents { get; } = [];
+    public ICollectionView FilteredDiscoveredRamEvents { get; }
+
+    // 4. رادار المنافذ والملفات المحفوظة والمكتبات
+    public ObservableCollection<SourceTelemetryEvent> RadarAndFileEvents { get; } = [];
+    public ICollectionView FilteredRadarEvents { get; }
+
+    // 5. التبويب الخامس الجديد: السجل الشامل الخام بدون فلترة (Unfiltered Raw Stream — يحفظ كل شيء لملف منفصل!)
+    public ObservableCollection<SourceTelemetryEvent> UnfilteredRawEvents { get; } = [];
+    public ICollectionView FilteredUnfilteredRawEvents { get; }
+
+    // القائمة المنظمة الشاملة
     public ObservableCollection<SourceTelemetryEvent> LiveEvents { get; } = [];
     public ICollectionView FilteredEvents { get; }
 
@@ -72,7 +97,7 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
                 _activeOriginFilter = value;
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(IsOriginFilterActive));
-                FilteredEvents.Refresh();
+                RefreshAllViews();
             }
         }
     }
@@ -88,84 +113,259 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
             {
                 _searchText = value;
                 OnPropertyChanged();
-                FilteredEvents.Refresh();
+                RefreshAllViews();
             }
         }
     }
 
-    private string _stageFilterMode = "All"; // All, ModemUsb, Radar, RamModules, PipesShell
-    public string StageFilterMode
-    {
-        get => _stageFilterMode;
-        set
-        {
-            if (_stageFilterMode != value)
-            {
-                _stageFilterMode = value;
-                OnPropertyChanged();
-                OnPropertyChanged(nameof(IsAllFilterSelected));
-                OnPropertyChanged(nameof(IsModemUsbFilterSelected));
-                OnPropertyChanged(nameof(IsRadarFilterSelected));
-                OnPropertyChanged(nameof(IsRamFilterSelected));
-                OnPropertyChanged(nameof(IsPipesFilterSelected));
-                FilteredEvents.Refresh();
-            }
-        }
-    }
-
-    public bool IsAllFilterSelected => StageFilterMode == "All";
-    public bool IsModemUsbFilterSelected => StageFilterMode == "ModemUsb";
-    public bool IsRadarFilterSelected => StageFilterMode == "Radar";
-    public bool IsRamFilterSelected => StageFilterMode == "RamModules";
-    public bool IsPipesFilterSelected => StageFilterMode == "PipesShell";
-
-    // Metrics Counters
+    // العدادات الحية للأقسام الخمسة
     public int TotalEventsCount => LiveEvents.Count;
-    private int _rawCommandsCount;
-    public int RawCommandsCount { get => _rawCommandsCount; private set { _rawCommandsCount = value; OnPropertyChanged(); } }
-    private int _radarScansCount;
-    public int RadarScansCount { get => _radarScansCount; private set { _radarScansCount = value; OnPropertyChanged(); } }
-    private int _ramUnpacksCount;
-    public int RamUnpacksCount { get => _ramUnpacksCount; private set { _ramUnpacksCount = value; OnPropertyChanged(); } }
-    private int _networkEventsCount;
-    public int NetworkEventsCount { get => _networkEventsCount; private set { _networkEventsCount = value; OnPropertyChanged(); } }
+    public int ExecutedCommandsCount => ExecutedDeviceEvents.Count;
+    public int PurePhoneCommandsCount => PurePhoneTestableEvents.Count;
+    public int DiscoveredRamCommandsCount => DiscoveredRamEvents.Count;
+    public int RadarEventsCount => RadarAndFileEvents.Count;
+    public int UnfilteredRawEventsCount => UnfilteredRawEvents.Count;
 
     private string _statusMessage = "مستعد لمراقبة الأداة من المصدر (Ready)";
     public string StatusMessage { get => _statusMessage; set { _statusMessage = value; OnPropertyChanged(); } }
 
+    // التحكم الاختياري في آلية اكتشاف الأوامر من الـ RAM وإظهار ردود الهاتف
+    public int SelectedDiscoveryModeIndex
+    {
+        get => (int)_orchestrator.DiscoveryMode;
+        set
+        {
+            if (Enum.IsDefined(typeof(L24DiscoveryMode), value) && (int)_orchestrator.DiscoveryMode != value)
+            {
+                _orchestrator.DiscoveryMode = (L24DiscoveryMode)value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public bool ShowPhoneResponses
+    {
+        get => _orchestrator.ShowPhoneResponses;
+        set
+        {
+            if (_orchestrator.ShowPhoneResponses != value)
+            {
+                _orchestrator.ShowPhoneResponses = value;
+                OnPropertyChanged();
+                RefreshAllViews();
+            }
+        }
+    }
+
+    // فلترة تبويب الأوامر المكتشفة في الذاكرة (11 خياراً شاملاً)
+    private string _discoveredCategoryFilter = "All";
+    public string DiscoveredCategoryFilter
+    {
+        get => _discoveredCategoryFilter;
+        set
+        {
+            if (_discoveredCategoryFilter != value)
+            {
+                _discoveredCategoryFilter = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsDiscAllSelected));
+                OnPropertyChanged(nameof(IsDiscModemSelected));
+                OnPropertyChanged(nameof(IsDiscMtkSelected));
+                OnPropertyChanged(nameof(IsDiscQualcommSelected));
+                OnPropertyChanged(nameof(IsDiscAppleSelected));
+                OnPropertyChanged(nameof(IsDiscAdbSelected));
+                OnPropertyChanged(nameof(IsDiscServerCloudSelected));
+                OnPropertyChanged(nameof(IsDiscTransferSelected));
+                OnPropertyChanged(nameof(IsDiscArchiveSelected));
+                OnPropertyChanged(nameof(IsDiscCryptoSelected));
+                OnPropertyChanged(nameof(IsDiscOtherSelected));
+                FilteredDiscoveredRamEvents.Refresh();
+            }
+        }
+    }
+
+    public bool IsDiscAllSelected => DiscoveredCategoryFilter == "All";
+    public bool IsDiscModemSelected => DiscoveredCategoryFilter == "ModemAt";
+    public bool IsDiscMtkSelected => DiscoveredCategoryFilter == "MediaTek";
+    public bool IsDiscQualcommSelected => DiscoveredCategoryFilter == "Qualcomm";
+    public bool IsDiscAppleSelected => DiscoveredCategoryFilter == "AppleIos";
+    public bool IsDiscAdbSelected => DiscoveredCategoryFilter == "AdbFastboot";
+    public bool IsDiscServerCloudSelected => DiscoveredCategoryFilter == "ServerCloudLogin";
+    public bool IsDiscTransferSelected => DiscoveredCategoryFilter == "FileTransfer";
+    public bool IsDiscArchiveSelected => DiscoveredCategoryFilter == "ArchiveUnpack";
+    public bool IsDiscCryptoSelected => DiscoveredCategoryFilter == "CryptoAuth";
+    public bool IsDiscOtherSelected => DiscoveredCategoryFilter == "OtherCommands";
+
+    public int DiscModemCount => DiscoveredRamEvents.Count(e => e.CommandGroup == L24CommandGroup.ModemAt);
+    public int DiscMtkCount => DiscoveredRamEvents.Count(e => e.CommandGroup == L24CommandGroup.MediaTek);
+    public int DiscQualcommCount => DiscoveredRamEvents.Count(e => e.CommandGroup == L24CommandGroup.Qualcomm);
+    public int DiscAppleCount => DiscoveredRamEvents.Count(e => e.CommandGroup == L24CommandGroup.AppleIos);
+    public int DiscAdbCount => DiscoveredRamEvents.Count(e => e.CommandGroup == L24CommandGroup.AdbFastboot);
+    public int DiscServerCloudCount => DiscoveredRamEvents.Count(e => e.CommandGroup == L24CommandGroup.ServerCloudLogin);
+    public int DiscTransferCount => DiscoveredRamEvents.Count(e => e.CommandGroup == L24CommandGroup.FileTransfer);
+    public int DiscArchiveCount => DiscoveredRamEvents.Count(e => e.CommandGroup == L24CommandGroup.ArchiveUnpack);
+    public int DiscCryptoCount => DiscoveredRamEvents.Count(e => e.CommandGroup == L24CommandGroup.CryptoAuth);
+    public int DiscOtherCount => DiscoveredRamEvents.Count(e => e.CommandGroup == L24CommandGroup.OtherCommands);
+
+    public bool IsL24Active => _orchestrator.IsActive;
+
+    public string L24MasterStatusText => IsL24Active ? "🟢 الطبقة 24 تعمل وتراقب الآن" : "⏹️ الطبقة 24 معطلة (توفير الموارد)";
+    public string L24MasterStatusColor => IsL24Active ? "#34D399" : "#F87171";
+    public string L24MasterBadgeText => IsL24Active ? "⚡ L24 ACTIVE" : "💤 L24 STANDBY";
+    public string L24MasterBackground => IsL24Active ? "#064E3B" : "#450A0A";
+    public string L24MasterBorder => IsL24Active ? "#10B981" : "#EF4444";
+    public string L24MasterButtonText => IsL24Active ? "⏹️ إيقاف الطبقة 24 بالكامل" : "▶️ تشغيل وتفعيل الطبقة 24";
+    public string L24MasterButtonBackground => IsL24Active ? "#7F1D1D" : "#065F46";
+    public string L24MasterButtonBorder => IsL24Active ? "#EF4444" : "#10B981";
+    public string L24MasterTooltip => IsL24Active 
+        ? "الطبقة 24 تعمل وتراقب الذاكرة والملفات والمنافذ. اضغط لإيقافها تماماً وإيقاف كافة مهام الخلفية وتوفير موارد الجهاز 100%." 
+        : "الطبقة 24 معطلة بالكامل ولا تستهلك أي موارد بالخلفية. اضغط لتشغيلها وتفعيل المراقبة الشاملة.";
+
+    public ICommand ToggleL24MasterCommand { get; }
+    public ICommand StartL24Command { get; }
+    public ICommand StopL24Command { get; }
+
+    public void NotifyL24StateChanged()
+    {
+        OnPropertyChanged(nameof(IsL24Active));
+        OnPropertyChanged(nameof(L24MasterStatusText));
+        OnPropertyChanged(nameof(L24MasterStatusColor));
+        OnPropertyChanged(nameof(L24MasterBadgeText));
+        OnPropertyChanged(nameof(L24MasterBackground));
+        OnPropertyChanged(nameof(L24MasterBorder));
+        OnPropertyChanged(nameof(L24MasterButtonText));
+        OnPropertyChanged(nameof(L24MasterButtonBackground));
+        OnPropertyChanged(nameof(L24MasterButtonBorder));
+        OnPropertyChanged(nameof(L24MasterTooltip));
+    }
+
     public ICommand LaunchToolCommand { get; }
     public ICommand AttachProcessCommand { get; }
+    public bool IsUnfilteredRawLoggingEnabled
+    {
+        get => _orchestrator.IsUnfilteredRawLoggingEnabled;
+        set
+        {
+            if (_orchestrator.IsUnfilteredRawLoggingEnabled != value)
+            {
+                _orchestrator.IsUnfilteredRawLoggingEnabled = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(UnfilteredRawStatusText));
+                OnPropertyChanged(nameof(UnfilteredRawStatusColor));
+                OnPropertyChanged(nameof(UnfilteredRawStatusBorder));
+                OnPropertyChanged(nameof(UnfilteredRawStatusBackground));
+                OnPropertyChanged(nameof(UnfilteredRawToggleActionText));
+                OnPropertyChanged(nameof(UnfilteredRawToggleBtnBackground));
+                OnPropertyChanged(nameof(UnfilteredRawToggleBtnBorder));
+            }
+        }
+    }
+
+    public string UnfilteredRawStatusText => IsUnfilteredRawLoggingEnabled ? "🟢 يعمل ويسجل آنياً" : "⏸️ متوقف مؤقتاً";
+    public string UnfilteredRawStatusColor => IsUnfilteredRawLoggingEnabled ? "#4ADE80" : "#F87171";
+    public string UnfilteredRawStatusBorder => IsUnfilteredRawLoggingEnabled ? "#16A34A" : "#DC2626";
+    public string UnfilteredRawStatusBackground => IsUnfilteredRawLoggingEnabled ? "#052E16" : "#450A0A";
+    public string UnfilteredRawToggleActionText => IsUnfilteredRawLoggingEnabled ? "⏸️ إيقاف السجل الخام مؤقتاً" : "▶️ تشغيل واستئناف السجل الخام";
+    public string UnfilteredRawToggleBtnBackground => IsUnfilteredRawLoggingEnabled ? "#7F1D1D" : "#14532D";
+    public string UnfilteredRawToggleBtnBorder => IsUnfilteredRawLoggingEnabled ? "#EF4444" : "#22C55E";
+
+    public ICommand ToggleUnfilteredRawLoggingCommand { get; }
+    public ICommand ClearUnfilteredRawCommand { get; }
+
     public ICommand ClearEventsCommand { get; }
     public ICommand ExportLogsCommand { get; }
+    public ICommand ExportPurePhoneCommandsCommand { get; }
+    public ICommand ExportSelectedDiscoveredCategoryCommand { get; }
+    public ICommand ExportAllDiscoveredCategoriesSeparatelyCommand { get; }
+    public ICommand ExportUnfilteredRawLogsCommand { get; }
     public ICommand OpenLogsFolderCommand { get; }
+    public ICommand OpenCapturedFilesFolderCommand { get; }
     public ICommand ClearOriginFilterCommand { get; }
-    public ICommand SetFilterModeCommand { get; }
+    public ICommand SetDiscoveredCategoryFilterCommand { get; }
 
     public SourceSentinelViewModel()
     {
         _orchestrator = new SourceSentinelOrchestrator();
 
-        FilteredEvents = CollectionViewSource.GetDefaultView(LiveEvents);
-        FilteredEvents.Filter = FilterEventItem;
+        FilteredExecutedEvents = CollectionViewSource.GetDefaultView(ExecutedDeviceEvents);
+        FilteredExecutedEvents.Filter = FilterExecutedDeviceItem;
 
+        FilteredPurePhoneEvents = CollectionViewSource.GetDefaultView(PurePhoneTestableEvents);
+        FilteredPurePhoneEvents.Filter = FilterCommonItem;
+
+        FilteredDiscoveredRamEvents = CollectionViewSource.GetDefaultView(DiscoveredRamEvents);
+        FilteredDiscoveredRamEvents.Filter = FilterDiscoveredRamItem;
+
+        FilteredRadarEvents = CollectionViewSource.GetDefaultView(RadarAndFileEvents);
+        FilteredRadarEvents.Filter = FilterCommonItem;
+
+        FilteredUnfilteredRawEvents = CollectionViewSource.GetDefaultView(UnfilteredRawEvents);
+        FilteredUnfilteredRawEvents.Filter = FilterUnfilteredRawItem;
+
+        FilteredEvents = CollectionViewSource.GetDefaultView(LiveEvents);
         FilteredArtifacts = CollectionViewSource.GetDefaultView(LoadedArtifacts);
 
+        BindingOperations.EnableCollectionSynchronization(ExecutedDeviceEvents, _lockObj);
+        BindingOperations.EnableCollectionSynchronization(PurePhoneTestableEvents, _lockObj);
+        BindingOperations.EnableCollectionSynchronization(DiscoveredRamEvents, _lockObj);
+        BindingOperations.EnableCollectionSynchronization(RadarAndFileEvents, _lockObj);
+        BindingOperations.EnableCollectionSynchronization(UnfilteredRawEvents, _lockObj);
         BindingOperations.EnableCollectionSynchronization(LiveEvents, _lockObj);
         BindingOperations.EnableCollectionSynchronization(LoadedArtifacts, _lockObj);
 
         _orchestrator.OnTelemetryEventCaptured += OnEventCaptured;
+        _orchestrator.OnUnfilteredRawEventCaptured += OnUnfilteredRawCaptured;
         _orchestrator.OnLogMessage += msg => StatusMessage = msg;
 
-        // Commands
+        ToggleL24MasterCommand = new RelayCommand(_ =>
+        {
+            if (_orchestrator.IsActive)
+                _orchestrator.Stop();
+            else
+                _orchestrator.Start();
+            NotifyL24StateChanged();
+        });
+
+        StartL24Command = new RelayCommand(_ =>
+        {
+            _orchestrator.Start();
+            NotifyL24StateChanged();
+        });
+
+        StopL24Command = new RelayCommand(_ =>
+        {
+            _orchestrator.Stop();
+            NotifyL24StateChanged();
+        });
+
         LaunchToolCommand = new RelayCommand(_ => ExecuteLaunchTool());
         AttachProcessCommand = new RelayCommand(_ => ExecuteAttachProcess());
+        ToggleUnfilteredRawLoggingCommand = new RelayCommand(_ =>
+        {
+            IsUnfilteredRawLoggingEnabled = !IsUnfilteredRawLoggingEnabled;
+        });
+
+        ClearUnfilteredRawCommand = new RelayCommand(_ =>
+        {
+            lock (_lockObj)
+            {
+                UnfilteredRawEvents.Clear();
+                _orchestrator.ClearUnfilteredRawEvents();
+                OnPropertyChanged(nameof(UnfilteredRawEventsCount));
+            }
+        });
+
         ClearEventsCommand = new RelayCommand(_ => ExecuteClearEvents());
         ExportLogsCommand = new RelayCommand(_ => ExecuteExportLogs());
+        ExportPurePhoneCommandsCommand = new RelayCommand(_ => ExecuteExportPurePhoneCommands());
+        ExportSelectedDiscoveredCategoryCommand = new RelayCommand(_ => ExecuteExportSelectedDiscoveredCategory());
+        ExportAllDiscoveredCategoriesSeparatelyCommand = new RelayCommand(_ => ExecuteExportAllDiscoveredCategoriesSeparately());
+        ExportUnfilteredRawLogsCommand = new RelayCommand(_ => ExecuteExportUnfilteredRawLogs());
         OpenLogsFolderCommand = new RelayCommand(_ => ExecuteOpenLogsFolder());
+        OpenCapturedFilesFolderCommand = new RelayCommand(_ => ExecuteOpenCapturedFilesFolder());
         ClearOriginFilterCommand = new RelayCommand(_ => { ActiveOriginFilter = null; SelectedArtifact = null; });
-        SetFilterModeCommand = new RelayCommand(param => { if (param is string mode) StageFilterMode = mode; });
+        SetDiscoveredCategoryFilterCommand = new RelayCommand(param => { if (param is string cat) DiscoveredCategoryFilter = cat; });
 
-        // بدء تشغيل الخادم تلقائياً
         _orchestrator.Start();
     }
 
@@ -174,67 +374,150 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
         _orchestrator.AttachToOmniTraceEventBus(bus);
     }
 
-    private void OnEventCaptured(SourceTelemetryEvent evt)
+    private void OnUnfilteredRawCaptured(SourceTelemetryEvent rawEvt)
     {
+        if (!IsL24Active || !IsUnfilteredRawLoggingEnabled) return;
         Application.Current?.Dispatcher.InvokeAsync(() =>
         {
             lock (_lockObj)
             {
-                if (LiveEvents.Count >= 20000)
-                {
-                    LiveEvents.RemoveAt(0);
-                }
-                LiveEvents.Add(evt);
-
-                // تحديث العدادات
-                switch (evt.Stage)
-                {
-                    case SentinelStage.RawCommandExecution:
-                        RawCommandsCount++;
-                        break;
-                    case SentinelStage.PortAndDeviceRadar:
-                        RadarScansCount++;
-                        break;
-                    case SentinelStage.RamUnpackOrModuleLoad:
-                        RamUnpacksCount++;
-                        AddArtifactIfNotExists(evt);
-                        break;
-                    case SentinelStage.NetworkPreEncryption:
-                        NetworkEventsCount++;
-                        break;
-                }
-                OnPropertyChanged(nameof(TotalEventsCount));
+                if (UnfilteredRawEvents.Count >= 50000)
+                    UnfilteredRawEvents.RemoveAt(0);
+                UnfilteredRawEvents.Add(rawEvt);
+                OnPropertyChanged(nameof(UnfilteredRawEventsCount));
             }
         });
     }
 
+    private void OnEventCaptured(SourceTelemetryEvent evt)
+    {
+        if (!IsL24Active || evt == null) return;
+        Application.Current?.Dispatcher.InvokeAsync(() =>
+        {
+            lock (_lockObj)
+            {
+                if (LiveEvents.Count >= 30000) LiveEvents.RemoveAt(0);
+                LiveEvents.Add(evt);
+
+                switch (evt.Scope)
+                {
+                    case L24CommandScope.ExecutedOnDevice:
+                        // حظر قاطع للروابط وطلبات الشبكة من تبويب الأوامر الفعلية للجهاز
+                        if (!L24CommandClassifier.IsUrlOrNetworkOrAuth(evt) && evt.CommandGroup != L24CommandGroup.ServerCloudLogin)
+                        {
+                            ExecutedDeviceEvents.Add(evt);
+                        }
+                        else
+                        {
+                            DiscoveredRamEvents.Add(evt);
+                            UpdateDiscoveredCategoryCounters();
+                        }
+                        break;
+
+                    case L24CommandScope.DiscoveredInRam:
+                        DiscoveredRamEvents.Add(evt);
+                        UpdateDiscoveredCategoryCounters();
+                        break;
+
+                    case L24CommandScope.RadarAndFiles:
+                        RadarAndFileEvents.Add(evt);
+                        if (evt.Stage is SentinelStage.RamUnpackOrModuleLoad or SentinelStage.LocalFilePreparation)
+                        {
+                            AddArtifactIfNotExists(evt);
+                        }
+                        break;
+                }
+
+                if (L24CommandClassifier.IsPurePhoneTestable(evt, out string cleanTestable))
+                {
+                    string normKey = RamCommandConsolidator.NormalizeCommandKey(cleanTestable);
+                    bool alreadyInPure = PurePhoneTestableEvents.Any(x =>
+                        string.Equals(RamCommandConsolidator.NormalizeCommandKey(x.PureCommandText), normKey, StringComparison.OrdinalIgnoreCase));
+
+                    if (!alreadyInPure)
+                    {
+                        evt.PureCommandText = cleanTestable;
+                        PurePhoneTestableEvents.Add(evt);
+                    }
+                }
+
+                NotifyCounterProperties();
+            }
+        });
+    }
+
+    private void NotifyCounterProperties()
+    {
+        OnPropertyChanged(nameof(TotalEventsCount));
+        OnPropertyChanged(nameof(ExecutedCommandsCount));
+        OnPropertyChanged(nameof(PurePhoneCommandsCount));
+        OnPropertyChanged(nameof(DiscoveredRamCommandsCount));
+        OnPropertyChanged(nameof(RadarEventsCount));
+        OnPropertyChanged(nameof(UnfilteredRawEventsCount));
+    }
+
+    private void UpdateDiscoveredCategoryCounters()
+    {
+        OnPropertyChanged(nameof(DiscModemCount));
+        OnPropertyChanged(nameof(DiscMtkCount));
+        OnPropertyChanged(nameof(DiscQualcommCount));
+        OnPropertyChanged(nameof(DiscAppleCount));
+        OnPropertyChanged(nameof(DiscAdbCount));
+        OnPropertyChanged(nameof(DiscServerCloudCount));
+        OnPropertyChanged(nameof(DiscTransferCount));
+        OnPropertyChanged(nameof(DiscArchiveCount));
+        OnPropertyChanged(nameof(DiscCryptoCount));
+        OnPropertyChanged(nameof(DiscOtherCount));
+    }
+
     private void AddArtifactIfNotExists(SourceTelemetryEvent evt)
     {
-        string moduleName = Path.GetFileName(evt.TargetResource);
+        string path = !string.IsNullOrWhiteSpace(evt.SavedFilePath) ? evt.SavedFilePath : evt.TargetResource;
+        string moduleName = Path.GetFileName(path);
         if (string.IsNullOrWhiteSpace(moduleName)) moduleName = evt.CallerModuleOrigin;
 
         bool exists = LoadedArtifacts.Any(a => a.ModuleName.Equals(moduleName, StringComparison.OrdinalIgnoreCase)
-                                            || a.FilePath.Equals(evt.TargetResource, StringComparison.OrdinalIgnoreCase));
+                                            || a.FilePath.Equals(path, StringComparison.OrdinalIgnoreCase));
         if (!exists)
         {
-            var artifact = new LoadedModuleArtifact(
+            LoadedArtifacts.Add(new LoadedModuleArtifact(
                 ModuleName: moduleName,
-                FilePath: evt.TargetResource,
+                FilePath: path,
                 BaseAddress: IntPtr.Zero,
                 MemorySize: evt.PayloadSize,
                 IsUnpackedInRam: evt.HookedApiName.Contains("VirtualProtect", StringComparison.OrdinalIgnoreCase),
                 DetectionTimestamp: evt.Timestamp,
                 ProcessId: evt.ProcessId
-            );
-            LoadedArtifacts.Add(artifact);
+            ));
         }
     }
 
-    private bool FilterEventItem(object obj)
+    private void RefreshAllViews()
+    {
+        FilteredExecutedEvents.Refresh();
+        FilteredPurePhoneEvents.Refresh();
+        FilteredDiscoveredRamEvents.Refresh();
+        FilteredRadarEvents.Refresh();
+        FilteredUnfilteredRawEvents.Refresh();
+        FilteredEvents.Refresh();
+    }
+
+    private bool FilterExecutedDeviceItem(object obj)
     {
         if (obj is not SourceTelemetryEvent item) return false;
 
-        // فلترة حسب المصدر المحدد (Origin Attribution)
+        // عزل 100%: حجب أي رابط أو طلب سيرفر أو تسجيل دخول من الظهور في تبويب الأوامر الفعلية
+        if (item.CommandGroup == L24CommandGroup.ServerCloudLogin || L24CommandClassifier.IsUrlOrNetworkOrAuth(item))
+            return false;
+
+        return FilterCommonItem(item);
+    }
+
+    private bool FilterCommonItem(object obj)
+    {
+        if (obj is not SourceTelemetryEvent item) return false;
+        if (!ShowPhoneResponses && item.IsPhoneResponse) return false;
+
         if (!string.IsNullOrWhiteSpace(_activeOriginFilter))
         {
             bool originMatches = item.CallerModuleOrigin.Contains(_activeOriginFilter, StringComparison.OrdinalIgnoreCase)
@@ -242,56 +525,233 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
             if (!originMatches) return false;
         }
 
-        // فلترة حسب وضع المرحلة
-        if (StageFilterMode == "ModemUsb")
-        {
-            bool isModemUsb = item.CommandCategory.Contains("AT", StringComparison.OrdinalIgnoreCase)
-                           || item.CommandCategory.Contains("MTK", StringComparison.OrdinalIgnoreCase)
-                           || item.CommandCategory.Contains("MediaTek", StringComparison.OrdinalIgnoreCase)
-                           || item.CommandCategory.Contains("BROM", StringComparison.OrdinalIgnoreCase)
-                           || item.CommandCategory.Contains("Sahara", StringComparison.OrdinalIgnoreCase)
-                           || item.CommandCategory.Contains("Firehose", StringComparison.OrdinalIgnoreCase)
-                           || item.CommandCategory.Contains("Odin", StringComparison.OrdinalIgnoreCase)
-                           || item.CommandCategory.Contains("BSL", StringComparison.OrdinalIgnoreCase)
-                           || item.CommandCategory.Contains("DIAG", StringComparison.OrdinalIgnoreCase)
-                           || item.CommandCategory.Contains("Modem", StringComparison.OrdinalIgnoreCase)
-                           || item.CommandCategory.Contains("BaudRate", StringComparison.OrdinalIgnoreCase)
-                           || item.CommandCategory.Contains("Port", StringComparison.OrdinalIgnoreCase);
-            if (!isModemUsb) return false;
-        }
-        else if (StageFilterMode == "Radar")
-        {
-            if (item.Stage != SentinelStage.PortAndDeviceRadar && item.Stage != SentinelStage.LocalFilePreparation)
-                return false;
-        }
-        else if (StageFilterMode == "RamModules")
-        {
-            if (item.Stage != SentinelStage.RamUnpackOrModuleLoad)
-                return false;
-        }
-        else if (StageFilterMode == "PipesShell")
-        {
-            bool isPipeOrShell = item.CommandCategory.Contains("Pipe", StringComparison.OrdinalIgnoreCase)
-                              || item.CommandCategory.Contains("Shell", StringComparison.OrdinalIgnoreCase)
-                              || item.CommandCategory.Contains("ADB", StringComparison.OrdinalIgnoreCase)
-                              || item.CommandCategory.Contains("RIL", StringComparison.OrdinalIgnoreCase)
-                              || item.TargetResource.Contains("pipe", StringComparison.OrdinalIgnoreCase);
-            if (!isPipeOrShell) return false;
-        }
-
-        // فلترة حسب نص البحث
         if (!string.IsNullOrWhiteSpace(_searchText))
         {
             string q = _searchText.Trim();
-            bool textMatches = item.DecodedCommandText.Contains(q, StringComparison.OrdinalIgnoreCase)
-                            || item.TargetResource.Contains(q, StringComparison.OrdinalIgnoreCase)
-                            || item.CallerModuleOrigin.Contains(q, StringComparison.OrdinalIgnoreCase)
-                            || item.CommandCategory.Contains(q, StringComparison.OrdinalIgnoreCase)
-                            || item.HookedApiName.Contains(q, StringComparison.OrdinalIgnoreCase);
-            if (!textMatches) return false;
+            return item.DecodedCommandText.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || item.PureCommandText.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || item.TargetResource.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || item.CallerModuleOrigin.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || item.CommandCategory.Contains(q, StringComparison.OrdinalIgnoreCase);
         }
 
         return true;
+    }
+
+    private bool FilterDiscoveredRamItem(object obj)
+    {
+        if (obj is not SourceTelemetryEvent item) return false;
+        if (!FilterCommonItem(item)) return false;
+
+        if (_discoveredCategoryFilter != "All" && Enum.TryParse<L24CommandGroup>(_discoveredCategoryFilter, out var grp))
+        {
+            if (item.CommandGroup != grp) return false;
+        }
+        return true;
+    }
+
+    private bool FilterUnfilteredRawItem(object obj)
+    {
+        if (obj is not SourceTelemetryEvent item) return false;
+        if (string.IsNullOrWhiteSpace(_searchText)) return true;
+
+        string q = _searchText.Trim();
+        return item.DecodedCommandText.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || item.PureCommandText.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || item.TargetResource.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || item.CallerModuleOrigin.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || item.CommandCategory.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || item.HookedApiName.Contains(q, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ExecuteClearEvents()
+    {
+        lock (_lockObj)
+        {
+            ExecutedDeviceEvents.Clear();
+            PurePhoneTestableEvents.Clear();
+            DiscoveredRamEvents.Clear();
+            RadarAndFileEvents.Clear();
+            UnfilteredRawEvents.Clear();
+            LiveEvents.Clear();
+            LoadedArtifacts.Clear();
+            SelectedEvent = null;
+            SelectedArtifact = null;
+            NotifyCounterProperties();
+            UpdateDiscoveredCategoryCounters();
+        }
+        ForensicNoiseGate.ResetSessionDeduplication();
+        StatusMessage = "تم تنظيف كافة التبويبات وإعادة ضبط الجلسة.";
+    }
+
+    private void ExecuteExportUnfilteredRawLogs()
+    {
+        try
+        {
+            var items = UnfilteredRawEvents.ToList();
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string baseFile = Path.Combine(_orchestrator.LogDirectory, $"L24_Unfiltered_Raw_Complete_{timestamp}");
+
+            WriteCategoryExportFiles(baseFile, "السجل الشامل الخام بدون فلترة (Unfiltered Raw Stream - كافة العمليات والروابط وتسجيل الدخول)", items);
+            StatusMessage = $"تم تصدير السجل الشامل الخام ({items.Count} عملية) إلى: {baseFile}.txt | ويُحفظ تلقائياً في: {Path.GetFileName(_orchestrator.UnfilteredRawTxtPath)}";
+            MessageBox.Show(
+                $"تم تصدير السجل الشامل الخام بدون فلترة ({items.Count} عملية) بنجاح:\n\n1. ملف التصدير الفوري:\n{baseFile}.txt\n\n2. ملف التسجيل التلقائي المستمر:\n{_orchestrator.UnfilteredRawTxtPath}",
+                "تصدير السجل الشامل الخام (بدون فلترة)",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"تعذر تصدير السجل الخام: {ex.Message}", "خطأ", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void ExecuteExportSelectedDiscoveredCategory()
+    {
+        try
+        {
+            var items = FilteredDiscoveredRamEvents.Cast<SourceTelemetryEvent>().ToList();
+            string catSlug = _discoveredCategoryFilter == "All" ? "All_Discovered" : _discoveredCategoryFilter;
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string baseFile = Path.Combine(_orchestrator.LogDirectory, $"L24_Discovered_{catSlug}_{timestamp}");
+
+            WriteCategoryExportFiles(baseFile, $"الأوامر المكتشفة في الذاكرة — الفئة: {catSlug}", items);
+            StatusMessage = $"تم تصدير الفئة ({catSlug}) بنجاح ({items.Count} أمر) إلى: {baseFile}.txt";
+            MessageBox.Show($"تم تصدير أوامر الفئة [{catSlug}] بنجاح ({items.Count} أمر):\n{baseFile}.txt\n{baseFile}.json",
+                "تصدير الفئة المحددة", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"تعذر التصدير: {ex.Message}", "خطأ", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void ExecuteExportAllDiscoveredCategoriesSeparately()
+    {
+        try
+        {
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string exportFolder = Path.Combine(_orchestrator.LogDirectory, $"Export_By_Category_{timestamp}");
+            Directory.CreateDirectory(exportFolder);
+
+            int exportedFilesCount = 0;
+
+            var executedList = ExecutedDeviceEvents.ToList();
+            if (executedList.Count > 0)
+            {
+                WriteCategoryExportFiles(Path.Combine(exportFolder, "01_Executed_On_Device"), "الأوامر الفعلية المنفذة للجهاز", executedList);
+                exportedFilesCount++;
+            }
+
+            var pureList = PurePhoneTestableEvents.ToList();
+            if (pureList.Count > 0)
+            {
+                WriteCategoryExportFiles(Path.Combine(exportFolder, "02_Pure_Phone_Testable"), "أوامر الهاتف الصافية للتجربة", pureList);
+                exportedFilesCount++;
+            }
+
+            var rawList = UnfilteredRawEvents.ToList();
+            if (rawList.Count > 0)
+            {
+                WriteCategoryExportFiles(Path.Combine(exportFolder, "03_Unfiltered_Raw_Everything"), "السجل الشامل الخام بدون فلترة", rawList);
+                exportedFilesCount++;
+            }
+
+            foreach (L24CommandGroup group in Enum.GetValues<L24CommandGroup>())
+            {
+                var groupItems = DiscoveredRamEvents.Where(e => e.CommandGroup == group).ToList();
+                if (groupItems.Count == 0) continue;
+
+                string slug = L24CommandClassifier.GetGroupShortSlug(group);
+                string title = L24CommandClassifier.GetGroupArabicTitle(group);
+                WriteCategoryExportFiles(Path.Combine(exportFolder, $"Discovered_{slug}"), title, groupItems);
+                exportedFilesCount++;
+            }
+
+            StatusMessage = $"تم تصدير {exportedFilesCount} ملفات منفصلة في المجلد: {exportFolder}";
+            MessageBox.Show($"تم تصدير كل نوع في ملفات منفصلة بنجاح ({exportedFilesCount} ملفات) داخل المجلد:\n{exportFolder}",
+                "تصدير كافة الفئات بشكل منفصل", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"تعذر تصدير الفئات: {ex.Message}", "خطأ", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void ExecuteExportPurePhoneCommands()
+    {
+        try
+        {
+            var items = PurePhoneTestableEvents.ToList();
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string baseFile = Path.Combine(_orchestrator.LogDirectory, $"L24_PurePhone_Testable_{timestamp}");
+
+            WriteCategoryExportFiles(baseFile, "أوامر الهاتف الصافية القابلة للتجربة المباشرة", items);
+            StatusMessage = $"تم تصدير أوامر الهاتف للتجربة ({items.Count} أمر) إلى: {baseFile}.txt";
+            MessageBox.Show($"تم تصدير أوامر الهاتف الصافية للتجربة بنجاح:\n{baseFile}.txt\n{baseFile}.json",
+                "تصدير أوامر الهاتف للتجربة", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"تعذر تصدير أوامر الهاتف: {ex.Message}", "خطأ", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private static void WriteCategoryExportFiles(string basePathWithoutExt, string headerTitle, List<SourceTelemetryEvent> items)
+    {
+        string txtPath = basePathWithoutExt + ".txt";
+        string jsonPath = basePathWithoutExt + ".json";
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"=== {headerTitle} ===");
+        sb.AppendLine($"تاريخ التصدير: {DateTime.Now:yyyy-MM-dd HH:mm:ss} | إجمالي السجلات: {items.Count}");
+        sb.AppendLine(new string('=', 80));
+        sb.AppendLine();
+
+        sb.AppendLine("--- [أولاً: القائمة الصافية السريعة] ---");
+        foreach (var ev in items)
+        {
+            sb.AppendLine(ev.PureCommandText);
+        }
+        sb.AppendLine();
+        sb.AppendLine(new string('=', 80));
+        sb.AppendLine("--- [ثانياً: التفاصيل الجنائية الكاملة لكل حدث] ---");
+        sb.AppendLine();
+
+        foreach (var ev in items)
+        {
+            sb.AppendLine($"[{ev.TimeFormatted}] [PID:{ev.ProcessId}] [{ev.CommandGroupBadge}] ({ev.CommandCategory})");
+            sb.AppendLine($"الأمر الصافي : {ev.PureCommandText}");
+            sb.AppendLine($"الوصف       : {ev.DecodedCommandText}");
+            sb.AppendLine($"الهدف/البورت : {ev.TargetResource} | المصدر: {ev.CallerModuleOrigin}");
+            if (!string.IsNullOrWhiteSpace(ev.SavedFilePath))
+                sb.AppendLine($"الملف المحفوظ: {ev.SavedFilePath}");
+            sb.AppendLine(new string('-', 60));
+        }
+
+        File.WriteAllText(txtPath, sb.ToString(), Encoding.UTF8);
+
+        var options = new JsonSerializerOptions
+        {
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            WriteIndented = true
+        };
+        var cleanDtos = items.Select(e => new
+        {
+            e.FormattedTimestamp,
+            e.ProcessId,
+            Scope = e.Scope.ToString(),
+            Group = e.CommandGroup.ToString(),
+            e.CommandCategory,
+            e.PureCommandText,
+            e.DecodedCommandText,
+            e.TargetResource,
+            e.SavedFilePath,
+            e.CallerModuleOrigin,
+            e.HookedApiName,
+            e.PayloadSize
+        });
+        File.WriteAllText(jsonPath, JsonSerializer.Serialize(cleanDtos, options), Encoding.UTF8);
     }
 
     private void ExecuteLaunchTool()
@@ -305,11 +765,8 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
         if (ofd.ShowDialog() == true)
         {
             StatusMessage = $"جاري تشغيل واعتراض الأداة: {Path.GetFileName(ofd.FileName)}...";
-            bool ok = _orchestrator.LaunchAndInterceptTool(ofd.FileName);
-            if (ok)
-            {
-                StatusMessage = $"الأداة تعمل الآن تحت المراقبة الجنائية المباشرة من المصدر: {Path.GetFileName(ofd.FileName)}";
-            }
+            if (_orchestrator.LaunchAndInterceptTool(ofd.FileName))
+                StatusMessage = $"الأداة تعمل الآن تحت المراقبة الشاملة: {Path.GetFileName(ofd.FileName)}";
         }
     }
 
@@ -344,23 +801,8 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
             Margin = new Thickness(0, 0, 0, 14)
         };
         var btnPanel = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        var okBtn = new System.Windows.Controls.Button
-        {
-            Content = "ارتباط (Attach)",
-            Width = 100,
-            Height = 28,
-            Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(2, 132, 199)),
-            Foreground = System.Windows.Media.Brushes.White,
-            Margin = new Thickness(0, 0, 8, 0)
-        };
-        var cancelBtn = new System.Windows.Controls.Button
-        {
-            Content = "إلغاء",
-            Width = 70,
-            Height = 28,
-            Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(30, 41, 59)),
-            Foreground = System.Windows.Media.Brushes.White
-        };
+        var okBtn = new System.Windows.Controls.Button { Content = "ارتباط (Attach)", Width = 100, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
+        var cancelBtn = new System.Windows.Controls.Button { Content = "إلغاء", Width = 70, Height = 28 };
 
         okBtn.Click += (_, _) => { dialog.DialogResult = true; dialog.Close(); };
         cancelBtn.Click += (_, _) => { dialog.DialogResult = false; dialog.Close(); };
@@ -374,66 +816,15 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
 
         if (dialog.ShowDialog() == true && int.TryParse(textBox.Text.Trim(), out int pid))
         {
-            StatusMessage = $"جاري الارتباط بالعملية PID {pid}...";
-            bool ok = _orchestrator.AttachToRunningProcess(pid);
-            if (ok)
-            {
+            if (_orchestrator.AttachToRunningProcess(pid))
                 StatusMessage = $"تم الارتباط بنجاح بالعملية PID {pid}";
-            }
         }
-    }
-
-    private void ExecuteClearEvents()
-    {
-        lock (_lockObj)
-        {
-            LiveEvents.Clear();
-            LoadedArtifacts.Clear();
-            SelectedEvent = null;
-            SelectedArtifact = null;
-            RawCommandsCount = 0;
-            RadarScansCount = 0;
-            RamUnpacksCount = 0;
-            NetworkEventsCount = 0;
-            OnPropertyChanged(nameof(TotalEventsCount));
-        }
-        ForensicNoiseGate.ResetSessionDeduplication();
-        StatusMessage = "تم تنظيف قائمة الأحداث الحالية.";
     }
 
     private void ExecuteExportLogs()
     {
         _orchestrator.FlushAndExportSessionSnapshot();
-
-        // تصدير ملف نصي منظم للأوامر بجانب ملف الـ JSON
-        try
-        {
-            string txtPath = Path.ChangeExtension(_orchestrator.SessionLogPath, ".txt");
-            var sb = new StringBuilder();
-            sb.AppendLine("=== سجل أوامر طبقة L24 SourceSentinel المنظم ===");
-            sb.AppendLine($"تاريخ التصدير: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-            sb.AppendLine(new string('=', 60));
-            sb.AppendLine();
-
-            foreach (var ev in FilteredEvents.Cast<SourceTelemetryEvent>())
-            {
-                sb.AppendLine($"[{ev.CommandCategory}] ({ev.TimeFormatted})");
-                sb.AppendLine(ev.DecodedCommandText);
-                if (!string.IsNullOrWhiteSpace(ev.TargetResource) && ev.TargetResource != "N/A")
-                {
-                    sb.AppendLine($"الهدف/البورت: {ev.TargetResource}");
-                }
-                sb.AppendLine(new string('-', 40));
-            }
-            File.WriteAllText(txtPath, sb.ToString(), Encoding.UTF8);
-            StatusMessage = $"تم حفظ وتصدير الجلسة إلى: {txtPath}";
-            MessageBox.Show($"تم حفظ سجلات الجلسة بنجاح في:\n{txtPath}\n{_orchestrator.SessionLogPath}", "تصدير السجلات L24", MessageBoxButton.OK, MessageBoxImage.Information);
-        }
-        catch
-        {
-            StatusMessage = $"تم حفظ وتصدير الجلسة إلى: {_orchestrator.SessionLogPath}";
-            MessageBox.Show($"تم حفظ سجلات الجلسة بنجاح في:\n{_orchestrator.SessionLogPath}", "تصدير السجلات L24", MessageBoxButton.OK, MessageBoxImage.Information);
-        }
+        ExecuteExportAllDiscoveredCategoriesSeparately();
     }
 
     private void ExecuteOpenLogsFolder()
@@ -449,13 +840,24 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
                 });
             }
         }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"تعذر فتح المجلد: {ex.Message}", "خطأ", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
+        catch { }
     }
 
-    // Inspector Helpers
+    private void ExecuteOpenCapturedFilesFolder()
+    {
+        try
+        {
+            string dir = _orchestrator.CapturedFilesDirectory;
+            Directory.CreateDirectory(dir);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = dir,
+                UseShellExecute = true
+            });
+        }
+        catch { }
+    }
+
     public string SelectedEventHexDump
     {
         get
@@ -467,31 +869,23 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
             {
                 byte[] bytes = Convert.FromHexString(SelectedEvent.RawPayloadHex);
                 var sb = new StringBuilder();
-                int length = bytes.Length;
-
-                for (int i = 0; i < length; i += 16)
+                for (int i = 0; i < bytes.Length; i += 16)
                 {
                     sb.AppendFormat("{0:X4}: ", i);
-                    int chunk = Math.Min(16, length - i);
-
+                    int chunk = Math.Min(16, bytes.Length - i);
                     for (int j = 0; j < 16; j++)
                     {
-                        if (j < chunk)
-                            sb.AppendFormat("{0:X2} ", bytes[i + j]);
-                        else
-                            sb.Append("   ");
-                        if (j == 7) sb.Append(" ");
+                        sb.Append(j < chunk ? $"{bytes[i + j]:X2} " : "   ");
+                        if (j == 7) sb.Append(' ');
                     }
-
                     sb.Append(" | ");
                     for (int j = 0; j < chunk; j++)
                     {
                         byte b = bytes[i + j];
-                        sb.Append(b >= 32 && b <= 126 ? (char)b : '.');
+                        sb.Append(b is >= 32 and <= 126 ? (char)b : '.');
                     }
                     sb.AppendLine();
                 }
-
                 return sb.ToString();
             }
             catch
@@ -501,42 +895,21 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
         }
     }
 
-    public string SelectedEventAsciiText
-    {
-        get
-        {
-            if (SelectedEvent == null) return "";
-            if (!string.IsNullOrWhiteSpace(SelectedEvent.DecodedCommandText))
-                return SelectedEvent.DecodedCommandText;
-            return SelectedEventHexDump;
-        }
-    }
+    public string SelectedEventAsciiText => SelectedEvent?.PureCommandText ?? "";
 
-    public string SelectedEventDetails
-    {
-        get
-        {
-            if (SelectedEvent == null) return "اختر حدثاً من الجدول لعرض التفاصيل الجنائية الدقيقة.";
-            return $"معرف الحدث: {SelectedEvent.EventId}\n" +
-                   $"التوقيت: {SelectedEvent.Timestamp:yyyy-MM-dd HH:mm:ss.fff} UTC\n" +
-                   $"العملية/المسار: PID {SelectedEvent.ProcessId} | TID {SelectedEvent.ThreadId}\n" +
-                   $"المرحلة: {SelectedEvent.StageBadge}\n" +
-                   $"الدالة المعترضة: {SelectedEvent.HookedApiName}\n" +
-                   $"المصدر المسؤول (Origin): {SelectedEvent.CallerModuleOrigin}\n" +
-                   $"المورد المستهدف: {SelectedEvent.TargetResource}\n" +
-                   $"التصنيف: {SelectedEvent.CommandCategory}\n" +
-                   $"حجم الحمولة: {SelectedEvent.PayloadSize} بايت";
-        }
-    }
+    public string SelectedEventDetails => SelectedEvent == null
+        ? "اختر حدثاً من الجدول لعرض التفاصيل الجنائية الدقيقة."
+        : $"النطاق: {SelectedEvent.ScopeBadge} | المجموعة: {SelectedEvent.CommandGroupBadge}\n" +
+          $"الأمر الصافي: {SelectedEvent.PureCommandText}\n" +
+          $"المصدر (Origin): {SelectedEvent.CallerModuleOrigin} | الهدف: {SelectedEvent.TargetResource}\n" +
+          (!string.IsNullOrWhiteSpace(SelectedEvent.SavedFilePath) ? $"💾 مسار الملف المحفوظ: {SelectedEvent.SavedFilePath}\n" : "") +
+          $"الدالة: {SelectedEvent.HookedApiName} | الحجم: {SelectedEvent.PayloadSize} بايت";
 
     public event PropertyChangedEventHandler? PropertyChanged;
     private void OnPropertyChanged([CallerMemberName] string? propName = null)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propName));
 
-    public void Dispose()
-    {
-        _orchestrator.Dispose();
-    }
+    public void Dispose() => _orchestrator.Dispose();
 
     private sealed class RelayCommand : ICommand
     {

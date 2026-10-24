@@ -13,7 +13,7 @@ namespace PhoenixOmniTrace.L24_SourceSentinel.Core;
 public sealed class SourceIpcServer : IDisposable
 {
     public const string PipeName = "PhoenixL24SentinelPipe";
-    private readonly CancellationTokenSource _cts = new();
+    private CancellationTokenSource? _cts;
     private bool _isDisposed;
 
     public event Action<SourceTelemetryEvent>? OnEventCaptured;
@@ -23,6 +23,8 @@ public sealed class SourceIpcServer : IDisposable
     public void Start()
     {
         if (IsRunning || _isDisposed) return;
+        try { _cts?.Cancel(); _cts?.Dispose(); } catch { }
+        _cts = new CancellationTokenSource();
         IsRunning = true;
 
         // Launch 6 concurrent pipe listener tasks to prevent any packet loss under heavy I/O
@@ -32,9 +34,22 @@ public sealed class SourceIpcServer : IDisposable
         }
     }
 
+    public void Stop()
+    {
+        if (!IsRunning) return;
+        IsRunning = false;
+        try
+        {
+            _cts?.Cancel();
+            _cts?.Dispose();
+        }
+        catch { }
+        _cts = null;
+    }
+
     private async Task ListenLoopAsync(CancellationToken token)
     {
-        while (!token.IsCancellationRequested && !_isDisposed)
+        while (!token.IsCancellationRequested && !_isDisposed && IsRunning)
         {
             try
             {
@@ -54,7 +69,7 @@ public sealed class SourceIpcServer : IDisposable
             }
             catch (Exception)
             {
-                if (token.IsCancellationRequested) break;
+                if (token.IsCancellationRequested || !IsRunning) break;
                 await Task.Delay(50, token).ConfigureAwait(false);
             }
         }
@@ -65,7 +80,7 @@ public sealed class SourceIpcServer : IDisposable
         using var reader = new BinaryReader(stream, Encoding.Unicode, leaveOpen: true);
         try
         {
-            while (stream.CanRead && !token.IsCancellationRequested && !_isDisposed)
+            while (stream.CanRead && !token.IsCancellationRequested && !_isDisposed && IsRunning)
             {
                 int pid = reader.ReadInt32();
                 int tid = reader.ReadInt32();
@@ -105,8 +120,6 @@ public sealed class SourceIpcServer : IDisposable
     {
         if (_isDisposed) return;
         _isDisposed = true;
-        IsRunning = false;
-        _cts.Cancel();
-        _cts.Dispose();
+        Stop();
     }
 }

@@ -2,12 +2,20 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using PhoenixGSM.MonitoringStudio.Models;
+using PhoenixGSM.OmniTrace.Decoders;
 
 namespace PhoenixGSM.MonitoringStudio.Services;
 
 public partial class MonitoringEngine
 {
+    private readonly object _adbStreamCoalesceLock = new();
+    private readonly List<byte> _pendingAdbStreamBytes = new();
+    private string _pendingAdbStreamEp = string.Empty;
+    private uint _pendingAdbStreamTransferType;
+    private CancellationTokenSource? _adbStreamFlushCts;
+
     private void HandleMtkPacket(
         PhoenixGSM.UsbMonitor.UsbDriverClient.KernelUsbPacket pkt,
         byte[] chunk,
@@ -127,19 +135,176 @@ public partial class MonitoringEngine
         string cleanLine,
         string cleanLineTrimmed)
     {
-        string protoTag = isAdbRilIpc ? "ADB-RIL-IPC" : "ADB-INTERACTIVE-CMD";
-        string sourceTag = isAdbRilIpc ? "ADB-RIL" : "ADB-SHELL";
+        if (dir == "OUT")
+        {
+            FlushPendingAdbStreamInbound();
+        }
 
         string activeAtInstance = _smartFileArchiver.GetActiveArtifactInstanceLabel("/data/local/tmp/AT");
         string targetTool = isAdbRilIpc
             ? (!string.IsNullOrEmpty(activeAtInstance) ? activeAtInstance : (!string.IsNullOrEmpty(_lastActiveAtBinaryCommand) ? _lastActiveAtBinaryCommand : "/data/local/tmp/AT"))
             : (!string.IsNullOrEmpty(_activeInteractiveShellCommand) ? _activeInteractiveShellCommand : activeAtInstance);
 
-        string rilCmdText = cleanLineTrimmed.Length > 0 ? cleanLineTrimmed : $"[{protoTag}] ({chunk.Length}B): {Convert.ToHexString(chunk)}";
-        string decodedEmbedded = isAdbRilIpc ? DecodeEmbeddedRilOrAtHex(rilCmdText) : string.Empty;
+        if (string.IsNullOrWhiteSpace(targetTool))
+        {
+            targetTool = _isPtySessionActive ? "shell,v2,pty:" : "shell:";
+        }
+
+        // 1. إذا كان الأمر المرسل هو فتح جلسة PTY أو Shell (مثل shell,v2,pty: أو pty:)
+        if (dir == "OUT" && !isAdbRilIpc &&
+            ShellStreamReconstructor.IsShellOrPtyOpenService(cleanLineTrimmed, out string svcHdr, out string innerCmd, out bool isPtyOpen, out bool isV2Open))
+        {
+            _isPtySessionActive = isPtyOpen;
+            _isShellV2SessionActive = isV2Open;
+
+            if (string.IsNullOrWhiteSpace(innerCmd))
+            {
+                // تم فتح جلسة تيرمنال تفاعلي PTY فارغة تنتظر إدخال الأوامر حرفاً بحرف أو سطراً بسطر
+                EmitCompletedInteractiveOrPtyCommand(
+                    pkt.TransferType,
+                    chunk,
+                    dir,
+                    epHex,
+                    pDir,
+                    isAdbRilIpc: false,
+                    isPtySession: isPtyOpen,
+                    targetTool: svcHdr,
+                    commandText: svcHdr);
+                return;
+            }
+            else
+            {
+                // أمر مباشر مرفق مع فتح الجلسة (مثل shell,v2,pty:su -c id)
+                EmitCompletedInteractiveOrPtyCommand(
+                    pkt.TransferType,
+                    chunk,
+                    dir,
+                    epHex,
+                    pDir,
+                    isAdbRilIpc: false,
+                    isPtySession: isPtyOpen,
+                    targetTool: svcHdr,
+                    commandText: innerCmd);
+                return;
+            }
+        }
+
+        // 2. إذا كنا في جلسة PTY تفاعلية (أو تُرسل الحروف حرفاً بحرف بدون أو مع Enter):
+        // نمرر البايتات عبر مجمع الأسطر التفاعلي _ptyInputReconstructor الذي يعالج الحروف المفردة و Backspace والأسهم!
+        if (dir == "OUT" && !isAdbRilIpc && (_isPtySessionActive || chunk.Length <= 4 || !_ptyInputReconstructor.HasPendingInput == false))
+        {
+            string? completedPtyLine;
+            lock (_ptyInputLock)
+            {
+                _lastPtyKeystrokeTime = DateTime.UtcNow;
+                _ptyInputReconstructor.ProcessInputBytes(chunk, out completedPtyLine, out _);
+
+                if (!string.IsNullOrWhiteSpace(completedPtyLine))
+                {
+                    _ptyIdleFlushCts?.Cancel();
+                    _lastCompletedPtyCommand = completedPtyLine;
+                }
+                else if (_ptyInputReconstructor.HasPendingInput)
+                {
+                    // المستخدم أو الأداة تكتب حرفاً بحرف ولم تضغط Enter بعد:
+                    // نضبط مؤقت 650ms لتفريغ السطر تلقائياً فقط إذا توقفت الكتابة ولم يُرسل \r\n (مثل إدخال مفتاح تفاعلي)
+                    _ptyIdleFlushCts?.Cancel();
+                    var cts = new CancellationTokenSource();
+                    _ptyIdleFlushCts = cts;
+                    uint savedTransferType = pkt.TransferType;
+                    string savedTarget = targetTool;
+
+                    _ = System.Threading.Tasks.Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await System.Threading.Tasks.Task.Delay(650, cts.Token).ConfigureAwait(false);
+                            string? flushed = null;
+                            lock (_ptyInputLock)
+                            {
+                                if (_ptyInputReconstructor.TryFlushPendingLine(out string fl))
+                                {
+                                    flushed = fl;
+                                    _lastCompletedPtyCommand = fl;
+                                }
+                            }
+                            if (!string.IsNullOrWhiteSpace(flushed))
+                            {
+                                byte[] flBytes = Encoding.UTF8.GetBytes(flushed);
+                                EmitCompletedInteractiveOrPtyCommand(
+                                    savedTransferType,
+                                    flBytes,
+                                    "OUT",
+                                    epHex,
+                                    PhoenixGSM.OmniTrace.Models.PacketDirection.HOST_TO_DEVICE,
+                                    isAdbRilIpc: false,
+                                    isPtySession: _isPtySessionActive,
+                                    targetTool: savedTarget,
+                                    commandText: flushed);
+                            }
+                        }
+                        catch (OperationCanceledException) { }
+                    });
+                    return;
+                }
+                else
+                {
+                    return;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(completedPtyLine))
+            {
+                byte[] lineBytes = Encoding.UTF8.GetBytes(completedPtyLine);
+                EmitCompletedInteractiveOrPtyCommand(
+                    pkt.TransferType,
+                    lineBytes,
+                    dir,
+                    epHex,
+                    pDir,
+                    isAdbRilIpc: false,
+                    isPtySession: _isPtySessionActive,
+                    targetTool: targetTool,
+                    commandText: completedPtyLine);
+                return;
+            }
+        }
+
+        string rilCmdText = cleanLineTrimmed.Length > 0 ? cleanLineTrimmed : $"[ADB-INTERACTIVE-CMD] ({chunk.Length}B): {Convert.ToHexString(chunk)}";
+        EmitCompletedInteractiveOrPtyCommand(
+            pkt.TransferType,
+            chunk,
+            dir,
+            epHex,
+            pDir,
+            isAdbRilIpc,
+            _isPtySessionActive,
+            targetTool,
+            rilCmdText);
+    }
+
+    private void EmitCompletedInteractiveOrPtyCommand(
+        uint transferType,
+        byte[] chunk,
+        string dir,
+        string epHex,
+        PhoenixGSM.OmniTrace.Models.PacketDirection pDir,
+        bool isAdbRilIpc,
+        bool isPtySession,
+        string targetTool,
+        string commandText)
+    {
+        string protoTag = isAdbRilIpc
+            ? "ADB-RIL-IPC"
+            : (isPtySession ? "ADB-PTY-CMD" : "ADB-INTERACTIVE-CMD");
+        string sourceTag = isAdbRilIpc
+            ? "ADB-RIL"
+            : (isPtySession ? "ADB-PTY" : "ADB-SHELL");
+
+        string decodedEmbedded = isAdbRilIpc ? DecodeEmbeddedRilOrAtHex(commandText) : string.Empty;
         string summaryText = !string.IsNullOrEmpty(decodedEmbedded)
-            ? $"[{protoTag}] {dir} -> {targetTool}: {rilCmdText} ({decodedEmbedded})"
-            : $"[{protoTag}] {dir} -> {targetTool}: {rilCmdText}";
+            ? $"[{protoTag}] {dir} -> {targetTool}: {commandText} ({decodedEmbedded})"
+            : $"[{protoTag}] {dir} -> {targetTool}: {commandText}";
 
         EmitEvent(new LiveEventItem
         {
@@ -149,12 +314,12 @@ public partial class MonitoringEngine
             Direction = dir,
             EndpointOrTarget = $"EP {epHex} -> {targetTool}",
             Protocol = protoTag,
-            Command = rilCmdText,
+            Command = commandText,
             Summary = summaryText,
             RawPayload = chunk,
-            PayloadAscii = !string.IsNullOrEmpty(decodedEmbedded) ? $"{cleanLine}\nDecoded Embedded Payload: {decodedEmbedded}" : cleanLine,
+            PayloadAscii = !string.IsNullOrEmpty(decodedEmbedded) ? $"{commandText}\nDecoded Embedded Payload: {decodedEmbedded}" : commandText,
             PayloadHex = LiveEventItem.FormatHexDump(chunk),
-            AdditionalDetails = $"Active Interactive Target: {targetTool}\nDecoded Payload: {decodedEmbedded}\nTransferType: {pkt.TransferType}\nDirection: {dir}\nActualLength: {pkt.ActualLength} B\nSource: KernelDriver ADB Interactive Sniff"
+            AdditionalDetails = $"Active Interactive Target: {targetTool}\nPTY Mode: {isPtySession} (Shell_v2: {_isShellV2SessionActive})\nDecoded Payload: {decodedEmbedded}\nTransferType: {transferType}\nDirection: {dir}\nActualLength: {chunk.Length} B\nSource: KernelDriver ADB/PTY Interactive Sniff"
         });
 
         if (_omniService != null)
@@ -177,14 +342,15 @@ public partial class MonitoringEngine
                         ["Source"] = "KernelDriver",
                         ["Protocol"] = protoTag,
                         ["Endpoint"] = epHex,
-                        ["Command"] = rilCmdText,
-                        ["ActiveShell"] = targetTool
+                        ["Command"] = commandText,
+                        ["ActiveShell"] = targetTool,
+                        ["IsPty"] = isPtySession.ToString()
                     }
                 });
 
                 var logicalCmd = new PhoenixGSM.OmniTrace.Models.LogicalCommandEvent
                 {
-                    Command = rilCmdText,
+                    Command = commandText,
                     Protocol = PhoenixGSM.OmniTrace.Models.KnownProtocol.ADB,
                     Service = targetTool,
                     Transport = PhoenixGSM.OmniTrace.Models.TransportType.BULK,
@@ -195,6 +361,7 @@ public partial class MonitoringEngine
                     Timestamp = DateTime.UtcNow
                 };
                 logicalCmd.Details["ProtocolName"] = protoTag;
+                logicalCmd.Details["CommandLine"] = commandText;
                 logicalCmd.Details["EmittedByKernelDriver"] = "true";
                 _omniService.EventBus.ReportLogicalCommand(logicalCmd);
             }
@@ -229,15 +396,121 @@ public partial class MonitoringEngine
         string cleanedInboundText,
         string cleanLine)
     {
-        string streamCmdText = isReadableInboundAdbResponse && !string.IsNullOrWhiteSpace(cleanedInboundText)
-            ? cleanedInboundText
-            : (cleanLine.Length > 0 ? cleanLine : Encoding.ASCII.GetString(chunk).Trim('\0'));
+        if (dir == "IN")
+        {
+            string trimmedCheck = (cleanedInboundText ?? cleanLine).Trim();
+
+            // 1. في وضع PTY، نتجاهل صدى الحروف المفردة الراجعة أثناء كتابة المستخدم قبل ضغط Enter
+            lock (_ptyInputLock)
+            {
+                if (_ptyInputReconstructor.HasPendingInput && chunk.Length <= 4 && !chunk.Contains((byte)'\n'))
+                {
+                    return;
+                }
+            }
+
+            // 2. نتجاهل صدى الأمر الكامل نفسه إذا رجع في أول شريحة من الـ PTY
+            string strippedActive = ShellStreamReconstructor.StripShellOrPtyPrefix(_activeInteractiveShellCommand);
+            if (trimmedCheck.Length > 0 &&
+                !trimmedCheck.Equals(_activeInteractiveShellCommand, StringComparison.OrdinalIgnoreCase) &&
+                !trimmedCheck.Equals(strippedActive, StringComparison.OrdinalIgnoreCase) &&
+                !trimmedCheck.Equals(_lastCompletedPtyCommand, StringComparison.OrdinalIgnoreCase))
+            {
+                lock (_adbStreamCoalesceLock)
+                {
+                    _pendingAdbStreamBytes.AddRange(chunk);
+                    _pendingAdbStreamEp = epHex;
+                    _pendingAdbStreamTransferType = pkt.TransferType;
+
+                    _adbStreamFlushCts?.Cancel();
+                    var cts = new CancellationTokenSource();
+                    _adbStreamFlushCts = cts;
+
+                    int delayMs = (chunk.Length >= 400 || trimmedCheck.Contains("****") || trimmedCheck.Contains("Token")) ? 95 : 40;
+
+                    _ = System.Threading.Tasks.Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await System.Threading.Tasks.Task.Delay(delayMs, cts.Token).ConfigureAwait(false);
+                            FlushPendingAdbStreamInbound();
+                        }
+                        catch (OperationCanceledException) { }
+                    });
+                    return;
+                }
+            }
+            else if (trimmedCheck.Equals(_lastCompletedPtyCommand, StringComparison.OrdinalIgnoreCase))
+            {
+                // تجاهل صدى السطر المرسل للتو في جلسة PTY
+                return;
+            }
+        }
+
+        EmitAdbStreamEventImmediate(pkt.TransferType, chunk, dir, epHex, pDir);
+    }
+
+    private void FlushPendingAdbStreamInbound()
+    {
+        byte[] combinedBytes;
+        string epHex;
+        uint transferType;
+
+        lock (_adbStreamCoalesceLock)
+        {
+            if (_pendingAdbStreamBytes.Count == 0) return;
+            combinedBytes = _pendingAdbStreamBytes.ToArray();
+            _pendingAdbStreamBytes.Clear();
+            epHex = _pendingAdbStreamEp;
+            transferType = _pendingAdbStreamTransferType;
+        }
+
+        EmitAdbStreamEventImmediate(
+            transferType,
+            combinedBytes,
+            "IN",
+            epHex,
+            PhoenixGSM.OmniTrace.Models.PacketDirection.DEVICE_TO_HOST);
+    }
+
+    private void EmitAdbStreamEventImmediate(
+        uint transferType,
+        byte[] chunk,
+        string dir,
+        string epHex,
+        PhoenixGSM.OmniTrace.Models.PacketDirection pDir)
+    {
+        string streamCmdText = CleanInboundPhoneResponse(chunk).Trim('\r', '\n');
+        if (string.IsNullOrWhiteSpace(streamCmdText))
+        {
+            streamCmdText = ShellStreamReconstructor.CleanTerminalOutput(Encoding.UTF8.GetString(chunk)).Replace("\0", "").Trim('\r', '\n');
+        }
+
+        // إذا كان أول سطر في مخرجات PTY هو صدى الأمر المرسل، نزيل سطر الصدى ونبقي بقية المخرجات كاملة
+        if (dir == "IN" && !string.IsNullOrWhiteSpace(_lastCompletedPtyCommand))
+        {
+            string normalized = streamCmdText.Replace("\r\n", "\n");
+            int firstNl = normalized.IndexOf('\n');
+            if (firstNl > 0)
+            {
+                string firstLine = normalized[..firstNl].Trim();
+                if (firstLine.Equals(_lastCompletedPtyCommand, StringComparison.OrdinalIgnoreCase) ||
+                    firstLine.EndsWith("# " + _lastCompletedPtyCommand, StringComparison.OrdinalIgnoreCase) ||
+                    firstLine.EndsWith("$ " + _lastCompletedPtyCommand, StringComparison.OrdinalIgnoreCase))
+                {
+                    streamCmdText = normalized[(firstNl + 1)..].Replace("\n", Environment.NewLine).Trim('\r', '\n');
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(streamCmdText))
+            return;
 
         EmitEvent(new LiveEventItem
         {
             Timestamp = DateTime.UtcNow,
             Category = EventSourceCategory.AdbProxy,
-            SourceTag = dir == "OUT" ? "ADB-OUT" : "ADB-STREAM",
+            SourceTag = dir == "OUT" ? "ADB-OUT" : (_isPtySessionActive ? "ADB-PTY-STREAM" : "ADB-STREAM"),
             Direction = dir,
             EndpointOrTarget = $"EP {epHex}",
             Protocol = "ADB-STREAM",
@@ -246,7 +519,7 @@ public partial class MonitoringEngine
             RawPayload = chunk,
             PayloadAscii = streamCmdText,
             PayloadHex = LiveEventItem.FormatHexDump(chunk),
-            AdditionalDetails = $"TransferType: {pkt.TransferType}\nDirection: {dir}\nActualLength: {pkt.ActualLength} B\nActiveShell: {_activeInteractiveShellCommand}\nSource: KernelDriver ADB Active Stream Sniff"
+            AdditionalDetails = $"TransferType: {transferType}\nDirection: {dir}\nActualLength: {chunk.Length} B\nActiveShell: {_activeInteractiveShellCommand}\nPTY Mode: {_isPtySessionActive}\nSource: KernelDriver ADB/PTY Active Stream Sniff (Reassembled)"
         });
 
         if (_omniService != null)
@@ -270,7 +543,8 @@ public partial class MonitoringEngine
                         ["Protocol"] = "ADB-STREAM",
                         ["Endpoint"] = epHex,
                         ["Command"] = streamCmdText,
-                        ["ActiveShell"] = _activeInteractiveShellCommand
+                        ["ActiveShell"] = _activeInteractiveShellCommand,
+                        ["IsPty"] = _isPtySessionActive.ToString()
                     }
                 });
             }
@@ -371,19 +645,19 @@ public partial class MonitoringEngine
         }
     }
 
-    /// <summary>
-    /// Checks whether a PayloadPreview string from AdbProtocolParser is a fallback hex dump of binary bytes
-    /// (e.g. "00 00 00 01 59 4D 91 A7 00 00 00 03 FC FF FE").
-    /// </summary>
     private static bool IsHexDumpPreview(string preview, byte[]? rawPayload)
     {
         if (rawPayload != null && rawPayload.Length > 0)
         {
+            // لا نحجب حزم Shell v2 الصالحة
+            if (ShellStreamReconstructor.TryUnpackShellV2Frames(rawPayload, out _, out _, out _, out _))
+                return false;
+
             int nonPrintable = 0;
             foreach (byte b in rawPayload)
             {
-                if (b < 32 && b != 9 && b != 10 && b != 13 && b != 0) nonPrintable++;
-                else if (b > 126) nonPrintable++;
+                if (b < 32 && b != 9 && b != 10 && b != 13 && b != 0 && b != 0x1B && b != 0x08 && b != 0x7F) nonPrintable++;
+                else if (b > 126 && b != 0x7F) nonPrintable++;
             }
             if (nonPrintable > rawPayload.Length / 5) return true;
         }
@@ -396,7 +670,6 @@ public partial class MonitoringEngine
             return true;
         }
 
-        // Check if string consists of space-separated 2-character hex pairs ("00 00 00 01 59 4D ...")
         if (trimmed.Length >= 8 && trimmed.IndexOf(' ') == 2)
         {
             string[] parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -456,13 +729,17 @@ public partial class MonitoringEngine
                     {
                         _isInsideFileSyncTransfer = true;
                         _activeInteractiveShellCommand = string.Empty;
+                        _isPtySessionActive = false;
                     }
                     else
                     {
                         _isInsideFileSyncTransfer = false;
-                        if (payloadPreview.Contains("shell:"))
+                        if (ShellStreamReconstructor.IsShellOrPtyOpenService(payloadPreview, out string svcHdr, out string innerCmd, out bool openPty, out bool openV2))
                         {
                             _activeInteractiveShellCommand = payloadPreview.Trim();
+                            _isPtySessionActive = openPty;
+                            _isShellV2SessionActive = openV2;
+
                             if (_activeInteractiveShellCommand.Contains("/data/local/tmp/AT", StringComparison.OrdinalIgnoreCase) &&
                                 !_activeInteractiveShellCommand.Contains("chmod ", StringComparison.OrdinalIgnoreCase))
                             {
@@ -482,13 +759,25 @@ public partial class MonitoringEngine
                     }
                 }
 
-                // Suppress WRTE frames during file sync OR whenever WRTE payload is binary/hex telemetry (such as EP 0x8D 00 00 00 01 59 4D...)
                 if (frame.Command == "WRTE")
                 {
                     if (_isInsideFileSyncTransfer ||
                         _smartFileArchiver.IsInsideTransfer ||
-                        epHex.Equals("0x8D", StringComparison.OrdinalIgnoreCase) ||
-                        IsHexDumpPreview(payloadPreview, frame.Payload))
+                        epHex.Equals("0x8D", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    // إذا كانت حزمة WRTE تحتوي على إطار Shell v2 PTY، نقوم بفكها وتنظيفها!
+                    if (frame.Payload != null &&
+                        ShellStreamReconstructor.TryUnpackShellV2Frames(frame.Payload, out _, out byte[] unpackedWrte, out bool isCtrlOnly, out _))
+                    {
+                        if (isCtrlOnly)
+                            continue;
+
+                        payloadPreview = ShellStreamReconstructor.CleanTerminalOutput(Encoding.UTF8.GetString(unpackedWrte)).Trim('\0', '\r', '\n');
+                    }
+                    else if (IsHexDumpPreview(payloadPreview, frame.Payload))
                     {
                         continue;
                     }

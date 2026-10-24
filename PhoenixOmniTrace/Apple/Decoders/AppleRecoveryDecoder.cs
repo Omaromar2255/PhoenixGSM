@@ -66,7 +66,7 @@ public static class AppleRecoveryDecoder
         return 0.0;
     }
 
-    public static AppleDecodedCommand? DecodePacket(ReadOnlySpan<byte> buffer)
+    public static AppleDecodedCommand? DecodePacket(ReadOnlySpan<byte> buffer, bool isInboundResponse = false)
     {
         if (buffer.Length == 0) return null;
 
@@ -93,11 +93,23 @@ public static class AppleRecoveryDecoder
 
             cmd.Operation = "iBoot:DeviceInfo";
             cmd.Summary = $"iBoot Hardware ID: ECID={cmd.Ecid ?? "N/A"}, CPID={cmd.Cpid ?? "N/A"}";
+            cmd.Details["IsResponse"] = "true";
             return cmd;
         }
 
-        // Parse command line
+        // Parse command line or inbound phone response
         string[] tokens = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        bool isCmd = tokens.Length > 0 && Array.Exists(RecoveryCommands, rc => rc.Equals(tokens[0], StringComparison.OrdinalIgnoreCase));
+
+        if (isInboundResponse || !isCmd)
+        {
+            cmd.Operation = "iBoot:Response";
+            cmd.Parameters = text;
+            cmd.Summary = $"iBoot Phone Response -> {text}";
+            cmd.Details["IsResponse"] = "true";
+            return cmd;
+        }
+
         if (tokens.Length > 0)
         {
             cmd.Operation = $"iBoot:{tokens[0]}";
@@ -114,6 +126,7 @@ public static class AppleRecoveryDecoder
         cmd.Summary = string.IsNullOrEmpty(cmd.Parameters)
             ? $"iBoot [{tokens[0]}]"
             : $"iBoot [{tokens[0]}] -> {cmd.Parameters}";
+        cmd.Details["IsResponse"] = "false";
 
         return cmd;
     }

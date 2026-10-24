@@ -48,7 +48,7 @@ public static class AppleDfuDecoder
         return 0.0;
     }
 
-    public static AppleDecodedCommand? DecodePacket(ReadOnlySpan<byte> buffer)
+    public static AppleDecodedCommand? DecodePacket(ReadOnlySpan<byte> buffer, bool isInboundResponse = false)
     {
         if (buffer.Length == 0) return null;
 
@@ -60,6 +60,38 @@ public static class AppleDfuDecoder
             Mode = isPwned ? AppleDeviceMode.PwnedDfu : AppleDeviceMode.Dfu,
             Category = "SecureROM"
         };
+
+        // 0. Handle 6-byte USB DFU GETSTATUS response from device
+        if (buffer.Length == 6 && (buffer[0] <= 0x0F && buffer[4] <= 0x0A))
+        {
+            byte bStatus = buffer[0];
+            uint pollTimeout = (uint)(buffer[1] | (buffer[2] << 8) | (buffer[3] << 16));
+            byte bState = buffer[4];
+
+            string stateName = bState switch
+            {
+                0 => "appIDLE",
+                1 => "appDETACH",
+                2 => "dfuIDLE",
+                3 => "dfuDNLOAD-SYNC",
+                4 => "dfuDNBUSY",
+                5 => "dfuDNLOAD-IDLE",
+                6 => "dfuMANIFEST-SYNC",
+                7 => "dfuMANIFEST",
+                8 => "dfuMANIFEST-WAIT-RESET",
+                9 => "dfuUPLOAD-IDLE",
+                10 => "dfuERROR",
+                _ => $"dfuState_{bState}"
+            };
+
+            cmd.Operation = "DFU:StatusResponse";
+            cmd.Parameters = $"Status={bStatus}, State={stateName}, Timeout={pollTimeout}ms";
+            cmd.Summary = $"DFU Status Response -> State={stateName}, Status={bStatus}";
+            cmd.Details["IsResponse"] = "true";
+            cmd.Details["DfuStatus"] = bStatus.ToString();
+            cmd.Details["DfuState"] = stateName;
+            return cmd;
+        }
 
         // Extract hardware identifiers
         var matches = DfuIdRegex.Matches(text);

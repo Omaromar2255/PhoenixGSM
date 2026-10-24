@@ -40,17 +40,21 @@ public partial class MonitoringEngine
                         _seenDeviceInstances.Add(dev.InstanceId);
                         string serial = dev.InstanceId.Split('\\').Last();
 
-                        string proto = dev.IsAndroidAdb ? "USB-ADB" : (dev.IsModemInterface ? "USB-MODEM" : "USB-SERIAL");
-                        var cat = dev.IsAndroidAdb ? EventSourceCategory.UsbDriver : EventSourceCategory.SerialPort;
-                        string modeHint = dev.DeviceModeHint ?? (dev.IsAndroidAdb ? "ADB Mode" : "Normal Mode / Modem");
-                        string summary = dev.IsAndroidAdb
-                            ? $"Android Device Connected: {dev.DeviceName} (Serial: {serial})"
-                            : $"Phone Connected ({modeHint}): {dev.DeviceName} (Serial: {serial})";
+                        bool isApple = dev.Vid == 0x05AC;
+                        string proto = isApple ? "APPLE-USB" : (dev.IsAndroidAdb ? "USB-ADB" : (dev.IsModemInterface ? "USB-MODEM" : "USB-SERIAL"));
+                        var cat = isApple ? EventSourceCategory.AppleIos : (dev.IsAndroidAdb ? EventSourceCategory.UsbDriver : EventSourceCategory.SerialPort);
+                        string modeHint = dev.DeviceModeHint ?? (isApple ? "Apple iOS Mode" : (dev.IsAndroidAdb ? "ADB Mode" : "Normal Mode / Modem"));
+                        string summary = isApple
+                            ? $"Apple Device Connected ({modeHint}): {dev.DeviceName} (Serial: {serial})"
+                            : (dev.IsAndroidAdb
+                                ? $"Android Device Connected: {dev.DeviceName} (Serial: {serial})"
+                                : $"Phone Connected ({modeHint}): {dev.DeviceName} (Serial: {serial})");
+                        string sourceTag = isApple ? "APPLE-PNP" : (dev.IsAndroidAdb ? "USB-PNP" : "MODEM-PNP");
 
                         EmitEvent(new LiveEventItem
                         {
                             Category = cat,
-                            SourceTag = dev.IsAndroidAdb ? "USB-PNP" : "MODEM-PNP",
+                            SourceTag = sourceTag,
                             Direction = "SYS",
                             EndpointOrTarget = !string.IsNullOrEmpty(dev.AttachedPort) ? dev.AttachedPort : $"{dev.VidHex}:{dev.PidHex}",
                             Protocol = proto,

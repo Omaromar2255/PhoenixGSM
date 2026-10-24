@@ -152,6 +152,32 @@ public sealed class AdbPushArtifactSensor : IDisposable
                 RecordCapturedArtifact(artifact);
             }
         }
+        else if (TryParseDirectAppInstallCommand(text, out var installFiles, out bool isAppleIpa))
+        {
+            foreach (string pkgFile in installFiles)
+            {
+                if (IsIgnoredHostNoiseFile(pkgFile)) continue;
+                string resolvedPath = ResolveLocalFilePath(pkgFile);
+                string fn = Path.GetFileName(pkgFile.Trim('"', '\'', ' '));
+                string virtualTarget = isAppleIpa ? $"PublicStaging/{fn}" : $"/data/app/streamed_install/{fn}";
+
+                int pid = cmd.Attribution?.ProcessId ?? 0;
+                string procName = cmd.Attribution?.ImageName ?? (!string.IsNullOrWhiteSpace(cmd.Service) ? cmd.Service : "GSM_Tool.exe");
+                string serial = cmd.DeviceIdentity ?? "";
+
+                var artifact = _vault.TryCaptureLocalFile(
+                    resolvedPath, virtualTarget, procName, pid, serial,
+                    new Dictionary<string, string>
+                    {
+                        ["InstallMode"] = isAppleIpa ? "DirectAppleIpaInstall" : "DirectAndroidApkInstall",
+                        ["PackageType"] = isAppleIpa ? "IPA" : "APK"
+                    });
+                if (artifact != null)
+                {
+                    RecordCapturedArtifact(artifact);
+                }
+            }
+        }
         else if (TryParseAdbPullCommand(text, out string remotePull, out string localPull))
         {
             if (IsIgnoredHostNoiseFile(remotePull) || IsIgnoredHostNoiseFile(localPull))
@@ -291,6 +317,104 @@ public sealed class AdbPushArtifactSensor : IDisposable
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Parses direct PC-to-Device application installation commands:
+    /// 1. Android: `adb install [-r -t -d -g --abi ...] app.apk` and `adb install-multiple [-r -t -p ...] base.apk split.apk`
+    /// 2. Apple iOS: `ideviceinstaller [-u <udid>] -i app.ipa` or `--install app.ipa`
+    /// </summary>
+    public static bool TryParseDirectAppInstallCommand(
+        string commandLine,
+        out List<string> localPackagePaths,
+        out bool isAppleIpa)
+    {
+        localPackagePaths = [];
+        isAppleIpa = false;
+
+        if (string.IsNullOrWhiteSpace(commandLine)) return false;
+
+        // 1. Check Apple `ideviceinstaller -i <file.ipa>` / `--install <file.ipa>`
+        if (commandLine.Contains("ideviceinstaller", StringComparison.OrdinalIgnoreCase))
+        {
+            var tokens = TokenizeCommandLine(commandLine);
+            for (int i = 0; i < tokens.Count; i++)
+            {
+                if ((tokens[i].Equals("-i", StringComparison.OrdinalIgnoreCase) ||
+                     tokens[i].Equals("--install", StringComparison.OrdinalIgnoreCase)) &&
+                    i + 1 < tokens.Count)
+                {
+                    string ipaPath = tokens[i + 1].Trim('"', '\'', ' ');
+                    if (!string.IsNullOrWhiteSpace(ipaPath))
+                    {
+                        isAppleIpa = true;
+                        localPackagePaths.Add(ipaPath);
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // 2. Check Android `adb install` / `adb install-multiple` / `adb install-multi-package`
+        if (!Regex.IsMatch(commandLine, @"\binstall(?:-multiple|-multi-package)?\b", RegexOptions.IgnoreCase))
+            return false;
+
+        // Exclude `shell pm install` where the path is already on the Android device (`/data/local/tmp/...`)
+        if (Regex.IsMatch(commandLine, @"\bshell\b.*?\bpm\s+install\b", RegexOptions.IgnoreCase))
+            return false;
+
+        var cmdTokens = TokenizeCommandLine(commandLine);
+        int installIdx = -1;
+        for (int i = 0; i < cmdTokens.Count; i++)
+        {
+            if (cmdTokens[i].Equals("install", StringComparison.OrdinalIgnoreCase) ||
+                cmdTokens[i].Equals("install-multiple", StringComparison.OrdinalIgnoreCase) ||
+                cmdTokens[i].Equals("install-multi-package", StringComparison.OrdinalIgnoreCase))
+            {
+                installIdx = i;
+                break;
+            }
+        }
+
+        if (installIdx < 0) return false;
+
+        // Flags that consume a following value argument in `adb install`
+        HashSet<string> flagsWithNextArg = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "-i", "--installer", "--abi", "-p", "--originating-uri", "--referrer", "--install-reason"
+        };
+
+        for (int i = installIdx + 1; i < cmdTokens.Count; i++)
+        {
+            string tok = cmdTokens[i].Trim('"', '\'', ' ');
+            if (string.IsNullOrWhiteSpace(tok)) continue;
+
+            if (tok.StartsWith("-"))
+            {
+                if (flagsWithNextArg.Contains(tok))
+                {
+                    i++; // Skip flag value
+                }
+                continue;
+            }
+
+            // Ignore remote device paths starting with `/data/` or `/sdcard/`
+            if (tok.StartsWith("/data/", StringComparison.OrdinalIgnoreCase) ||
+                tok.StartsWith("/sdcard/", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (tok.EndsWith(".apk", StringComparison.OrdinalIgnoreCase) ||
+                tok.EndsWith(".apks", StringComparison.OrdinalIgnoreCase) ||
+                tok.EndsWith(".apex", StringComparison.OrdinalIgnoreCase) ||
+                File.Exists(tok))
+            {
+                localPackagePaths.Add(tok);
+            }
+        }
+
+        return localPackagePaths.Count > 0;
     }
 
     public static bool TryParseAdbPullCommand(string commandLine, out string remotePath, out string localPath)

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -9,9 +10,15 @@ namespace PhoenixGSM.OmniTrace.Sensors;
 
 public sealed partial class SmartFilePushArchiver
 {
+    private bool _isStreamedInstallTransfer = false;
+
     /// <summary>
     /// Fast, non-blocking packet ingestion on the USB capture thread (or USB ETW / Proxy stream).
-    /// Properly strips embedded 64KB DATA headers in multi-URB adb.exe transfers and triggers full Disk/RAM recovery.
+    /// Supports BOTH:
+    /// 1. Standard ADB Sync (`STAT` / `SEND` / `DATA` / `DONE`) file transfers.
+    /// 2. Direct PC-to-Device Streamed APK Installations (`exec:cmd package install-write -S <size> ...`,
+    ///    `abb_exec:package\0install-write\0-S\0<size>...`, `exec:pm install -S <size>`) where raw APK ZIP bytes (`PK\x03\x04`)
+    ///    are streamed directly without `adb push` and without `SEND`/`DATA` headers!
     /// </summary>
     public bool ProcessOutboundSyncOrBulkChunk(
         byte[] chunk,
@@ -30,10 +37,12 @@ public sealed partial class SmartFilePushArchiver
     }
 
     /// <summary>
-    /// Direct CLI / Process interception hook for `adb push &lt;localSource&gt; &lt;remoteTarget&gt;`.
-    /// - Resolves the exact local source file using the PEB CurrentDirectory of `adb.exe` and its parent (`cmd.exe` / tool).
-    /// - Caches the full original bytes so USB Filter wire jobs ALWAYS get 100% of the file.
-    /// - When the USB Filter is OFF (or if no wire transfer occurs within 450ms), saves the full file directly to CapturedArtifacts/Session_...
+    /// Direct CLI / Process interception hook for:
+    /// - `adb push <localSource> <remoteTarget>`
+    /// - `adb install [-r -t -d -g] <localApk>`
+    /// - `adb install-multiple [-r -t -p] <base.apk> <split1.apk> ...`
+    /// - `ideviceinstaller [-u <udid>] -i <localIpa>`
+    /// Works whether the USB Kernel Filter is ON or OFF!
     /// </summary>
     public void NotifyAdbPushCommandLine(
         string? commandLine,
@@ -43,152 +52,182 @@ public sealed partial class SmartFilePushArchiver
         bool isKernelDriverActive)
     {
         if (string.IsNullOrWhiteSpace(commandLine)) return;
-        if (!AdbPushArtifactSensor.TryParseAdbPushCommand(commandLine, out string localSource, out string remoteTarget))
-            return;
 
-        if (IsIgnoredNoiseFile(localSource)) return;
+        var itemsToCapture = new List<(string LocalSource, string RemoteTarget, bool IsDirectAppInstall)>();
 
-        // Normalize target path if user specified a directory like `/data/local/tmp/` or `/sdcard`
-        string localFileName = Path.GetFileName(localSource.Trim('"', '\'', ' '));
-        remoteTarget = remoteTarget.Trim('"', '\'', ' ').Replace('\\', '/');
-        if (remoteTarget.EndsWith("/") ||
-            remoteTarget.Equals("/data/local/tmp", StringComparison.OrdinalIgnoreCase) ||
-            remoteTarget.Equals("/sdcard", StringComparison.OrdinalIgnoreCase) ||
-            remoteTarget.Equals("/tmp", StringComparison.OrdinalIgnoreCase))
+        if (AdbPushArtifactSensor.TryParseAdbPushCommand(commandLine, out string pushLocal, out string pushRemote))
         {
-            remoteTarget = remoteTarget.TrimEnd('/') + "/" + localFileName;
+            itemsToCapture.Add((pushLocal, pushRemote, false));
+        }
+        else if (AdbPushArtifactSensor.TryParseDirectAppInstallCommand(commandLine, out var installFiles, out bool isAppleIpa))
+        {
+            foreach (string pkgFile in installFiles)
+            {
+                string fn = Path.GetFileName(pkgFile.Trim('"', '\'', ' '));
+                if (string.IsNullOrWhiteSpace(fn)) continue;
+                string virtualTarget = isAppleIpa
+                    ? $"PublicStaging/{fn}"
+                    : $"/data/app/streamed_install/{fn}";
+                itemsToCapture.Add((pkgFile, virtualTarget, true));
+            }
         }
 
-        if (IsIgnoredNoiseFile(remoteTarget)) return;
+        if (itemsToCapture.Count == 0) return;
 
-        // Deduplicate identical CLI notifications within 1.5 seconds (since ETW, WMI, and 4688 may all report the same process start)
-        string dedupeKey = $"{pid}:{localSource}->{remoteTarget}";
-        DateTime now = DateTime.UtcNow;
-        if (_recentCliPushDedupe.TryGetValue(dedupeKey, out var prevTime) && (now - prevTime).TotalMilliseconds < 1500)
-        {
-            return;
-        }
-        _recentCliPushDedupe[dedupeKey] = now;
-
-        // Capture process working directories IMMEDIATELY before short-lived `adb.exe` exits
+        // Capture process working directories IMMEDIATELY before short-lived `adb.exe` / `ideviceinstaller.exe` exits
         string? pidCwd = pid > 4 ? TryGetProcessCurrentDirectory(pid) : null;
         string? parentCwd = parentPid > 4 ? TryGetProcessCurrentDirectory(parentPid) : null;
         string? exeDir = !string.IsNullOrWhiteSpace(executablePath) ? Path.GetDirectoryName(executablePath) : null;
 
-        _ = Task.Run(async () =>
+        foreach (var item in itemsToCapture)
         {
-            try
+            string localSource = item.LocalSource;
+            string remoteTarget = item.RemoteTarget;
+            bool isDirectInstall = item.IsDirectAppInstall;
+
+            if (IsIgnoredNoiseFile(localSource)) continue;
+
+            string localFileName = Path.GetFileName(localSource.Trim('"', '\'', ' '));
+            remoteTarget = remoteTarget.Trim('"', '\'', ' ').Replace('\\', '/');
+            if (remoteTarget.EndsWith("/") ||
+                remoteTarget.Equals("/data/local/tmp", StringComparison.OrdinalIgnoreCase) ||
+                remoteTarget.Equals("/sdcard", StringComparison.OrdinalIgnoreCase) ||
+                remoteTarget.Equals("/tmp", StringComparison.OrdinalIgnoreCase))
             {
-                string? resolvedPath = ResolveCliPushLocalFile(localSource, pidCwd, parentCwd, exeDir);
-                byte[]? fullBytes = null;
-
-                if (!string.IsNullOrEmpty(resolvedPath) && File.Exists(resolvedPath))
-                {
-                    fullBytes = TryReadSharedFile(resolvedPath, expectedHeader: null);
-                }
-
-                if (fullBytes == null || fullBytes.Length == 0)
-                {
-                    fullBytes = TryRecoverFromHostDisk(localFileName, headerSig: null);
-                }
-
-                if (fullBytes != null && fullBytes.Length > 0)
-                {
-                    var entry = (resolvedPath ?? localSource, fullBytes, DateTime.UtcNow);
-                    _recentCliPushByTarget[remoteTarget] = entry;
-                    if (!string.IsNullOrWhiteSpace(localFileName))
-                    {
-                        _recentCliPushByTarget[localFileName] = entry;
-                    }
-                }
-
-                // If the USB Kernel Filter is OFF, or if no wire transfer captured this push within 500ms, archive it directly!
-                int waitMs = isKernelDriverActive ? 550 : 50;
-                await Task.Delay(waitMs).ConfigureAwait(false);
-
-                if (fullBytes == null || fullBytes.Length == 0) return;
-
-                // Check if the wire archiver is currently transferring or already saved this full file within the last 2 seconds
-                bool alreadyHandledByWire = false;
-                lock (_transferLock)
-                {
-                    if (_isInsideTransfer && string.Equals(_activeTargetPath, remoteTarget, StringComparison.OrdinalIgnoreCase))
-                    {
-                        alreadyHandledByWire = true;
-                    }
-                }
-
-                if (alreadyHandledByWire) return;
-
-                if (_latestInstanceByPath.TryGetValue(remoteTarget, out var latest) &&
-                    latest.FileSize >= fullBytes.Length &&
-                    File.Exists(latest.LocalSavedPath) &&
-                    (DateTime.UtcNow - File.GetLastWriteTimeUtc(latest.LocalSavedPath)).TotalSeconds < 2.5)
-                {
-                    return;
-                }
-
-                long seqId;
-                int uploadNum;
-                string sessionDir;
-                string sessionFolder;
-
-                lock (_transferLock)
-                {
-                    seqId = Interlocked.Increment(ref _transferSequenceCounter);
-                    int pCount = _uploadCountByTargetPath.AddOrUpdate(remoteTarget, 1, (_, prev) => prev + 1);
-                    int nCount = !string.IsNullOrWhiteSpace(localFileName)
-                        ? _uploadCountByFileName.AddOrUpdate(localFileName, 1, (_, prev) => prev + 1)
-                        : pCount;
-                    uploadNum = Math.Max(pCount, nCount);
-                    sessionDir = CurrentSessionDirectory;
-                    sessionFolder = CurrentSessionFolderName;
-                }
-
-                string vector = isKernelDriverActive
-                    ? "Host CLI Push Snapshot (Full Verified)"
-                    : "Host CLI Push (Filter-Free Direct Capture)";
-
-                var savedRecord = SaveSingleCleanFileToDisk(
-                    fullBytes,
-                    remoteTarget,
-                    "0777",
-                    vector,
-                    sessionDir,
-                    sessionFolder,
-                    uploadNum,
-                    seqId,
-                    isCompleteCapture: true,
-                    declaredSize: fullBytes.Length,
-                    kernelDroppedDelta: 0);
-
-                if (savedRecord != null)
-                {
-                    _savedTransfersById[seqId] = (
-                        savedRecord.LocalSavedPath,
-                        savedRecord.SavedFileName,
-                        savedRecord.FileSizeBytes,
-                        savedRecord.UploadSequenceNumber,
-                        true);
-
-                    _latestInstanceByPath[remoteTarget] = (
-                        savedRecord.SavedFileName,
-                        savedRecord.UploadSequenceNumber,
-                        savedRecord.FileSizeBytes,
-                        savedRecord.LocalSavedPath);
-
-                    OnFileArchivedAsync?.Invoke(savedRecord, "ADB-CLI");
-                }
+                remoteTarget = remoteTarget.TrimEnd('/') + "/" + localFileName;
             }
-            catch { }
-        });
+
+            if (IsIgnoredNoiseFile(remoteTarget)) continue;
+
+            string dedupeKey = $"{pid}:{localSource}->{remoteTarget}";
+            DateTime now = DateTime.UtcNow;
+            if (_recentCliPushDedupe.TryGetValue(dedupeKey, out var prevTime) && (now - prevTime).TotalMilliseconds < 1500)
+            {
+                continue;
+            }
+            _recentCliPushDedupe[dedupeKey] = now;
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    string? resolvedPath = ResolveCliPushLocalFile(localSource, pidCwd, parentCwd, exeDir);
+                    byte[]? fullBytes = null;
+
+                    if (!string.IsNullOrEmpty(resolvedPath) && File.Exists(resolvedPath))
+                    {
+                        fullBytes = TryReadSharedFile(resolvedPath, expectedHeader: null);
+                    }
+
+                    if (fullBytes == null || fullBytes.Length == 0)
+                    {
+                        fullBytes = TryRecoverFromHostDisk(localFileName, headerSig: null);
+                    }
+
+                    if (fullBytes != null && fullBytes.Length > 0)
+                    {
+                        var entry = (resolvedPath ?? localSource, fullBytes, DateTime.UtcNow);
+                        _recentCliPushByTarget[remoteTarget] = entry;
+                        if (!string.IsNullOrWhiteSpace(localFileName))
+                        {
+                            _recentCliPushByTarget[localFileName] = entry;
+                        }
+                        if (isDirectInstall)
+                        {
+                            _recentCliPushByTarget["base.apk"] = entry;
+                        }
+                    }
+
+                    int waitMs = (isKernelDriverActive && !isDirectInstall) ? 550 : 80;
+                    await Task.Delay(waitMs).ConfigureAwait(false);
+
+                    if (fullBytes == null || fullBytes.Length == 0) return;
+
+                    bool alreadyHandledByWire = false;
+                    lock (_transferLock)
+                    {
+                        if (_isInsideTransfer &&
+                            (string.Equals(_activeTargetPath, remoteTarget, StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(Path.GetFileName(_activeTargetPath), localFileName, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            alreadyHandledByWire = true;
+                        }
+                    }
+
+                    if (alreadyHandledByWire) return;
+
+                    if (_latestInstanceByPath.TryGetValue(remoteTarget, out var latest) &&
+                        latest.FileSize >= fullBytes.Length &&
+                        File.Exists(latest.LocalSavedPath) &&
+                        (DateTime.UtcNow - File.GetLastWriteTimeUtc(latest.LocalSavedPath)).TotalSeconds < 2.5)
+                    {
+                        return;
+                    }
+
+                    long seqId;
+                    int uploadNum;
+                    string sessionDir;
+                    string sessionFolder;
+
+                    lock (_transferLock)
+                    {
+                        seqId = Interlocked.Increment(ref _transferSequenceCounter);
+                        int pCount = _uploadCountByTargetPath.AddOrUpdate(remoteTarget, 1, (_, prev) => prev + 1);
+                        int nCount = !string.IsNullOrWhiteSpace(localFileName)
+                            ? _uploadCountByFileName.AddOrUpdate(localFileName, 1, (_, prev) => prev + 1)
+                            : pCount;
+                        uploadNum = Math.Max(pCount, nCount);
+                        sessionDir = CurrentSessionDirectory;
+                        sessionFolder = CurrentSessionFolderName;
+                    }
+
+                    string vector = isDirectInstall
+                        ? "Direct PC App Install Snapshot (Full APK/IPA)"
+                        : (isKernelDriverActive
+                            ? "Host CLI Push Snapshot (Full Verified)"
+                            : "Host CLI Push (Filter-Free Direct Capture)");
+
+                    var savedRecord = SaveSingleCleanFileToDisk(
+                        fullBytes,
+                        remoteTarget,
+                        "0644",
+                        vector,
+                        sessionDir,
+                        sessionFolder,
+                        uploadNum,
+                        seqId,
+                        isCompleteCapture: true,
+                        declaredSize: fullBytes.Length,
+                        kernelDroppedDelta: 0);
+
+                    if (savedRecord != null)
+                    {
+                        _savedTransfersById[seqId] = (
+                            savedRecord.LocalSavedPath,
+                            savedRecord.SavedFileName,
+                            savedRecord.FileSizeBytes,
+                            savedRecord.UploadSequenceNumber,
+                            true);
+
+                        _latestInstanceByPath[remoteTarget] = (
+                            savedRecord.SavedFileName,
+                            savedRecord.UploadSequenceNumber,
+                            savedRecord.FileSizeBytes,
+                            savedRecord.LocalSavedPath);
+
+                        OnFileArchivedAsync?.Invoke(savedRecord, isDirectInstall ? "APP-INSTALL" : "ADB-CLI");
+                    }
+                }
+                catch { }
+            });
+        }
     }
 
     private bool ProcessChunkInternalLocked(byte[] chunk, string epHex, uint actualUrbLength, int depth)
     {
         if (chunk == null || chunk.Length == 0 || depth > 8) return false;
 
-        // 0. Strip any leading 24-byte ADB wire header (e.g. WRTE + payload in the same URB)
+        // 0. Strip any leading 24-byte ADB wire header (e.g. OPEN / WRTE + payload in the same URB)
         while (chunk.Length >= 24 && IsAdbWireHeader(chunk, 0))
         {
             if (chunk.Length == 24) return false;
@@ -202,6 +241,102 @@ public sealed partial class SmartFilePushArchiver
             {
                 EnqueueCurrentTransferForBackgroundSave(epHex, "QuitPacketFlush");
             }
+            return false;
+        }
+
+        // 0B. Check for Direct Streamed APK Installation over `exec:`, `shell:`, or Android 11+ `abb_exec:` / `abb:`!
+        if (chunk.Length >= 16 &&
+            (StartsWithAscii(chunk, "exec:") || StartsWithAscii(chunk, "shell:") ||
+             StartsWithAscii(chunk, "abb_exec:") || StartsWithAscii(chunk, "abb:")))
+        {
+            string normalizedCmd = DecodeAsciiPreservingAbbArguments(chunk, Math.Min(chunk.Length, 512));
+            var streamInstallMatch = StreamedApkInstallWriteRegex.Match(normalizedCmd);
+            if (streamInstallMatch.Success)
+            {
+                if (_isInsideTransfer && !string.IsNullOrEmpty(_activeTargetPath))
+                {
+                    EnqueueCurrentTransferForBackgroundSave(epHex, "NewStreamedInstallStarted");
+                }
+
+                string sizeStr = !string.IsNullOrEmpty(streamInstallMatch.Groups[1].Value)
+                    ? streamInstallMatch.Groups[1].Value
+                    : streamInstallMatch.Groups[4].Value;
+                long.TryParse(sizeStr, out long declaredApkBytes);
+
+                string splitOrApkName = streamInstallMatch.Groups[3].Value.Trim();
+                if (string.IsNullOrWhiteSpace(splitOrApkName) || splitOrApkName == "-")
+                {
+                    splitOrApkName = "streamed_app.apk";
+                }
+                else if (!splitOrApkName.EndsWith(".apk", StringComparison.OrdinalIgnoreCase))
+                {
+                    splitOrApkName += ".apk";
+                }
+
+                string targetVirtualPath = $"/data/app/streamed_install/{splitOrApkName}";
+                StartNewTransferStateLocked(targetVirtualPath, "0644", actualUrbLength, chunk.Length);
+                _isStreamedInstallTransfer = true;
+
+                if (declaredApkBytes > 0 && declaredApkBytes <= 512L * 1024 * 1024)
+                {
+                    _declaredDataSize = declaredApkBytes;
+                    _activeDataBlockCount = 1;
+                    _remainingInCurrentDataBlock = (int)Math.Min(declaredApkBytes, int.MaxValue);
+                }
+
+                return false;
+            }
+            else if (normalizedCmd.Contains("install-commit", StringComparison.OrdinalIgnoreCase) &&
+                     _isInsideTransfer && _isStreamedInstallTransfer)
+            {
+                _sawExplicitDone = true;
+                _doneAlreadyStripped = true;
+                EnqueueCurrentTransferForBackgroundSave(epHex, "StreamedInstallCommitFlush");
+                return true;
+            }
+        }
+
+        // 0C. Handle raw binary APK stream chunks during a Streamed Install (`exec:cmd package install-write` / `abb_exec:package install-write`)
+        if (_isInsideTransfer && _isStreamedInstallTransfer)
+        {
+            if (StartsWithAscii(chunk, "shell:") || StartsWithAscii(chunk, "host:") ||
+                StartsWithAscii(chunk, "exec:") || StartsWithAscii(chunk, "abb_exec:") || StartsWithAscii(chunk, "abb:"))
+            {
+                EnqueueCurrentTransferForBackgroundSave(epHex, "StreamedInstallNextCommandFlush");
+                return false;
+            }
+
+            if (actualUrbLength > chunk.Length)
+            {
+                _hadTruncatedUrb = true;
+            }
+
+            _lastChunkTime = DateTime.UtcNow;
+            _totalActualUrbBytes += Math.Max(actualUrbLength, (uint)chunk.Length);
+
+            _activeUploadStream.Write(chunk, 0, chunk.Length);
+            if (_remainingInCurrentDataBlock > 0)
+            {
+                _remainingInCurrentDataBlock = Math.Max(0, _remainingInCurrentDataBlock - chunk.Length);
+            }
+
+            if (_firstHeaderSignature == null && _activeUploadStream.Length >= 4)
+            {
+                byte[] streamArr = _activeUploadStream.ToArray();
+                _firstHeaderSignature = streamArr[..Math.Min(streamArr.Length, 256)];
+                StartEagerMidTransferSnapshot(_activeTargetPath, _firstHeaderSignature, _declaredDataSize > 0 ? _declaredDataSize : streamArr.Length);
+            }
+
+            // If we received the full declared APK size on a non-truncated stream, or saw the ZIP EOCD trailer at the end of the transfer
+            if ((!_hadTruncatedUrb && _declaredDataSize > 0 && _activeUploadStream.Length >= _declaredDataSize) ||
+                (_declaredDataSize > 0 && _totalActualUrbBytes >= _declaredDataSize && HasValidZipEocd(chunk)))
+            {
+                _sawExplicitDone = true;
+                _doneAlreadyStripped = true;
+                EnqueueCurrentTransferForBackgroundSave(epHex, "StreamedInstallCompleted");
+                return true;
+            }
+
             return false;
         }
 
@@ -232,7 +367,6 @@ public sealed partial class SmartFilePushArchiver
         bool hasSendToken = StartsWithAscii(chunk, "SEND") || FindAsciiTokenOffset(chunk, "SEND", 0, chunk.Length) >= 0;
         bool hasStatToken = StartsWithAscii(chunk, "STAT") || FindAsciiTokenOffset(chunk, "STAT", 0, Math.Min(chunk.Length, 64)) >= 0;
 
-        // When inside a multi-packet binary transfer, only accept a new SEND if it is a structurally valid SEND header!
         Match sendMatch = SendPathAndModeRegex.Match(combined);
         bool allowSendMatch = sendMatch.Success &&
                               (!_isInsideTransfer ||
@@ -361,7 +495,7 @@ public sealed partial class SmartFilePushArchiver
             return false;
         }
 
-        // 2. Check for STAT path check preceding SEND (ONLY when not inside an active binary transfer or when packet starts with STAT/SEND)
+        // 2. Check for STAT path check preceding SEND
         if ((!_isInsideTransfer || StartsWithAscii(chunk, "STAT") || StartsWithAscii(chunk, "SEND")) &&
             (hasStatToken || hasSendToken))
         {
@@ -400,7 +534,6 @@ public sealed partial class SmartFilePushArchiver
                 StartNewTransferStateLocked(_pendingStatPath, "33188", actualUrbLength, chunk.Length);
             }
 
-            // CRITICAL: Any URB larger than the captured 1024-byte chunk is truncated on the wire!
             if (actualUrbLength > chunk.Length)
             {
                 _hadTruncatedUrb = true;
@@ -409,7 +542,6 @@ public sealed partial class SmartFilePushArchiver
             _lastChunkTime = DateTime.UtcNow;
             _totalActualUrbBytes += Math.Max(actualUrbLength, (uint)chunk.Length);
 
-            // Check for standalone DONE packet ("DONE" + 4-byte mtime) — only when packet is 8 bytes or valid trailer!
             if (chunk.Length >= 8 && StartsWithAscii(chunk, "DONE") &&
                 (chunk.Length == 8 || FindDoneTrailerOffset(chunk, 0) == 0))
             {
@@ -448,7 +580,6 @@ public sealed partial class SmartFilePushArchiver
                      chunk[_remainingInCurrentDataBlock + 2] == (byte)'T' &&
                      chunk[_remainingInCurrentDataBlock + 3] == (byte)'A')
             {
-                // In adb.exe, the 2nd+ DATA header lands at offset `_remainingInCurrentDataBlock` (e.g. offset 40) because URB #1 started with SEND (32B)!
                 int preLen = _remainingInCurrentDataBlock;
                 _activeUploadStream.Write(chunk, 0, preLen);
 
@@ -524,6 +655,7 @@ public sealed partial class SmartFilePushArchiver
         _activeTargetPath = targetPath;
         _activeMode = string.IsNullOrWhiteSpace(mode) ? "33188" : mode;
         _isInsideTransfer = true;
+        _isStreamedInstallTransfer = false;
         _activeUploadStream.SetLength(0);
         _declaredDataSize = 0;
         _totalActualUrbBytes = 0;
@@ -623,7 +755,7 @@ public sealed partial class SmartFilePushArchiver
             }
         }
 
-        // 3. Delayed Passive Host-Disk Verification (only if the file was NEVER seen in any SEND transfer!)
+        // 3. Delayed Passive Host-Disk Verification
         if (!trimmed.StartsWith("rm ", StringComparison.OrdinalIgnoreCase) &&
             !trimmed.Contains("rm -r", StringComparison.OrdinalIgnoreCase))
         {
@@ -702,7 +834,7 @@ public sealed partial class SmartFilePushArchiver
                 return false;
             }
 
-            if (isClseSignal && (DateTime.UtcNow - _lastChunkTime).TotalMilliseconds < 400)
+            if (isClseSignal && !_isStreamedInstallTransfer && (DateTime.UtcNow - _lastChunkTime).TotalMilliseconds < 400)
             {
                 return false;
             }
@@ -733,6 +865,7 @@ public sealed partial class SmartFilePushArchiver
         string sessionFolder = CurrentSessionFolderName;
 
         _isInsideTransfer = false;
+        _isStreamedInstallTransfer = false;
         _activeTargetPath = string.Empty;
         _pendingStatPath = string.Empty;
         _activeUploadStream.SetLength(0);

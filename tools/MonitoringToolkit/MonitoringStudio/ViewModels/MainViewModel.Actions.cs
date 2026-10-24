@@ -259,11 +259,25 @@ public partial class MainViewModel
 
             if (includeDeviceResponses && currentResponses.Count > 0)
             {
-                string combinedReply = string.Join(" | ", currentResponses.Distinct());
-                sb.AppendLine($"رد الهاتف: {combinedReply}");
+                string reassembledReply = PhoneCommandClassifier.ReassembleMultilineStreamResponses(
+                    currentResponses,
+                    commandEchoToSkip: lastCommandText);
+
+                if (!string.IsNullOrWhiteSpace(reassembledReply))
+                {
+                    if (reassembledReply.Contains('\n'))
+                    {
+                        sb.AppendLine("رد الهاتف:");
+                        sb.AppendLine(reassembledReply);
+                    }
+                    else
+                    {
+                        sb.AppendLine($"رد الهاتف: {reassembledReply}");
+                    }
+                }
             }
 
-            sb.AppendLine(new string('-', 45));
+            sb.AppendLine(new string('-', 65));
             count++;
 
             lastCommandText = null;
@@ -275,22 +289,25 @@ public partial class MainViewModel
         {
             if (ev == null) continue;
 
-            // 1. Check if this event is a phone-directed command
+            // 1. فحص ما إذا كان الحدث أمراً موجهاً للهاتف
             string? pureCmd = ExtractPurePhoneCommand(ev);
             if (!string.IsNullOrWhiteSpace(pureCmd))
             {
+                // تجاهل أمر فتح الشل الفارغ "shell:" إذا تلاه فوراً الأمر الفعلي داخل الشل (مثل /data/local/tmp/AT)
+                if (pureCmd.Equals("shell:", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
                 string cmdType = PhoneCommandClassifier.ClassifyCommandTypeTag(
                     ev.Command, ev.Protocol, ev.Category.ToString(), ev.Summary);
 
-                // Deduplicate identical consecutive commands emitted within 250ms (e.g. KernelDriver + OmniTraceBus)
+                // منع تكرار نفس الأمر الصادر خلال 350ms
                 if (lastCommandText != null &&
-                     string.Equals(lastCommandText, pureCmd, StringComparison.Ordinal) &&
-                    Math.Abs((ev.Timestamp - lastCommandTime).TotalMilliseconds) < 250)
+                    string.Equals(lastCommandText, pureCmd, StringComparison.Ordinal) &&
+                    Math.Abs((ev.Timestamp - lastCommandTime).TotalMilliseconds) < 350)
                 {
                     continue;
                 }
 
-                // Flush previous command along with any collected phone responses
                 FlushPendingCommand();
 
                 lastCommandType = cmdType;
@@ -299,7 +316,7 @@ public partial class MainViewModel
                 continue;
             }
 
-            // 2. Check if this event is a phone response (attached to the current command)
+            // 2. فحص ما إذا كان الحدث رد هاتف تابعاً للأمر الحالي
             if (includeDeviceResponses && lastCommandText != null)
             {
                 string? pureResp = ExtractPurePhoneResponse(ev);
@@ -310,7 +327,6 @@ public partial class MainViewModel
             }
         }
 
-        // Flush final command
         FlushPendingCommand();
 
         exportedCommandsCount = count;

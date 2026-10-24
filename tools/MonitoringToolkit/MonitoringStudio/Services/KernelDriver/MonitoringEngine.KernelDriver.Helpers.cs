@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using PhoenixGSM.MonitoringStudio.Models;
+using PhoenixGSM.OmniTrace.Decoders;
 using PhoenixGSM.OmniTrace.Sensors;
 
 namespace PhoenixGSM.MonitoringStudio.Services;
@@ -12,26 +13,40 @@ public partial class MonitoringEngine
 {
     public static bool EnableKernelPacketFileLogging { get; set; } = false;
 
+    /// <summary>
+    /// ينظف مخرجات الهاتف الواردة ويفك ترويسة Shell v2 (إن وجدت) ويزيل رموز ألوان ANSI مع الحفاظ التام على الأسطر والمسافات والبانر
+    /// </summary>
     public static string CleanInboundPhoneResponse(byte[] chunk)
     {
         if (chunk == null || chunk.Length == 0) return string.Empty;
-        var sb = new StringBuilder(chunk.Length);
-        int printable = 0;
-        foreach (byte b in chunk)
+
+        byte[] target = chunk;
+        if (ShellStreamReconstructor.TryUnpackShellV2Frames(chunk, out _, out byte[] unpacked, out bool isCtrlOnly, out _))
         {
-            if (b >= 32 && b <= 126)
+            if (isCtrlOnly) return string.Empty;
+            target = unpacked;
+        }
+
+        string utf8Raw = Encoding.UTF8.GetString(target);
+        string strippedAnsi = ShellStreamReconstructor.CleanTerminalOutput(utf8Raw);
+
+        var sb = new StringBuilder(strippedAnsi.Length);
+        int printable = 0;
+        foreach (char c in strippedAnsi)
+        {
+            if (c >= 32 && c <= 126)
             {
-                sb.Append((char)b);
+                sb.Append(c);
                 printable++;
             }
-            else if (b == '\r' || b == '\n' || b == '\t')
+            else if (c == '\r' || c == '\n' || c == '\t')
             {
-                sb.Append((char)b);
+                sb.Append(c);
                 printable++;
             }
         }
-        if (printable < Math.Max(2, chunk.Length / 2)) return string.Empty;
-        return sb.ToString().Trim('\r', '\n', '\t', ' ', '\0', '.');
+        if (printable < Math.Max(1, strippedAnsi.Length / 2)) return string.Empty;
+        return sb.ToString().Trim('\0');
     }
 
     public static string DecodeEmbeddedRilOrAtHex(string hexText)

@@ -15,7 +15,10 @@ public partial class MonitoringEngine
         string? candidateCli = cmd.Details.TryGetValue("CommandLine", out var dCli) && !string.IsNullOrWhiteSpace(dCli)
             ? dCli
             : cmd.Command;
-        if (!string.IsNullOrWhiteSpace(candidateCli) && candidateCli.Contains("push", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(candidateCli) &&
+            (candidateCli.Contains("push", StringComparison.OrdinalIgnoreCase) ||
+             candidateCli.Contains("install", StringComparison.OrdinalIgnoreCase) ||
+             candidateCli.Contains("ideviceinstaller", StringComparison.OrdinalIgnoreCase)))
         {
             int.TryParse(cmd.Details.TryGetValue("PID", out var pidStr) ? pidStr : "0", out int pushPid);
             int.TryParse(cmd.Details.TryGetValue("ParentPID", out var ppidStr) ? ppidStr : "0", out int pushPpid);

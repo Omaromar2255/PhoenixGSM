@@ -3,14 +3,11 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Management;
-using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Parsers;
-using Microsoft.Diagnostics.Tracing.Parsers.Kernel;
 using Microsoft.Diagnostics.Tracing.Session;
 using PhoenixOmniTrace.L24_SourceSentinel.Decoders;
 using PhoenixOmniTrace.L24_SourceSentinel.Models;
@@ -31,9 +28,7 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
     private bool _isDisposed;
 
     public event Action<SourceTelemetryEvent>? OnKernelActivityDetected;
-
     public bool IsWinUsbOrChildAdbActive { get; set; }
-
     public event Action<int, string>? OnChildAdbOrWinUsbDetected;
 
     public void StartMonitoring(int targetPid, string processName = "")
@@ -47,14 +42,10 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
         }
 
         if (_cts != null) return;
-
         _cts = new CancellationTokenSource();
         var token = _cts.Token;
 
-        // 1. مراقب العمليات الفرعية عبر WMI لضمان التقاط CommandLine حتى بدون صلاحيات أدمن كاملة
         Task.Run(() => StartWmiProcessWatcher(token), token);
-
-        // 2. جلسة كيرنل و USB/Serial ETW لالتقاط أحداث الملفات، العمليات، وحزم USB/COM مباشرة من النواة
         Task.Run(() => StartEtwKernelSession(token), token);
     }
 
@@ -89,9 +80,11 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                         }
 
                         string cmdLine = GetProcessCommandLine(childPid);
-                        string key = $"PROC:{childPid}:{cmdLine}";
-                        if (TryRecordTimedEvent(key, 2.0))
+                        string effectiveCmd = string.IsNullOrWhiteSpace(cmdLine) ? procName : cmdLine;
+                        string key = $"PROC:{childPid}:{effectiveCmd}";
+                        if (TryRecordTimedEvent(key, 1.5))
                         {
+                            string cat = ClassifyChildProcessCategory(procName, effectiveCmd);
                             OnKernelActivityDetected?.Invoke(new SourceTelemetryEvent
                             {
                                 ProcessId = childPid,
@@ -99,10 +92,11 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                                 Stage = SentinelStage.RawCommandExecution,
                                 HookedApiName = "NtCreateUserProcess / Win32_ProcessStart",
                                 CallerModuleOrigin = $"{parentName} -> {procName}",
-                                TargetResource = string.IsNullOrWhiteSpace(cmdLine) ? procName : cmdLine,
-                                CommandCategory = "Child Process Execution",
-                                DecodedCommandText = $"تشغيل عملية فرعية من الأداة: [{procName}] سطر الأوامر: {(string.IsNullOrWhiteSpace(cmdLine) ? procName : cmdLine)}",
-                                PayloadSize = cmdLine.Length
+                                TargetResource = effectiveCmd,
+                                CommandCategory = cat,
+                                DecodedCommandText = $"تشغيل عملية فرعية من الأداة: [{procName}] سطر الأوامر: {effectiveCmd}",
+                                PureCommandText = effectiveCmd,
+                                PayloadSize = effectiveCmd.Length
                             });
                         }
                     }
@@ -116,13 +110,31 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
         catch { }
     }
 
+    private static string ClassifyChildProcessCategory(string procName, string cmdLine)
+    {
+        string combined = $"{procName} {cmdLine}".ToLowerInvariant();
+        if (combined.Contains("0e8d") || combined.Contains("mtk") || combined.Contains("brom") || combined.Contains("sp_flash"))
+            return "MediaTek BROM / Filter Execution";
+        if (combined.Contains("05c6") || combined.Contains("9008") || combined.Contains("fh_loader") || combined.Contains("qsahara"))
+            return "Qualcomm EDL / Sahara Execution";
+        if (combined.Contains("irecovery") || combined.Contains("idevice") || combined.Contains("iproxy") || combined.Contains("gaster"))
+            return "Apple iOS CLI Execution";
+        if (combined.Contains("7z") || combined.Contains("unzip") || combined.Contains("tar") || combined.Contains("lz4") || combined.Contains("simg2img"))
+            return "Archive / Unpack Execution";
+        if (combined.Contains("openssl") || combined.Contains("decrypt"))
+            return "Crypto / Decryption Execution";
+        return "Child Process Execution";
+    }
+
     private static bool IsKnownToolChild(string procName)
     {
         string lower = procName.ToLowerInvariant();
         return lower is "adb.exe" or "fastboot.exe" or "7z.exe" or "7za.exe" or "unzip.exe" or "tar.exe"
             or "simg2img.exe" or "make_ext4fs.exe" or "python.exe" or "cmd.exe" or "powershell.exe"
             or "scrcpy.exe" or "filter-x64.exe" or "filter-x86.exe" or "devcon.exe"
-            or "inf-wizard.exe" or "fh_loader.exe" or "qsahara_server.exe" or "spd_dump.exe";
+            or "inf-wizard.exe" or "fh_loader.exe" or "qsahara_server.exe" or "spd_dump.exe"
+            or "irecovery.exe" or "ideviceinfo.exe" or "ideviceactivation.exe" or "iproxy.exe"
+            or "openssl.exe" or "curl.exe" or "wget.exe";
     }
 
     private static string GetProcessCommandLine(int pid)
@@ -173,7 +185,6 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                 KernelTraceEventParser.Keywords.Process
             );
 
-            // تفعيل مزودات USB xHCI و Serial Class Extension في نفس الجلسة لالتقاط بايتات البورت والمودم و MTK
             try
             {
                 ulong xhciKeywords = 0x40000000000385D5UL | 0x8000000000000000UL;
@@ -184,7 +195,6 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
             }
             catch { }
 
-            // 1. مراقبة العمليات المنطلقة مع سطر الأوامر لحظياً
             _etwSession.Source.Kernel.ProcessStart += data =>
             {
                 try
@@ -209,8 +219,9 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                         }
 
                         string key = $"ETW_PROC:{childPid}:{cmdLine}";
-                        if (TryRecordTimedEvent(key, 2.0))
+                        if (TryRecordTimedEvent(key, 1.5))
                         {
+                            string cat = ClassifyChildProcessCategory(procName, cmdLine);
                             OnKernelActivityDetected?.Invoke(new SourceTelemetryEvent
                             {
                                 ProcessId = childPid,
@@ -219,8 +230,9 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                                 HookedApiName = "ETW_ProcessStart",
                                 CallerModuleOrigin = $"{parentName} -> {procName}",
                                 TargetResource = cmdLine,
-                                CommandCategory = "Child Process Execution",
+                                CommandCategory = cat,
                                 DecodedCommandText = $"تشغيل عملية فرعية بنواة ويندوز: [{procName}] سطر الأوامر: {cmdLine}",
+                                PureCommandText = cmdLine,
                                 PayloadSize = cmdLine.Length
                             });
                         }
@@ -229,12 +241,10 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                 catch { }
             };
 
-            // 2. مراقبة ملفات البوت واللودر ونشاط البورتات في النواة
             _etwSession.Source.Kernel.FileIOCreate += data => ProcessKernelFileEvent(data.ProcessID, data.FileName ?? "", "Create/Open", 0);
             _etwSession.Source.Kernel.FileIORead += data => ProcessKernelFileEvent(data.ProcessID, data.FileName ?? "", "Read", data.IoSize);
             _etwSession.Source.Kernel.FileIOWrite += data => ProcessKernelFileEvent(data.ProcessID, data.FileName ?? "", "Write", data.IoSize);
 
-            // 3. مراقبة الحزم الخام المرسلة عبر مزودي USB xHCI و Serial ETW
             _etwSession.Source.Dynamic.All += ProcessDynamicUsbAndSerialEtwEvent;
 
             _etwSession.Source.Process();
@@ -265,7 +275,10 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                 {
                     payload = rawBytes;
                 }
-                else if (val is string sVal && (sVal.Contains("VID_", StringComparison.OrdinalIgnoreCase) || sVal.Contains("COM", StringComparison.OrdinalIgnoreCase)))
+                else if (val is string sVal &&
+                         (sVal.Contains("VID_", StringComparison.OrdinalIgnoreCase) ||
+                          sVal.Contains("COM", StringComparison.OrdinalIgnoreCase) ||
+                          sVal.Contains("0E8D", StringComparison.OrdinalIgnoreCase)))
                 {
                     targetRes = sVal;
                 }
@@ -274,13 +287,25 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
             if (payload == null || payload.Length == 0) return;
 
             var (cat, decoded) = RawPayloadClassifier.Classify("ETW_UsbSerialPayload", targetRes, 0, payload);
-            if (cat == "Raw Binary / I/O Stream" || cat == "Control Operation") return;
+            if (cat == "Control Operation") return;
+
+            if (cat == "Raw Binary / I/O Stream" &&
+                (targetRes.Contains("0E8D", StringComparison.OrdinalIgnoreCase) ||
+                 targetRes.Contains("MTK", StringComparison.OrdinalIgnoreCase) ||
+                 targetRes.Contains("cdcacm", StringComparison.OrdinalIgnoreCase)))
+            {
+                cat = "MediaTek USB / BROM Raw Stream";
+            }
+            else if (cat == "Raw Binary / I/O Stream")
+            {
+                return;
+            }
 
             int pid = data.ProcessID;
             string procName = _trackedPids.TryGetValue(pid, out var pn) ? pn : (data.ProcessName ?? $"PID_{pid}");
             string dedupeKey = $"ETW_PAYLOAD:{cat}:{decoded}";
 
-            if (TryRecordTimedEvent(dedupeKey, 1.0))
+            if (TryRecordTimedEvent(dedupeKey, 0.8))
             {
                 OnKernelActivityDetected?.Invoke(new SourceTelemetryEvent
                 {
@@ -292,6 +317,7 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                     TargetResource = targetRes,
                     CommandCategory = cat,
                     DecodedCommandText = $"[{cat}] عبر ETW Kernel ({targetRes}): {decoded}",
+                    PureCommandText = decoded,
                     RawPayloadHex = Convert.ToHexString(payload.AsSpan(0, Math.Min(payload.Length, 256))),
                     PayloadSize = payload.Length
                 });
@@ -310,13 +336,29 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
             if (isTracked && IsBootOrLoaderOrArchiveFile(fileName))
             {
                 string key = $"FILEIO:{pid}:{fileName}";
-                if (TryRecordTimedEvent(key, 5.0))
+                if (TryRecordTimedEvent(key, 3.0))
                 {
                     string procName = _trackedPids.TryGetValue(pid, out var pn) ? pn : $"PID_{pid}";
                     string ext = Path.GetExtension(fileName).ToLowerInvariant();
                     string category = ext is ".zip" or ".7z" or ".tar" or ".lz4"
                         ? "Firmware / Archive Extraction"
                         : "Boot Loader / Firmware File Access";
+
+                    string savedFile = string.Empty;
+                    long savedLen = 0;
+                    string sha = string.Empty;
+
+                    // حفظ نسخة كاملة من ملف البوت/اللودر/الفيرموير تلقائياً عند وصول الكيرنل إليه!
+                    if (L24FileArchiver.TryArchiveDiscoveredFile(fileName, $"KernelETW_{ioOp} ({procName})", out string sPath, out long sSize, out string sHash))
+                    {
+                        savedFile = sPath;
+                        savedLen = sSize;
+                        sha = sHash;
+                    }
+
+                    string saveNote = !string.IsNullOrWhiteSpace(savedFile)
+                        ? $" | 💾 تم حفظ نسخة في: [{Path.GetFileName(savedFile)}] ({savedLen:N0} بايت)"
+                        : "";
 
                     OnKernelActivityDetected?.Invoke(new SourceTelemetryEvent
                     {
@@ -325,15 +367,18 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                         Stage = SentinelStage.LocalFilePreparation,
                         HookedApiName = $"Nt{ioOp}File (ETW Kernel)",
                         CallerModuleOrigin = procName,
-                        TargetResource = fileName,
+                        TargetResource = !string.IsNullOrWhiteSpace(savedFile) ? savedFile : fileName,
                         CommandCategory = category,
-                        DecodedCommandText = $"رصد وصول كيرنلي ({ioOp}) لملف بوت/لودر/فلاش: [{Path.GetFileName(fileName)}] المسار: {fileName}",
-                        PayloadSize = ioSize > 0 ? ioSize : fileName.Length
+                        DecodedCommandText = $"رصد وصول كيرنلي ({ioOp}) لملف بوت/لودر/فلاش: [{Path.GetFileName(fileName)}] المسار: {fileName}{saveNote}",
+                        PureCommandText = fileName,
+                        SavedFilePath = savedFile,
+                        PayloadSize = (int)(savedLen > 0 ? Math.Min(savedLen, int.MaxValue) : (ioSize > 0 ? ioSize : fileName.Length))
                     });
                 }
             }
             else if (fileName.Contains("COM", StringComparison.OrdinalIgnoreCase) ||
                      fileName.Contains("cdcacm", StringComparison.OrdinalIgnoreCase) ||
+                     fileName.Contains("0e8d", StringComparison.OrdinalIgnoreCase) ||
                      fileName.Contains("ssudmdm", StringComparison.OrdinalIgnoreCase) ||
                      fileName.Contains("QCUSB", StringComparison.OrdinalIgnoreCase) ||
                      fileName.Contains("USBSER", StringComparison.OrdinalIgnoreCase) ||
@@ -347,18 +392,24 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                     OnChildAdbOrWinUsbDetected?.Invoke(pid, "WinUSB");
                 }
 
-                // السماح بتسجيل عمليات الكتابة (Write) الفعلية على البورتات مع نافذة منع تكرار قصيرة (1.5 ثانية)
                 string key = ioOp == "Write"
                     ? $"DEVWRITE:{pid}:{fileName}:{ioSize}"
                     : $"DEVIO:{pid}:{fileName}";
-                double windowSec = ioOp == "Write" ? 1.5 : 10.0;
+                double windowSec = ioOp == "Write" ? 0.8 : 8.0;
 
                 if (TryRecordTimedEvent(key, windowSec))
                 {
                     string procName = _trackedPids.TryGetValue(pid, out var pn) ? pn : $"PID_{pid}";
-                    string cat = ioOp == "Write" ? "Port / Modem I/O Write" : "Kernel Device Handle Activity";
+                    bool isMtkHandle = fileName.Contains("cdcacm", StringComparison.OrdinalIgnoreCase) ||
+                                       fileName.Contains("vcom", StringComparison.OrdinalIgnoreCase) ||
+                                       fileName.Contains("0e8d", StringComparison.OrdinalIgnoreCase);
+
+                    string cat = ioOp == "Write"
+                        ? (isMtkHandle ? "MediaTek BROM / VCOM Port Write" : "Port / Modem I/O Write")
+                        : (isMtkHandle ? "MediaTek BROM / VCOM Handle Activity" : "Kernel Device Handle Activity");
+
                     string desc = ioOp == "Write"
-                        ? $"إرسال بيانات كيرنلي ({ioSize} بايت) من [{procName}] إلى البورت/المقبض: {fileName}"
+                        ? $"إرسال بيانات كيرنلي ({ioSize} بايت) من [{procName}] إلى المنفذ: {fileName}"
                         : $"نشاط كيرنلي ({ioOp}) على مقبض جهاز/بورت: {fileName}";
 
                     OnKernelActivityDetected?.Invoke(new SourceTelemetryEvent
@@ -371,6 +422,7 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                         TargetResource = fileName,
                         CommandCategory = cat,
                         DecodedCommandText = desc,
+                        PureCommandText = $"{ioOp} {fileName} ({ioSize}B)",
                         PayloadSize = ioSize > 0 ? ioSize : fileName.Length
                     });
                 }
@@ -395,8 +447,9 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
         string ext = Path.GetExtension(path).ToLowerInvariant();
         string name = Path.GetFileName(path).ToLowerInvariant();
 
-        return ext is ".mbn" or ".elf" or ".bin" or ".auth" or ".sca" or ".pit" or ".qcn" or ".xqcn"
+        return ext is ".mbn" or ".elf" or ".bin" or ".da" or ".auth" or ".sca" or ".pit" or ".qcn" or ".xqcn"
                    or ".pac" or ".ofp" or ".ops" or ".tar" or ".md5" or ".7z" or ".zip" or ".lz4"
+                   or ".img" or ".shsh2" or ".im4p" or ".img4" or ".plist"
             || name.Contains("scatter") || name.Contains("firehose") || name.Contains("rawprogram")
             || name.Contains("patch") || name.Contains("preloader") || name.Contains("da_")
             || name.Contains("prog_") || name.Contains("gpt_main") || name.Contains("gpt_backup");
@@ -414,17 +467,20 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
             TargetResource = targetResource,
             CommandCategory = category,
             DecodedCommandText = description,
+            PureCommandText = targetResource,
             PayloadSize = targetResource.Length
         });
     }
 
-    public void Dispose()
+    public void StopMonitoring()
     {
-        if (_isDisposed) return;
-        _isDisposed = true;
-
-        _cts?.Cancel();
-        _cts?.Dispose();
+        try
+        {
+            _cts?.Cancel();
+            _cts?.Dispose();
+        }
+        catch { }
+        _cts = null;
 
         try
         {
@@ -449,5 +505,13 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
         catch { }
 
         _trackedPids.Clear();
+        _seenKernelEvents.Clear();
+    }
+
+    public void Dispose()
+    {
+        if (_isDisposed) return;
+        _isDisposed = true;
+        StopMonitoring();
     }
 }

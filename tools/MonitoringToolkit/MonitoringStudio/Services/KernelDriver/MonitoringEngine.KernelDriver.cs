@@ -7,12 +7,21 @@ namespace PhoenixGSM.MonitoringStudio.Services;
 
 public partial class MonitoringEngine
 {
-    // Stateful Channel & Artifact Tracking
+    // Stateful Channel, PTY & Artifact Tracking
     private bool _isInsideFileSyncTransfer = false;
     private bool _isAdbSessionActive = false;
+    private bool _isPtySessionActive = false;
+    private bool _isShellV2SessionActive = false;
     private string _activeInteractiveShellCommand = string.Empty;
     private string _lastActiveAtBinaryCommand = string.Empty;
     private string _activeSocketBridgeChannel = string.Empty;
+    private string _lastCompletedPtyCommand = string.Empty;
+    private DateTime _lastPtyKeystrokeTime = DateTime.MinValue;
+
+    private readonly object _ptyInputLock = new();
+    private readonly PhoenixGSM.OmniTrace.Decoders.ShellStreamReconstructor _ptyInputReconstructor = new();
+    private CancellationTokenSource? _ptyIdleFlushCts;
+
     private readonly PhoenixGSM.OmniTrace.Sensors.SmartFilePushArchiver _smartFileArchiver = new();
 
     private readonly PhoenixGSM.OmniTrace.BinaryAnalysis.ElfBinaryInspector _elfInspector = new();

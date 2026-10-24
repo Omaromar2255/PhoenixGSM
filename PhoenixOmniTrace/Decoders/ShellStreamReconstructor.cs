@@ -105,13 +105,11 @@ public sealed class AdbGetpropAggregator
 }
 
 /// <summary>
-/// LAYER 10 — Shell Stream Reconstruction Engine
-/// Distinguishes stdin/stdout/stderr/exit, decodes interactive line editing
-/// (backspaces, arrow keys, ANSI escape sequences, UTF-8 multi-byte glyphs),
-/// handles chunk-fragmented escape sequences, and maintains dual streams:
-/// 1. Byte-exact Raw Stream (for forensic evidence)
-/// 2. Reconstructed Human Command (for analytical clarity)
-/// Includes dedicated getprop fragment aggregator.
+/// LAYER 10 — Shell & Interactive PTY Stream Reconstruction Engine
+/// Supports classic ADB shell:, modern shell,v2,pty:, shell,v2,TERM=...,pty:, shell,pty:, and pty: sessions.
+/// Unpacks 5-byte Shell Protocol v2 frames, decodes interactive keystroke-by-keystroke typing
+/// (backspaces, Ctrl+U/Ctrl+W/Ctrl+C, arrow keys, ANSI escape sequences, UTF-8 multi-byte glyphs),
+/// and reconstructs complete human-readable commands and clean multi-line terminal output.
 /// </summary>
 public sealed class ShellStreamReconstructor
 {
@@ -122,13 +120,15 @@ public sealed class ShellStreamReconstructor
     private readonly AdbGetpropAggregator _getpropAggregator = new();
 
     public AdbGetpropAggregator GetpropAggregator => _getpropAggregator;
+    public bool HasPendingInput => _lineBuffer.Count > 0;
+    public string CurrentPendingLine => new string(_lineBuffer.ToArray());
 
-    // State machine for chunk-spanning escape sequences
     private enum ParserState
     {
         Normal,
         InEscape,
-        InCsi
+        InCsi,
+        InOsc
     }
 
     private ParserState _state = ParserState.Normal;
@@ -136,17 +136,89 @@ public sealed class ShellStreamReconstructor
     private readonly List<byte> _utf8Buffer = [];
     private int _expectedUtf8Bytes = 0;
 
-    // Track contributing evidence
     private readonly List<ulong> _currentCommandSequences = [];
     private readonly List<string> _currentCommandHashes = [];
 
-    // Shell_v2 packet IDs
+    // Shell_v2 packet stream IDs
     public const byte ID_STDIN = 0;
     public const byte ID_STDOUT = 1;
     public const byte ID_STDERR = 2;
     public const byte ID_EXIT = 3;
     public const byte ID_CLOSE_STDIN = 4;
     public const byte ID_WINDOW_SIZE_CHANGE = 5;
+
+    private static readonly Regex AnsiEscapeCleanRegex = new(
+        @"\x1B(?:\[[0-9;?]*[a-zA-Z~]|\][^\x07\x1B]*(?:\x07|\x1B\\)|[=><A-Z0-9])",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// يفحص ما إذا كان النص يمثل أمر فتح قناة شل أو تيرمنال تفاعلي بنمط PTY
+    /// مثل: shell:, shell,v2,pty:, shell,v2,TERM=xterm-256color,pty:, shell,pty:, pty:, exec:
+    /// </summary>
+    public static bool IsShellOrPtyOpenService(
+        string? rawServiceText,
+        out string serviceHeader,
+        out string initialCommand,
+        out bool isPtyMode,
+        out bool isShellV2)
+    {
+        serviceHeader = string.Empty;
+        initialCommand = string.Empty;
+        isPtyMode = false;
+        isShellV2 = false;
+
+        if (string.IsNullOrWhiteSpace(rawServiceText))
+            return false;
+
+        string trimmed = rawServiceText.Trim('\0', '\r', '\n', ' ');
+
+        // البحث عن بداية الخدمة إذا كانت مسبوقة بـ OPEN -> أو ما شابه
+        if (trimmed.StartsWith("OPEN -> ", StringComparison.OrdinalIgnoreCase))
+            trimmed = trimmed["OPEN -> ".Length..].Trim();
+        else if (trimmed.StartsWith("OPEN ", StringComparison.OrdinalIgnoreCase))
+            trimmed = trimmed["OPEN ".Length..].Trim();
+
+        int colonIdx = trimmed.IndexOf(':');
+        if (colonIdx <= 0)
+            return false;
+
+        string prefix = trimmed[..colonIdx].Trim();
+        bool isShellPrefix = prefix.Equals("shell", StringComparison.OrdinalIgnoreCase) ||
+                             prefix.StartsWith("shell,", StringComparison.OrdinalIgnoreCase);
+        bool isPtyPrefix = prefix.Equals("pty", StringComparison.OrdinalIgnoreCase) ||
+                           prefix.StartsWith("pty,", StringComparison.OrdinalIgnoreCase);
+        bool isExecPrefix = prefix.Equals("exec", StringComparison.OrdinalIgnoreCase);
+
+        if (!isShellPrefix && !isPtyPrefix && !isExecPrefix)
+            return false;
+
+        serviceHeader = trimmed[..(colonIdx + 1)];
+        initialCommand = colonIdx + 1 < trimmed.Length
+            ? trimmed[(colonIdx + 1)..].Split('\0')[0].Trim()
+            : string.Empty;
+
+        isShellV2 = prefix.Contains(",v2", StringComparison.OrdinalIgnoreCase);
+        isPtyMode = isPtyPrefix ||
+                    prefix.Contains(",pty", StringComparison.OrdinalIgnoreCase) ||
+                    (isShellPrefix && !prefix.Contains(",raw", StringComparison.OrdinalIgnoreCase) && string.IsNullOrEmpty(initialCommand));
+
+        return true;
+    }
+
+    /// <summary>
+    /// يقتطع بادئة الخدمة (shell: أو shell,v2,TERM=...,pty: أو pty:) ويعيد الأمر الصافي الداخلي
+    /// </summary>
+    public static string StripShellOrPtyPrefix(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        if (IsShellOrPtyOpenService(text, out _, out string innerCmd, out bool isPty, out _))
+        {
+            if (!string.IsNullOrWhiteSpace(innerCmd))
+                return innerCmd;
+            return isPty ? "[Interactive PTY Session Opened]" : "shell:";
+        }
+        return text.Trim();
+    }
 
     public void ProcessInputBytes(ReadOnlySpan<byte> rawBytes, out string? completedCommand, out string rawTranscriptFragment)
     {
@@ -163,7 +235,22 @@ public sealed class ShellStreamReconstructor
         out List<string> evidenceHashes)
     {
         completedCommand = null;
-        rawTranscriptFragment = Encoding.UTF8.GetString(rawBytes);
+
+        // إذا كانت الحزمة مغلفة بترويسة Shell v2 (5 بايت)، نقوم بفكها أولاً قبل تجميع الحروف
+        ReadOnlySpan<byte> effectiveBytes = rawBytes;
+        if (TryUnpackShellV2Frames(rawBytes, out _, out byte[] unpacked, out bool isControlOnly, out _))
+        {
+            if (isControlOnly)
+            {
+                rawTranscriptFragment = string.Empty;
+                evidenceSequences = [];
+                evidenceHashes = [];
+                return;
+            }
+            effectiveBytes = unpacked;
+        }
+
+        rawTranscriptFragment = Encoding.UTF8.GetString(effectiveBytes);
         _rawAccumulator.Append(rawTranscriptFragment);
 
         if (sequenceNumber.HasValue)
@@ -177,13 +264,14 @@ public sealed class ShellStreamReconstructor
 
         evidenceSequences = [];
         evidenceHashes = [];
+        var completedLinesInChunk = new List<string>();
 
-        int len = rawBytes.Length;
+        int len = effectiveBytes.Length;
         for (int i = 0; i < len; i++)
         {
-            byte b = rawBytes[i];
+            byte b = effectiveBytes[i];
 
-            // 1. Handling escape state machine
+            // 1. Escape state machine (ANSI / VT100 sequences in PTY)
             if (_state == ParserState.InEscape)
             {
                 _escapeBuffer.Add(b);
@@ -191,9 +279,23 @@ public sealed class ShellStreamReconstructor
                 {
                     _state = ParserState.InCsi;
                 }
+                else if (b == (byte)']')
+                {
+                    _state = ParserState.InOsc;
+                }
                 else
                 {
-                    // Non-CSI escape sequence (single-byte follower)
+                    _state = ParserState.Normal;
+                    _escapeBuffer.Clear();
+                }
+                continue;
+            }
+
+            if (_state == ParserState.InOsc)
+            {
+                _escapeBuffer.Add(b);
+                if (b == 0x07 || _escapeBuffer.Count > 128) // BEL terminates OSC
+                {
                     _state = ParserState.Normal;
                     _escapeBuffer.Clear();
                 }
@@ -203,19 +305,16 @@ public sealed class ShellStreamReconstructor
             if (_state == ParserState.InCsi)
             {
                 _escapeBuffer.Add(b);
-                // CSI parameter/intermediate bytes: 0x20..0x3F
                 if (b >= 0x20 && b <= 0x3F)
                 {
                     if (_escapeBuffer.Count > 32)
                     {
-                        // Escape sequence safety abort
                         _state = ParserState.Normal;
                         _escapeBuffer.Clear();
                     }
                     continue;
                 }
 
-                // CSI final bytes: 0x40..0x7E
                 if (b >= 0x40 && b <= 0x7E)
                 {
                     char finalChar = (char)b;
@@ -226,13 +325,11 @@ public sealed class ShellStreamReconstructor
                     continue;
                 }
 
-                // Unexpected byte in CSI
                 _state = ParserState.Normal;
                 _escapeBuffer.Clear();
                 continue;
             }
 
-            // Normal state
             if (b == 0x1B) // ESC
             {
                 _state = ParserState.InEscape;
@@ -252,7 +349,31 @@ public sealed class ShellStreamReconstructor
                 continue;
             }
 
-            // 3. Newline or Carriage Return (\n or \r)
+            // 3. Ctrl-U (0x15): Clear entire line in PTY
+            if (b == 0x15)
+            {
+                _lineBuffer.Clear();
+                _cursorPos = 0;
+                continue;
+            }
+
+            // 4. Ctrl-W (0x17): Delete previous word in PTY
+            if (b == 0x17)
+            {
+                while (_cursorPos > 0 && _lineBuffer[_cursorPos - 1] == ' ')
+                {
+                    _cursorPos--;
+                    _lineBuffer.RemoveAt(_cursorPos);
+                }
+                while (_cursorPos > 0 && _lineBuffer[_cursorPos - 1] != ' ')
+                {
+                    _cursorPos--;
+                    _lineBuffer.RemoveAt(_cursorPos);
+                }
+                continue;
+            }
+
+            // 5. Newline or Carriage Return (\n or \r)
             if (b == (byte)'\r' || b == (byte)'\n')
             {
                 if (_lineBuffer.Count > 0)
@@ -260,19 +381,14 @@ public sealed class ShellStreamReconstructor
                     string cmd = new string(_lineBuffer.ToArray()).Trim();
                     if (!string.IsNullOrEmpty(cmd))
                     {
-                        completedCommand = cmd;
+                        completedLinesInChunk.Add(cmd);
                         _reconstructedCommands.Add(cmd);
-                        evidenceSequences = new List<ulong>(_currentCommandSequences);
-                        evidenceHashes = new List<string>(_currentCommandHashes);
-                        _currentCommandSequences.Clear();
-                        _currentCommandHashes.Clear();
                     }
                     _lineBuffer.Clear();
                     _cursorPos = 0;
                 }
 
-                // If \r\n, check if next byte is \n and skip it
-                if (b == (byte)'\r' && i + 1 < len && rawBytes[i + 1] == (byte)'\n')
+                if (b == (byte)'\r' && i + 1 < len && effectiveBytes[i + 1] == (byte)'\n')
                 {
                     i++;
                 }
@@ -280,7 +396,7 @@ public sealed class ShellStreamReconstructor
                 continue;
             }
 
-            // 4. Ctrl-C (0x03) or Ctrl-D (0x04)
+            // 6. Ctrl-C (0x03) or Ctrl-D (0x04)
             if (b == 0x03)
             {
                 _lineBuffer.Clear();
@@ -290,10 +406,10 @@ public sealed class ShellStreamReconstructor
                 continue;
             }
 
-            // 5. UTF-8 multi-byte decoding
+            // 7. UTF-8 multi-byte decoding
             if (_expectedUtf8Bytes > 0)
             {
-                if ((b & 0xC0) == 0x80) // Continuation byte
+                if ((b & 0xC0) == 0x80)
                 {
                     _utf8Buffer.Add(b);
                     _expectedUtf8Bytes--;
@@ -305,20 +421,17 @@ public sealed class ShellStreamReconstructor
                 }
                 else
                 {
-                    // Invalid continuation byte, reset
                     _utf8Buffer.Clear();
                     _expectedUtf8Bytes = 0;
                 }
                 continue;
             }
 
-            // ASCII printable
-            if (b >= 0x20 && b < 0x80)
+            // 8. Printable ASCII & Tab
+            if ((b >= 0x20 && b < 0x7F) || b == (byte)'\t')
             {
-                char c = (char)b;
-                InsertChar(c);
+                InsertChar(b == (byte)'\t' ? ' ' : (char)b);
             }
-            // UTF-8 lead byte
             else if (b >= 0xC2 && b <= 0xF4)
             {
                 _utf8Buffer.Clear();
@@ -328,6 +441,38 @@ public sealed class ShellStreamReconstructor
                 else _expectedUtf8Bytes = 3;
             }
         }
+
+        if (completedLinesInChunk.Count > 0)
+        {
+            completedCommand = string.Join(Environment.NewLine, completedLinesInChunk);
+            evidenceSequences = new List<ulong>(_currentCommandSequences);
+            evidenceHashes = new List<string>(_currentCommandHashes);
+            _currentCommandSequences.Clear();
+            _currentCommandHashes.Clear();
+        }
+    }
+
+    /// <summary>
+    /// يفرغ أي نص متبقٍ في مخزن السطر التفاعلي (في حال أرسلت الأداة مفتاح مصادقة أو اختياراً بدون \n)
+    /// </summary>
+    public bool TryFlushPendingLine(out string flushedCommand)
+    {
+        flushedCommand = string.Empty;
+        if (_lineBuffer.Count == 0)
+            return false;
+
+        string cmd = new string(_lineBuffer.ToArray()).Trim();
+        _lineBuffer.Clear();
+        _cursorPos = 0;
+        _currentCommandSequences.Clear();
+        _currentCommandHashes.Clear();
+
+        if (string.IsNullOrWhiteSpace(cmd))
+            return false;
+
+        _reconstructedCommands.Add(cmd);
+        flushedCommand = cmd;
+        return true;
     }
 
     private void InsertChar(char c)
@@ -378,16 +523,16 @@ public sealed class ShellStreamReconstructor
                     _lineBuffer.RemoveRange(_cursorPos, _lineBuffer.Count - _cursorPos);
                 }
                 break;
-            case '~': // Keypad / Extended functions
-                if (seq.Contains("3~") && _cursorPos < _lineBuffer.Count) // Delete key: \x1b[3~
+            case '~':
+                if (seq.Contains("3~") && _cursorPos < _lineBuffer.Count)
                 {
                     _lineBuffer.RemoveAt(_cursorPos);
                 }
-                else if (seq.Contains("1~")) // Home key
+                else if (seq.Contains("1~"))
                 {
                     _cursorPos = 0;
                 }
-                else if (seq.Contains("4~")) // End key
+                else if (seq.Contains("4~"))
                 {
                     _cursorPos = _lineBuffer.Count;
                 }
@@ -395,21 +540,98 @@ public sealed class ShellStreamReconstructor
         }
     }
 
+    /// <summary>
+    /// يفك حزمة أو سلسلة حزم Shell Protocol v2 المتتالية (ترويسة 5 بايت: [StreamID: 1B][Length: 4B LE])
+    /// بدقة عالية دون الخلط بينها وبين النصوص العادية.
+    /// </summary>
+    public static bool TryUnpackShellV2Frames(
+        ReadOnlySpan<byte> packet,
+        out byte primaryStreamId,
+        out byte[] combinedPayload,
+        out bool isControlOnly,
+        out string? controlSummary)
+    {
+        primaryStreamId = 0;
+        combinedPayload = Array.Empty<byte>();
+        isControlOnly = false;
+        controlSummary = null;
+
+        if (packet.Length < 5)
+            return false;
+
+        int offset = 0;
+        int frameCount = 0;
+        int controlFrames = 0;
+        byte firstDataStreamId = 0xFF;
+        var dataBytes = new List<byte>(packet.Length);
+        string? lastCtrlDesc = null;
+
+        while (offset + 5 <= packet.Length)
+        {
+            byte sid = packet[offset];
+            if (sid > ID_WINDOW_SIZE_CHANGE)
+                return false;
+
+            uint len = BitConverter.ToUInt32(packet.Slice(offset + 1, 4));
+            if (len > 256 * 1024 || offset + 5 + (int)len > packet.Length)
+                return false;
+
+            ReadOnlySpan<byte> slice = packet.Slice(offset + 5, (int)len);
+            frameCount++;
+
+            if (sid is ID_STDIN or ID_STDOUT or ID_STDERR)
+            {
+                if (firstDataStreamId == 0xFF)
+                    firstDataStreamId = sid;
+                for (int i = 0; i < slice.Length; i++)
+                    dataBytes.Add(slice[i]);
+            }
+            else if (sid == ID_WINDOW_SIZE_CHANGE)
+            {
+                controlFrames++;
+                string winSpec = Encoding.ASCII.GetString(slice).Trim('\0', '\r', '\n');
+                lastCtrlDesc = $"[PTY-WINDOW-RESIZE] {winSpec}";
+            }
+            else if (sid == ID_CLOSE_STDIN)
+            {
+                controlFrames++;
+                lastCtrlDesc = "[PTY-CLOSE-STDIN]";
+            }
+            else if (sid == ID_EXIT)
+            {
+                controlFrames++;
+                int exitCode = slice.Length > 0 ? slice[0] : 0;
+                lastCtrlDesc = $"[PTY-EXIT] Code={exitCode}";
+            }
+
+            offset += 5 + (int)len;
+        }
+
+        // يجب أن تستهلك إطارات Shell v2 الحزمة بالكامل لضمان عدم التطابق العشوائي مع أي بيانات أخرى
+        if (frameCount == 0 || offset != packet.Length)
+            return false;
+
+        primaryStreamId = firstDataStreamId != 0xFF ? firstDataStreamId : packet[0];
+        combinedPayload = dataBytes.ToArray();
+        isControlOnly = dataBytes.Count == 0 && controlFrames > 0;
+        controlSummary = lastCtrlDesc;
+        return true;
+    }
+
     public static bool TryUnpackShellV2(ReadOnlySpan<byte> packet, out byte streamId, out byte[] payload)
     {
+        if (TryUnpackShellV2Frames(packet, out streamId, out payload, out _, out _))
+            return true;
+
         streamId = 0;
         payload = Array.Empty<byte>();
-
-        // Shell_v2 packet layout:
-        // [0]: stream_id (1 byte)
-        // [1..4]: length (4 bytes uint little endian)
-        // [5..5+length]: payload
         if (packet.Length < 5) return false;
 
         streamId = packet[0];
+        if (streamId > ID_WINDOW_SIZE_CHANGE) return false;
         uint length = BitConverter.ToUInt32(packet[1..5]);
 
-        if (packet.Length >= 5 + length)
+        if (length <= 256 * 1024 && packet.Length >= 5 + length)
         {
             payload = new byte[length];
             packet.Slice(5, (int)length).CopyTo(payload);
@@ -422,8 +644,7 @@ public sealed class ShellStreamReconstructor
     public static string CleanTerminalOutput(string raw)
     {
         if (string.IsNullOrEmpty(raw)) return string.Empty;
-        // Strip common ANSI escape codes from output
-        return Regex.Replace(raw, @"\x1B\[[0-9;]*[a-zA-Z~]", "");
+        return AnsiEscapeCleanRegex.Replace(raw, "");
     }
 
     public string GetFullRawTranscript() => _rawAccumulator.ToString();

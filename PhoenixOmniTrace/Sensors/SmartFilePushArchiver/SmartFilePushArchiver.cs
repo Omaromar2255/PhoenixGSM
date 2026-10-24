@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -8,16 +10,264 @@ using System.Threading.Tasks;
 namespace PhoenixGSM.OmniTrace.Sensors;
 
 /// <summary>
-/// LAYER 12C — High-Integrity Passive Parallel Smart File Push Archiver.
-/// - Works both WITH the USB Kernel Filter enabled AND WITHOUT the USB Filter (via ETW/WMI/CLI process interception + PEB CWD resolution).
-/// - Resolves exact local source files from CMD / PowerShell / ADB working directories (via Win32 PEB CurrentDirectory).
-/// - Creates a dedicated per-session folder under CapturedArtifacts/ every time the monitor starts.
-/// - Automatically numbers repeated uploads of the same target path (AT, AT_2, AT_3 or ADP.xml, ADP_2.xml).
+/// LAYER 12C &amp; LAYER 24 SHARED ARCHIVER — High-Integrity Passive Parallel Smart File Push &amp; Extracted File Archiver.
+/// - Works across ADB (USB Filter ON or OFF) AND Layer 24 (Modem, MTK DA/Preloader, Odin/Tar, QCN, Firmware/Loader extraction).
+/// - Shares a single unified per-session folder under CapturedArtifacts/Session_yyyy-MM-dd_HH-mm-ss across ADB and L24.
+/// - Automatically numbers repeated/modified files (e.g., preloader.bin, preloader_2.bin) while deduplicating identical RAM hits.
 /// </summary>
 public sealed partial class SmartFilePushArchiver : IDisposable
 {
     private readonly object _transferLock = new();
     private static readonly object _diskWriteLock = new();
+    private static readonly object _sharedSessionLock = new();
+
+    private static string _sharedActiveSessionDirectory = string.Empty;
+    private static string _sharedActiveSessionFolderName = string.Empty;
+    private static readonly ConcurrentDictionary<string, string> _l24SavedHashByFileKey = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, int> _l24UploadCountByFileName = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Shared active session directory (`CapturedArtifacts\Session_yyyy-MM-dd_HH-mm-ss`) used by both ADB and Layer 24.
+    /// </summary>
+    public static string ActiveSessionDirectory
+    {
+        get
+        {
+            lock (_sharedSessionLock)
+            {
+                if (string.IsNullOrWhiteSpace(_sharedActiveSessionDirectory) || !Directory.Exists(_sharedActiveSessionDirectory))
+                {
+                    EnsureSharedSessionFolderInitializedLocked();
+                }
+                return _sharedActiveSessionDirectory;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Shared active session folder name (`Session_yyyy-MM-dd_HH-mm-ss`).
+    /// </summary>
+    public static string ActiveSessionFolderName
+    {
+        get
+        {
+            lock (_sharedSessionLock)
+            {
+                if (string.IsNullOrWhiteSpace(_sharedActiveSessionFolderName))
+                {
+                    EnsureSharedSessionFolderInitializedLocked();
+                }
+                return _sharedActiveSessionFolderName;
+            }
+        }
+    }
+
+    private static void EnsureSharedSessionFolderInitializedLocked()
+    {
+        string baseRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "CapturedArtifacts");
+        string timestampName = $"Session_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}";
+        string candidateDir = Path.Combine(baseRoot, timestampName);
+
+        int suffix = 2;
+        while (Directory.Exists(candidateDir) && Directory.GetFileSystemEntries(candidateDir).Length > 0)
+        {
+            timestampName = $"Session_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}_{suffix}";
+            candidateDir = Path.Combine(baseRoot, timestampName);
+            suffix++;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(candidateDir);
+        }
+        catch { }
+
+        _sharedActiveSessionFolderName = timestampName;
+        _sharedActiveSessionDirectory = candidateDir;
+    }
+
+    /// <summary>
+    /// Archives any extracted, prepared, or used firmware/loader/DA/QCN/PIT/NV file discovered by Layer 24
+    /// directly into the shared ADB session folder (`CapturedArtifacts\Session_...`).
+    /// </summary>
+    public static bool ArchiveL24ExtractedOrUsedFile(
+        string? filePathOrName,
+        byte[]? fallbackBytes,
+        int processId,
+        string callerOrigin,
+        out CapturedPushedFileRecord? archivedRecord)
+    {
+        archivedRecord = null;
+        if (string.IsNullOrWhiteSpace(filePathOrName)) return false;
+
+        string cleaned = filePathOrName.Trim().Trim('"', '\'', ' ');
+        // Ignore remote cloud URLs that haven't been downloaded to a local file yet
+        if (cleaned.StartsWith("//", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string normalized = cleaned.Replace('/', '\\');
+        string fileName = Path.GetFileName(normalized);
+        if (string.IsNullOrWhiteSpace(fileName) || fileName.Length < 3 || !fileName.Contains('.'))
+            return false;
+
+        if (IsIgnoredNoiseFile(fileName) ||
+            fileName.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase) ||
+            fileName.EndsWith(".psm1", StringComparison.OrdinalIgnoreCase) ||
+            fileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ||
+            fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
+            fileName.EndsWith(".sys", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string? resolvedLocalPath = ResolveL24LocalFilePath(normalized, fileName, processId);
+        byte[]? fileBytes = null;
+
+        if (!string.IsNullOrWhiteSpace(resolvedLocalPath) && File.Exists(resolvedLocalPath))
+        {
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                fileBytes = TryReadL24FileShared(resolvedLocalPath);
+                if (fileBytes != null && fileBytes.Length > 0) break;
+                Thread.Sleep(60);
+            }
+        }
+
+        if ((fileBytes == null || fileBytes.Length == 0) && fallbackBytes != null && fallbackBytes.Length > 0)
+        {
+            fileBytes = fallbackBytes;
+        }
+
+        if (fileBytes == null || fileBytes.Length == 0)
+            return false;
+
+        string sha256 = Convert.ToHexString(SHA256.HashData(fileBytes));
+        string dedupeKey = $"{fileName.ToLowerInvariant()}:{sha256}";
+
+        // Prevent duplicate saving when LiveHeapCommandHunter re-scans the same unchanged file in RAM
+        if (!_l24SavedHashByFileKey.TryAdd(dedupeKey, resolvedLocalPath ?? normalized))
+        {
+            return false;
+        }
+
+        int seqNum = _l24UploadCountByFileName.AddOrUpdate(fileName, 1, (_, prev) => prev + 1);
+        string sessionDir = ActiveSessionDirectory;
+        string sessionFolder = ActiveSessionFolderName;
+
+        archivedRecord = SaveSingleCleanFileToDisk(
+            fileBytes,
+            resolvedLocalPath ?? filePathOrName,
+            "L24-AUTO",
+            $"L24 Auto-Saved ({callerOrigin})",
+            sessionDir,
+            sessionFolder,
+            seqNum,
+            transferSequenceId: 0,
+            isCompleteCapture: true,
+            declaredSize: fileBytes.Length,
+            kernelDroppedDelta: 0);
+
+        return archivedRecord != null;
+    }
+
+    private static string? ResolveL24LocalFilePath(string normalizedPath, string fileName, int processId)
+    {
+        try
+        {
+            if (Path.IsPathRooted(normalizedPath) && !normalizedPath.StartsWith("\\") && File.Exists(normalizedPath))
+            {
+                return normalizedPath;
+            }
+
+            // Handle root-relative paths like `\UnlockTool\Temp\pgpt.bin` or `\Users\trihc\Desktop\...`
+            string trimmedRelative = normalizedPath.TrimStart('\\');
+            foreach (var drive in DriveInfo.GetDrives())
+            {
+                if (!drive.IsReady) continue;
+                string driveCandidate = Path.Combine(drive.RootDirectory.FullName, trimmedRelative);
+                if (File.Exists(driveCandidate)) return driveCandidate;
+            }
+
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string? procCwd = processId > 4 ? TryGetProcessCurrentDirectory(processId) : null;
+            string? procExeDir = processId > 4 ? Path.GetDirectoryName(TryGetProcessExecutablePath(processId)) : null;
+
+            string?[] searchRoots =
+            [
+                procCwd,
+                procExeDir,
+                @"C:\UnlockTool\Temp",
+                @"C:\UnlockTool",
+                @"C:\UnlockTool\Binaries",
+                Path.GetTempPath(),
+                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                Path.Combine(userProfile, "Downloads"),
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                Environment.CurrentDirectory,
+                AppDomain.CurrentDomain.BaseDirectory
+            ];
+
+            foreach (string? root in searchRoots)
+            {
+                if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) continue;
+                if (root.Contains("CapturedArtifacts", StringComparison.OrdinalIgnoreCase)) continue;
+
+                string direct1 = Path.Combine(root, trimmedRelative);
+                if (File.Exists(direct1)) return direct1;
+
+                string direct2 = Path.Combine(root, fileName);
+                if (File.Exists(direct2)) return direct2;
+
+                try
+                {
+                    var opts = new EnumerationOptions
+                    {
+                        IgnoreInaccessible = true,
+                        RecurseSubdirectories = true,
+                        MaxRecursionDepth = 3,
+                        MatchCasing = MatchCasing.CaseInsensitive
+                    };
+                    foreach (string match in Directory.EnumerateFiles(root, fileName, opts))
+                    {
+                        if (!match.Contains("CapturedArtifacts", StringComparison.OrdinalIgnoreCase))
+                            return match;
+                    }
+                }
+                catch { }
+            }
+        }
+        catch { }
+
+        return null;
+    }
+
+    private static byte[]? TryReadL24FileShared(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return null;
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (fs.Length <= 0 || fs.Length > 256L * 1024 * 1024) return null;
+
+            byte[] buf = new byte[fs.Length];
+            int readTotal = 0;
+            while (readTotal < buf.Length)
+            {
+                int r = fs.Read(buf, readTotal, buf.Length - readTotal);
+                if (r <= 0) break;
+                readTotal += r;
+            }
+            return readTotal == buf.Length ? buf : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     private readonly MemoryStream _activeUploadStream = new();
     private string _activeTargetPath = string.Empty;
@@ -52,7 +302,6 @@ public sealed partial class SmartFilePushArchiver : IDisposable
     private readonly ConcurrentDictionary<long, (string LocalSavedPath, string SavedFileName, long SavedSize, int UploadNumber, bool IsComplete)> _savedTransfersById = new();
     private readonly ConcurrentDictionary<string, (string SavedFileName, int UploadNumber, long FileSize, string LocalSavedPath)> _latestInstanceByPath = new(StringComparer.OrdinalIgnoreCase);
 
-    // Maps remote TargetDevicePath (or FileName) -> recently resolved local file bytes from CLI `adb push <local> <remote>`
     private readonly ConcurrentDictionary<string, (string LocalPath, byte[] FileBytes, DateTime CapturedAtUtc)> _recentCliPushByTarget = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DateTime> _recentCliPushDedupe = new(StringComparer.OrdinalIgnoreCase);
 
@@ -145,6 +394,8 @@ public sealed partial class SmartFilePushArchiver : IDisposable
             _latestInstanceByPath.Clear();
             _recentCliPushByTarget.Clear();
             _recentCliPushDedupe.Clear();
+            _l24SavedHashByFileKey.Clear();
+            _l24UploadCountByFileName.Clear();
             _activeUploadStream.SetLength(0);
             _isInsideTransfer = false;
             _activeTargetPath = string.Empty;
@@ -160,26 +411,12 @@ public sealed partial class SmartFilePushArchiver : IDisposable
 
     private void InitializeNewSessionFolderLocked()
     {
-        string baseRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "CapturedArtifacts");
-        string timestampName = $"Session_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}";
-        string candidateDir = Path.Combine(baseRoot, timestampName);
-
-        int suffix = 2;
-        while (Directory.Exists(candidateDir) && Directory.GetFileSystemEntries(candidateDir).Length > 0)
+        lock (_sharedSessionLock)
         {
-            timestampName = $"Session_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}_{suffix}";
-            candidateDir = Path.Combine(baseRoot, timestampName);
-            suffix++;
+            EnsureSharedSessionFolderInitializedLocked();
+            _currentSessionFolderName = _sharedActiveSessionFolderName;
+            _currentSessionDirectory = _sharedActiveSessionDirectory;
         }
-
-        try
-        {
-            Directory.CreateDirectory(candidateDir);
-        }
-        catch { }
-
-        _currentSessionFolderName = timestampName;
-        _currentSessionDirectory = candidateDir;
     }
 
     public string GetActiveArtifactInstanceLabel(string targetDevicePath)

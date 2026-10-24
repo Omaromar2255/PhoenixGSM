@@ -23,6 +23,20 @@ public static class ApplePurpleDiagDecoder
 
         string text = Encoding.ASCII.GetString(buffer[..Math.Min(buffer.Length, 512)]).Trim();
 
+        if (text.Contains("uid=", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("gid=", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("context=u:r:", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0.0;
+        }
+
+        if (text.Contains("uid=", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("gid=", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("context=u:r:", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0.0;
+        }
+
         if (text.StartsWith("syscfg ", StringComparison.OrdinalIgnoreCase) ||
             text.Equals("syscfg", StringComparison.OrdinalIgnoreCase))
         {

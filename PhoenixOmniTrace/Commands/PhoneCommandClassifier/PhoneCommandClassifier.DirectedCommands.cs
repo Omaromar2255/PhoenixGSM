@@ -1,5 +1,6 @@
 using System;
 using System.Text.RegularExpressions;
+using PhoenixGSM.OmniTrace.Decoders;
 
 namespace PhoenixGSM.OmniTrace.Commands;
 
@@ -19,7 +20,6 @@ public static partial class PhoneCommandClassifier
         string proto = (protocol ?? "").Trim();
         string cat = (categoryName ?? "").Trim();
 
-        // 0. Reject corrupted binary ELF chunks and low-level sync tokens immediately
         if (IsCorruptedBinaryOrSyncNoise(cmd) ||
             cmd.Contains(".phx_keep_", StringComparison.OrdinalIgnoreCase) ||
             sum.Contains(".phx_keep_", StringComparison.OrdinalIgnoreCase) ||
@@ -33,7 +33,6 @@ public static partial class PhoneCommandClassifier
             return false;
         }
 
-        // Exclude handshake packets (AUTH, CNXN) and unparsed generic frame noise (e.g. "... Frame (... bytes)")
         if (cmd.Equals("AUTH", StringComparison.OrdinalIgnoreCase) ||
             cmd.StartsWith("43 4E 58 4E", StringComparison.OrdinalIgnoreCase) ||
             Regex.IsMatch(cmd, @"(?i)Frame\s*\([^)]*bytes\)$") ||
@@ -42,14 +41,13 @@ public static partial class PhoneCommandClassifier
             return false;
         }
 
-        // Reject bare "/data/local/tmp/AT" when it is merely the filename argument to STAT/SEND
         if (cmd.Equals("/data/local/tmp/AT", StringComparison.OrdinalIgnoreCase) &&
-            !sum.Contains("shell:/data/local/tmp/AT", StringComparison.OrdinalIgnoreCase))
+            !sum.Contains("shell", StringComparison.OrdinalIgnoreCase) &&
+            !sum.Contains("pty:", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        // 1. Exclude host-side internal processes and external network downloads
         if (cat.Equals("Process", StringComparison.OrdinalIgnoreCase) ||
             cat.Equals("NetworkUrl", StringComparison.OrdinalIgnoreCase) ||
             cat.Equals("InProcess", StringComparison.OrdinalIgnoreCase) ||
@@ -59,7 +57,6 @@ public static partial class PhoneCommandClassifier
             return false;
         }
 
-        // 2. Exclude Windows host services & background update pollers
         if (sum.Contains("updater.exe", StringComparison.OrdinalIgnoreCase) ||
             sum.Contains("drvinst.exe", StringComparison.OrdinalIgnoreCase) ||
             cmd.Contains("GoogleUpdater", StringComparison.OrdinalIgnoreCase) ||
@@ -71,7 +68,6 @@ public static partial class PhoneCommandClassifier
             return false;
         }
 
-        // 3. Staged / In-Flight Pushed Artifacts & ADB-SYNC PUSH
         if (cat.Equals("ArtifactVault", StringComparison.OrdinalIgnoreCase) ||
             proto.Equals("ADB-SYNC", StringComparison.OrdinalIgnoreCase) ||
             cmd.StartsWith("PUSH ", StringComparison.OrdinalIgnoreCase))
@@ -81,7 +77,6 @@ public static partial class PhoneCommandClassifier
 
         bool isOutbound = dir is "OUT" or "HOST->DEV" or ">>" or "FILE >>" or "--";
 
-        // 4. ADB Proxy & ADB Wire commands directed to phone
         if (cat.Equals("AdbProxy", StringComparison.OrdinalIgnoreCase) || 
             proto.Contains("ADB", StringComparison.OrdinalIgnoreCase))
         {
@@ -109,14 +104,20 @@ public static partial class PhoneCommandClassifier
                 return false;
             }
 
-            if (proto.Equals("ADB-RIL-IPC", StringComparison.OrdinalIgnoreCase))
+            if (proto.Equals("ADB-RIL-IPC", StringComparison.OrdinalIgnoreCase) ||
+                proto.Equals("ADB-PTY-CMD", StringComparison.OrdinalIgnoreCase))
             {
-                return true;
+                return isOutbound;
             }
 
-            if (cmd.StartsWith("OPEN ->", StringComparison.OrdinalIgnoreCase) ||
-                cmd.StartsWith("OPEN shell:", StringComparison.OrdinalIgnoreCase) ||
+            if (ShellStreamReconstructor.IsShellOrPtyOpenService(cmd, out _, out _, out _, out _) ||
+                cmd.StartsWith("OPEN ->", StringComparison.OrdinalIgnoreCase) ||
+                cmd.StartsWith("OPEN shell", StringComparison.OrdinalIgnoreCase) ||
+                cmd.StartsWith("OPEN pty", StringComparison.OrdinalIgnoreCase) ||
                 cmd.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
+                cmd.StartsWith("shell,", StringComparison.OrdinalIgnoreCase) ||
+                cmd.StartsWith("pty:", StringComparison.OrdinalIgnoreCase) ||
+                cmd.StartsWith("exec:", StringComparison.OrdinalIgnoreCase) ||
                 cmd.StartsWith("usb:", StringComparison.OrdinalIgnoreCase) ||
                 cmd.StartsWith("reboot", StringComparison.OrdinalIgnoreCase) ||
                 cmd.StartsWith("060100", StringComparison.OrdinalIgnoreCase) ||
@@ -144,7 +145,6 @@ public static partial class PhoneCommandClassifier
             return isOutbound && !string.IsNullOrWhiteSpace(cmd);
         }
 
-        // 5. Modem AT Commands & Samsung RIL Injections directed to phone
         if (cat.Equals("SerialPort", StringComparison.OrdinalIgnoreCase) || 
             proto.Contains("AT", StringComparison.OrdinalIgnoreCase) || 
             proto.Contains("SERIAL", StringComparison.OrdinalIgnoreCase))
@@ -184,7 +184,6 @@ public static partial class PhoneCommandClassifier
             return false;
         }
 
-        // 6. Fastboot Flash & Config Commands
         if (proto.Contains("FASTBOOT", StringComparison.OrdinalIgnoreCase))
         {
             return isOutbound || 
@@ -194,7 +193,6 @@ public static partial class PhoneCommandClassifier
                    cmd.StartsWith("reboot", StringComparison.OrdinalIgnoreCase);
         }
 
-        // 7. MediaTek BROM / DA Commands directed to phone
         if (cat.Equals("MediaTek", StringComparison.OrdinalIgnoreCase) || proto.Contains("MTK", StringComparison.OrdinalIgnoreCase))
         {
             if (isOutbound && cmd is not "DA_STATUS_FAIL" and not "DA_STATUS_OK")
@@ -204,7 +202,6 @@ public static partial class PhoneCommandClassifier
             return false;
         }
 
-        // 8. Qualcomm EDL / Sahara / Firehose Commands directed to phone
         if (cat.Equals("QualcommEdl", StringComparison.OrdinalIgnoreCase) || 
             proto.Contains("SAHARA", StringComparison.OrdinalIgnoreCase) || 
             proto.Contains("FIREHOSE", StringComparison.OrdinalIgnoreCase))
@@ -212,7 +209,6 @@ public static partial class PhoneCommandClassifier
             return isOutbound;
         }
 
-        // 9. Unisoc / Spreadtrum FDL Commands directed to phone
         if (cat.Equals("UnisocSpd", StringComparison.OrdinalIgnoreCase) || 
             proto.Contains("SPD", StringComparison.OrdinalIgnoreCase) || 
             proto.Contains("FDL", StringComparison.OrdinalIgnoreCase))
@@ -220,16 +216,16 @@ public static partial class PhoneCommandClassifier
             return isOutbound;
         }
 
-        // 10. Apple iOS Device Commands
         if (cat.Equals("AppleIos", StringComparison.OrdinalIgnoreCase))
         {
             return isOutbound;
         }
 
-        // 11. Raw USB transfers carrying commands to phone
         if (cat.Equals("UsbDriver", StringComparison.OrdinalIgnoreCase) && isOutbound)
         {
             if (sum.Contains("shell:", StringComparison.OrdinalIgnoreCase) ||
+                sum.Contains("shell,", StringComparison.OrdinalIgnoreCase) ||
+                sum.Contains("pty:", StringComparison.OrdinalIgnoreCase) ||
                 sum.Contains("chmod", StringComparison.OrdinalIgnoreCase) ||
                 sum.Contains("/data/local/tmp", StringComparison.OrdinalIgnoreCase) ||
                 sum.Contains("reboot", StringComparison.OrdinalIgnoreCase) ||
@@ -262,7 +258,6 @@ public static partial class PhoneCommandClassifier
         string details = (additionalDetails ?? "").Trim();
         string payload = (payloadAscii ?? "").Trim();
 
-        // 1. Artifacts Pushed to Device (/data/local/tmp/...)
         if (cat.Equals("ArtifactVault", StringComparison.OrdinalIgnoreCase) ||
             proto.Equals("ADB-SYNC", StringComparison.OrdinalIgnoreCase))
         {
@@ -286,7 +281,6 @@ public static partial class PhoneCommandClassifier
             return !string.IsNullOrWhiteSpace(cmd) ? cmd : sum;
         }
 
-        // 2. ADB Wire & ADB Shell Executions
         if (cat.Equals("AdbProxy", StringComparison.OrdinalIgnoreCase) ||
             proto.Contains("ADB", StringComparison.OrdinalIgnoreCase))
         {
@@ -302,36 +296,21 @@ public static partial class PhoneCommandClassifier
                     return adbCmd;
             }
 
-            if (cmd.StartsWith("OPEN -> ", StringComparison.OrdinalIgnoreCase))
+            if (ShellStreamReconstructor.IsShellOrPtyOpenService(cmd, out string svcHdr, out string innerCmd, out _, out _))
             {
-                string inner = cmd["OPEN -> ".Length..].Trim();
-                if (inner.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
-                    inner = inner["shell:".Length..].Trim();
-                if (IsCorruptedBinaryOrSyncNoise(inner)) return null;
-                return inner;
-            }
-
-            if (cmd.StartsWith("OPEN ", StringComparison.OrdinalIgnoreCase))
-            {
-                string inner = cmd["OPEN ".Length..].Trim();
-                if (inner.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
-                    inner = inner["shell:".Length..].Trim();
-                if (IsCorruptedBinaryOrSyncNoise(inner)) return null;
-                return inner;
-            }
-
-            if (cmd.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
-            {
-                string inner = cmd["shell:".Length..].Trim();
-                if (IsCorruptedBinaryOrSyncNoise(inner)) return null;
-                return inner;
+                if (!string.IsNullOrWhiteSpace(innerCmd))
+                {
+                    if (IsCorruptedBinaryOrSyncNoise(innerCmd)) return null;
+                    return innerCmd;
+                }
+                return svcHdr;
             }
 
             if (cmd.StartsWith("WRTE -> ", StringComparison.OrdinalIgnoreCase))
             {
                 string inner = cmd["WRTE -> ".Length..].Trim();
-                if (inner.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
-                    inner = inner["shell:".Length..].Trim();
+                if (ShellStreamReconstructor.IsShellOrPtyOpenService(inner, out _, out string sInner, out _, out _) && !string.IsNullOrWhiteSpace(sInner))
+                    inner = sInner;
                 if (IsCorruptedBinaryOrSyncNoise(inner)) return null;
                 return inner;
             }
@@ -343,6 +322,11 @@ public static partial class PhoneCommandClassifier
                 return null;
             }
 
+            if (cmd.StartsWith(">> ", StringComparison.Ordinal))
+            {
+                cmd = cmd[3..].Trim();
+            }
+
             if (cmd is "OKAY" or "CLSE" or "CNXN")
                 return null;
 
@@ -350,7 +334,6 @@ public static partial class PhoneCommandClassifier
             return !string.IsNullOrEmpty(annotation) ? $"{cmd}  {annotation}" : cmd;
         }
 
-        // 3. Modem / Serial / Samsung RIL OEM Hook
         if (cat.Equals("SerialPort", StringComparison.OrdinalIgnoreCase) ||
             proto.Contains("AT", StringComparison.OrdinalIgnoreCase) ||
             proto.Contains("SERIAL", StringComparison.OrdinalIgnoreCase))
@@ -367,7 +350,6 @@ public static partial class PhoneCommandClassifier
             return cmd.Trim('\r', '\n', '\0', ' ');
         }
 
-        // 4. Fastboot
         if (proto.Contains("FASTBOOT", StringComparison.OrdinalIgnoreCase))
         {
             if (cmd.StartsWith("FASTBOOT: ", StringComparison.OrdinalIgnoreCase))
@@ -377,14 +359,12 @@ public static partial class PhoneCommandClassifier
             return cmd;
         }
 
-        // 5. MediaTek BROM / DA
         if (cat.Equals("MediaTek", StringComparison.OrdinalIgnoreCase) || proto.Contains("MTK", StringComparison.OrdinalIgnoreCase))
         {
             if (cmd is "DA_STATUS_FAIL" or "DA_STATUS_OK") return null;
             return cmd;
         }
 
-        // 6. Generic Outbound
         return !string.IsNullOrWhiteSpace(cmd) ? cmd : null;
     }
 }

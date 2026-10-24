@@ -518,14 +518,27 @@ public class UsbScanner
                 }
             }
 
-            // Vendor check for known phone manufacturers
-            bool isPhoneVendor = dev.Vid is 0x12D1 or 0x04E8 or 0x2717 or 0x22D9 or 0x2B4E or 0x22B8 or 0x18D1 or 0x0E8D or 0x05C6 or 0x1782 or 0x1199 or 0x0BB4 or 0x1004 or 0x0FCE;
+            // Vendor check for known phone manufacturers (including Apple 0x05AC)
+            bool isPhoneVendor = dev.Vid is 0x05AC or 0x12D1 or 0x04E8 or 0x2717 or 0x22D9 or 0x2B4E or 0x22B8 or 0x18D1 or 0x0E8D or 0x05C6 or 0x1782 or 0x1199 or 0x0BB4 or 0x1004 or 0x0FCE;
             if (isPhoneVendor)
             {
                 dev.IsPhoneOrModem = true;
             }
 
-            if (dev.IsAndroidAdb)
+            if (dev.Vid == 0x05AC)
+            {
+                dev.IsPhoneOrModem = true;
+                dev.DeviceModeHint = dev.Pid switch
+                {
+                    0x1227 => "Apple DFU Mode (SecureROM 05AC:1227)",
+                    0x1222 => "Apple WTF / DFU Mode (05AC:1222)",
+                    0x1281 => "Apple Recovery / iBoot Mode (05AC:1281)",
+                    0x4141 => "Apple PongoOS / Checkra1n Shell Mode (05AC:4141)",
+                    0x1881 => "Apple Purple / Factory Diag Mode (05AC:1881)",
+                    _ => "Apple iOS Normal Mode (usbmuxd / Lockdown)"
+                };
+            }
+            else if (dev.IsAndroidAdb)
             {
                 dev.DeviceModeHint = "ADB Mode";
             }

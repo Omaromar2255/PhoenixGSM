@@ -118,7 +118,8 @@ public sealed class DevicePnpArrivalCommandSensor : IDisposable
     private static bool IsServicingChipsetVid(string vidPid)
     {
         string upper = vidPid.ToUpperInvariant();
-        return upper.Contains("VID_0E8D") || // MediaTek
+        return upper.Contains("VID_05AC") || // Apple
+               upper.Contains("VID_0E8D") || // MediaTek
                upper.Contains("VID_05C6") || // Qualcomm
                upper.Contains("VID_1782") || // Spreadtrum
                upper.Contains("VID_04E8");   // Samsung
@@ -141,7 +142,8 @@ public sealed class DevicePnpArrivalCommandSensor : IDisposable
     {
         string upper = vidPid.ToUpperInvariant();
         if (upper.Contains("VID_0E8D&PID_0003") || upper.Contains("VID_0E8D&PID_2000") ||
-            upper.Contains("VID_05C6&PID_9008") || upper.Contains("VID_1782&PID_4D00"))
+            upper.Contains("VID_05C6&PID_9008") || upper.Contains("VID_1782&PID_4D00") ||
+            upper.Contains("VID_05AC")) // Apple (DFU, Recovery, Normal, PongoOS, Purple)
         {
             EmitArrivalEvent(vidPid, fullDevId);
         }
@@ -184,6 +186,7 @@ public sealed class DevicePnpArrivalCommandSensor : IDisposable
         string action = uiState?.LastAction ?? "[BROM] FACTORY RESET / ERASE FRP";
         string activeModel = uiState?.ActiveModel ?? string.Empty;
 
+        bool isApple = hwId.Contains("05AC", StringComparison.OrdinalIgnoreCase);
         bool isMtk = hwId.Contains("0E8D", StringComparison.OrdinalIgnoreCase);
         bool isQcom = hwId.Contains("05C6", StringComparison.OrdinalIgnoreCase) || hwId.Contains("9008", StringComparison.OrdinalIgnoreCase);
 
@@ -192,7 +195,36 @@ public sealed class DevicePnpArrivalCommandSensor : IDisposable
         string category;
         KnownProtocol protocol;
 
-        if (isMtk)
+        if (isApple)
+        {
+            string appleMode = "Apple iOS Device";
+            protocol = KnownProtocol.AppleLockdown;
+            if (hwId.Contains("PID_1227", StringComparison.OrdinalIgnoreCase) || hwId.Contains("PID_1222", StringComparison.OrdinalIgnoreCase))
+            {
+                appleMode = "Apple DFU Mode (SecureROM)";
+                protocol = KnownProtocol.AppleDfu;
+            }
+            else if (hwId.Contains("PID_1281", StringComparison.OrdinalIgnoreCase))
+            {
+                appleMode = "Apple Recovery / iBoot Mode";
+                protocol = KnownProtocol.AppleRecovery;
+            }
+            else if (hwId.Contains("PID_4141", StringComparison.OrdinalIgnoreCase))
+            {
+                appleMode = "Apple PongoOS / Checkra1n Mode";
+                protocol = KnownProtocol.AppleDfu;
+            }
+            else if (hwId.Contains("PID_1881", StringComparison.OrdinalIgnoreCase))
+            {
+                appleMode = "Apple Purple / Diagnostics Mode";
+                protocol = KnownProtocol.ApplePurpleDiag;
+            }
+
+            serviceBanner = $"{appleMode} Connection Detected";
+            category = "AppleIos";
+            actionDesc = $"{appleMode} Handshake / Connection -> {hwId}";
+        }
+        else if (isMtk)
         {
             serviceBanner = "MediaTek Device Connection & Protocol Handshake";
             category = "MediaTek";

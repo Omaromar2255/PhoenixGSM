@@ -6,8 +6,8 @@ using PhoenixGSM.OmniTrace.Models;
 namespace PhoenixGSM.OmniTrace.Apple.Detection;
 
 /// <summary>
-/// Confidence-based detector for all Apple iOS operating modes and servicing protocols.
-/// Evaluates raw stream buffers against usbmuxd, lockdown, iBoot recovery, SecureROM DFU,
+/// Confidence-based detector for all Apple iOS operating modes and servicing protocols:
+/// usbmuxd, lockdown, AFC (Apple File Conduit), iBoot recovery, SecureROM DFU, PongoOS,
 /// SSH ramdisk, and Purple diagnostics.
 /// </summary>
 public static class AppleProtocolDetector
@@ -31,7 +31,17 @@ public static class AppleProtocolDetector
                 $"Apple usbmuxd Protocol (confidence={muxConfidence:P0})"));
         }
 
-        // 2. Check Apple Lockdown protocol
+        // 2. Check Apple File Conduit (AFC "CFA6LPAA")
+        double afcConfidence = AppleAfcAndPongoDecoder.EvaluateAfc(buffer);
+        if (afcConfidence > 0)
+        {
+            candidates.Add(new ProtocolCandidate(
+                KnownProtocol.AppleLockdown,
+                afcConfidence,
+                $"Apple AFC File Conduit Protocol (confidence={afcConfidence:P0})"));
+        }
+
+        // 3. Check Apple Lockdown / MobileGestalt / MobileBackup2 Plist protocol
         double lockConfidence = AppleLockdownDecoder.Evaluate(buffer);
         if (lockConfidence > 0)
         {
@@ -41,7 +51,7 @@ public static class AppleProtocolDetector
                 $"Apple Lockdown Plist Protocol (confidence={lockConfidence:P0})"));
         }
 
-        // 3. Check Apple Recovery Mode (iBoot / irecovery)
+        // 4. Check Apple Recovery Mode (iBoot / irecovery)
         double recConfidence = AppleRecoveryDecoder.Evaluate(buffer);
         if (recConfidence > 0)
         {
@@ -51,17 +61,17 @@ public static class AppleProtocolDetector
                 $"Apple Recovery Mode / iBoot (confidence={recConfidence:P0})"));
         }
 
-        // 4. Check Apple DFU Mode (SecureROM / checkm8)
-        double dfuConfidence = AppleDfuDecoder.Evaluate(buffer);
+        // 5. Check Apple DFU Mode (SecureROM / checkm8) & PongoOS (05AC:4141)
+        double dfuConfidence = Math.Max(AppleDfuDecoder.Evaluate(buffer), AppleAfcAndPongoDecoder.EvaluatePongoOs(buffer));
         if (dfuConfidence > 0)
         {
             candidates.Add(new ProtocolCandidate(
                 KnownProtocol.AppleDfu,
                 dfuConfidence,
-                $"Apple DFU / SecureROM Protocol (confidence={dfuConfidence:P0})"));
+                $"Apple DFU / SecureROM / PongoOS Protocol (confidence={dfuConfidence:P0})"));
         }
 
-        // 5. Check Apple Ramdisk SSH & bypass commands
+        // 6. Check Apple Ramdisk SSH & bypass commands
         double rdConfidence = AppleRamdiskSshDecoder.Evaluate(buffer);
         if (rdConfidence > 0)
         {
@@ -71,7 +81,7 @@ public static class AppleProtocolDetector
                 $"Apple Ramdisk SSH Channel (confidence={rdConfidence:P0})"));
         }
 
-        // 6. Check Apple Purple Mode / SysCfg diagnostics
+        // 7. Check Apple Purple Mode / SysCfg diagnostics
         double purpleConfidence = ApplePurpleDiagDecoder.Evaluate(buffer);
         if (purpleConfidence > 0)
         {

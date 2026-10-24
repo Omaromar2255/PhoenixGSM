@@ -11,14 +11,17 @@ using System.Threading.Tasks;
 using PhoenixGSM.OmniTrace.Apple.Models;
 using PhoenixGSM.OmniTrace.Bus;
 using PhoenixGSM.OmniTrace.Models;
+using PhoenixGSM.OmniTrace.Sensors;
 
 namespace PhoenixGSM.OmniTrace.Apple.Sensors;
 
 /// <summary>
-/// Dedicated real-time sensor that tracks Apple Ramdisk SSH servicing sessions.
-/// When an iproxy process (e.g., iproxy.exe 2222:22) is launched by a GSM servicing tool,
-/// this sensor immediately tracks the parent tool's workspace, staged bash scripts,
-/// live filesystem operations (summary.txt, activation tickets, plists), and SSH socket activity.
+/// Dedicated real-time sensor & automatic file archiver for Apple iOS servicing sessions:
+/// - Tracks Ramdisk SSH (`iproxy`, `plink`, `ssh`, `scp`), DFU/iBoot (`irecovery`, `gaster`), and GUI tools (`UnlockTool`, `3uTools`, `Broque`, `iRemoval`).
+/// - Automatically saves all Apple Activation Tickets (`activation_record.plist`, `IC-Info.sisv`, `commcenter.plist`, `data_ark.plist`),
+///   MDM/Bypass profiles (`CloudConfigurationDetails.plist`), Keychains (`keychain-2.db`), SHSH blobs (`.shsh2`),
+///   and Bootchain/Ramdisk files (`.im4p`, `.img4`, `iBSS`, `iBEC`, `ramdisk.dmg`, `Pongo.bin`) directly into
+///   the shared session directory (`CapturedArtifacts\Session_yyyy-MM-dd_HH-mm-ss`).
 /// </summary>
 public sealed class AppleRamdiskSessionWatcher : IDisposable
 {
@@ -28,13 +31,55 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
     private readonly ConcurrentDictionary<string, byte> _seenSummaryLines = new(StringComparer.OrdinalIgnoreCase);
     private ulong _sequenceCounter = 800000;
 
+    private static readonly HashSet<string> AppleArchivableExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".plist", ".sisv", ".sidb", ".sido", ".tsv", ".shsh", ".shsh2",
+        ".im4p", ".img4", ".dfu", ".dmg", ".sh", ".tar", ".gz", ".deb",
+        ".ipa", ".mobileconfig", ".cert", ".pem", ".der", ".db", ".bin"
+    };
+
+    private static readonly string[] AppleImportantFileKeywords =
+    [
+        "activation", "IC-Info", "commcenter", "data_ark", "purplebuddy", "MobileGestalt",
+        "CloudConfiguration", "disabled", "keychain", "LockoutState", "FairPlay", "wildcard",
+        "iBSS", "iBEC", "DeviceTree", "ramdisk", "kernelcache", "sep-firmware", "trustcache",
+        "bootlogo", "Pongo", "checkra1n", "palera1n", "shsh", "BuildManifest", "Restore"
+    ];
+
     public AppleRamdiskSessionWatcher(OmniTraceEventBus bus)
     {
         _bus = bus;
+        InitializeDefaultAppleWatchDirs();
+    }
+
+    private void InitializeDefaultAppleWatchDirs()
+    {
+        try
+        {
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string[] defaultDirs =
+            [
+                Path.GetTempPath(),
+                @"C:\UnlockTool\Temp",
+                @"C:\UnlockTool\DataFiles\Apple",
+                @"C:\3uTools",
+                Path.Combine(userProfile, ".ssh"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), @"Apple\Lockdown")
+            ];
+
+            foreach (string dir in defaultDirs)
+            {
+                if (Directory.Exists(dir))
+                {
+                    AttachWorkspaceWatcher(dir, "AppleMonitor");
+                }
+            }
+        }
+        catch { }
     }
 
     /// <summary>
-    /// Invoked when iproxy.exe is detected by process monitoring.
+    /// Invoked when iproxy.exe or any Apple CLI/GUI tool is detected by process monitoring.
     /// </summary>
     public void OnIproxyLaunched(int iproxyPid, int callerPid, string cmdLine, string callerPath, string? iproxyPath = null)
     {
@@ -43,7 +88,6 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
             ? (Directory.Exists(callerPath) ? callerPath : Path.GetDirectoryName(callerPath))
             : null;
 
-        // Try getting parent process executable path if callerDir is null
         if (string.IsNullOrWhiteSpace(callerDir) && callerPid > 0)
         {
             try
@@ -60,7 +104,6 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
             catch { }
         }
 
-        // Parse tunnel ports (e.g. 2222:22 or 2222 22)
         int localPort = 2222;
         int remotePort = 22;
         var portMatch = Regex.Match(cmdLine, @"(\d{2,5})[:\s](\d{1,5})");
@@ -70,10 +113,10 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
             int.TryParse(portMatch.Groups[2].Value, out remotePort);
         }
 
-        // 1. Emit SSH Ramdisk Tunnel Initialization
         EmitLogicalCommand(
             operation: "Ramdisk:TunnelStarted",
             summary: $"[iOS RAMDISK SSH] Tunnel Established: 127.0.0.1:{localPort} -> Device:{remotePort} (Caller: {callerName}, PID {callerPid})",
+            direction: PacketDirection.HOST_TO_DEVICE,
             details: new Dictionary<string, string>
             {
                 ["LocalPort"] = localPort.ToString(),
@@ -86,7 +129,6 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
             }
         );
 
-        // 2. Resolve directories to inspect: caller directory + iproxy tool directory hierarchy
         var dirsToScan = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrWhiteSpace(callerDir) && Directory.Exists(callerDir))
         {
@@ -111,16 +153,15 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
 
         foreach (var dir in dirsToScan)
         {
-            InspectStagedScripts(dir, callerName);
-            InspectExistingArtifacts(dir, callerName);
+            InspectStagedScripts(dir, callerName, callerPid);
+            InspectExistingArtifacts(dir, callerName, callerPid);
             AttachWorkspaceWatcher(dir, callerName);
         }
 
-        // 3. Track active TCP socket to localPort in background
         _ = Task.Run(() => TrackSshConnectionAsync(callerPid, localPort, callerName));
     }
 
-    private void InspectStagedScripts(string rootDir, string callerName)
+    private void InspectStagedScripts(string rootDir, string callerName, int callerPid)
     {
         try
         {
@@ -130,6 +171,7 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
                 string fname = Path.GetFileName(shFile);
                 if (_seenArtifacts.TryAdd(shFile, 1))
                 {
+                    ArchiveAppleFileToSharedSession(shFile, callerPid, callerName, "Apple Ramdisk Staged Script");
                     ParseAndEmitScript(shFile, fname, callerName);
                 }
             }
@@ -137,7 +179,7 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
         catch { }
     }
 
-    private void InspectExistingArtifacts(string rootDir, string callerName)
+    private void InspectExistingArtifacts(string rootDir, string callerName, int callerPid)
     {
         try
         {
@@ -148,7 +190,7 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
             }
             foreach (var plFile in Directory.GetFiles(rootDir, "*.plist", SearchOption.AllDirectories))
             {
-                HandleFileChange(plFile, callerName);
+                HandleFileChange(plFile, callerName, callerPid);
             }
         }
         catch { }
@@ -168,7 +210,8 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
 
                 if (tr.Contains("mount_apfs") || tr.Contains("mount_hfs") || tr.Contains("seputil") ||
                     tr.Contains("nvram") || tr.Contains("FairPlay") || tr.Contains("commcenter") ||
-                    tr.Contains("activation_record") || tr.Contains("IC-Info"))
+                    tr.Contains("activation_record") || tr.Contains("IC-Info") || tr.Contains("CloudConfiguration") ||
+                    tr.Contains("keychain") || tr.Contains("purplebuddy") || tr.Contains("chflags"))
                 {
                     mountSteps.Add(tr);
                 }
@@ -180,6 +223,7 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
                 EmitLogicalCommand(
                     operation: $"Ramdisk:ScriptStaged:{fileName}",
                     summary: $"[iOS RAMDISK SSH] Staged Script ({fileName}): {mountSteps.Count} critical device commands identified",
+                    direction: PacketDirection.HOST_TO_DEVICE,
                     details: new Dictionary<string, string>
                     {
                         ["ScriptFile"] = filePath,
@@ -193,8 +237,10 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
         catch { }
     }
 
-    private void AttachWorkspaceWatcher(string callerDir, string callerName)
+    public void AttachWorkspaceWatcher(string callerDir, string callerName)
     {
+        if (string.IsNullOrWhiteSpace(callerDir) || !Directory.Exists(callerDir)) return;
+        if (callerDir.Contains("CapturedArtifacts", StringComparison.OrdinalIgnoreCase)) return;
         if (_activeWatchers.ContainsKey(callerDir)) return;
 
         try
@@ -206,60 +252,90 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
                 EnableRaisingEvents = true
             };
 
-            watcher.Created += (s, e) => HandleFileChange(e.FullPath, callerName);
-            watcher.Changed += (s, e) => HandleFileChange(e.FullPath, callerName);
+            watcher.Created += (s, e) => HandleFileChange(e.FullPath, callerName, 0);
+            watcher.Changed += (s, e) => HandleFileChange(e.FullPath, callerName, 0);
 
             _activeWatchers[callerDir] = watcher;
         }
         catch { }
     }
 
-    private void HandleFileChange(string fullPath, string callerName)
+    private void HandleFileChange(string fullPath, string callerName, int callerPid)
     {
         try
         {
-            string fileName = Path.GetFileName(fullPath);
+            if (string.IsNullOrWhiteSpace(fullPath) || fullPath.Contains("CapturedArtifacts", StringComparison.OrdinalIgnoreCase))
+                return;
 
-            // 1. Live Summary Log parser (summary.txt)
+            string fileName = Path.GetFileName(fullPath);
+            string ext = Path.GetExtension(fullPath);
+
             if (fileName.Equals("summary.txt", StringComparison.OrdinalIgnoreCase))
             {
                 ParseSummaryFile(fullPath, callerName);
                 return;
             }
 
-            // 2. Activation and bypass artifacts
-            if (fileName.EndsWith(".plist", StringComparison.OrdinalIgnoreCase) ||
-                fileName.EndsWith(".sisv", StringComparison.OrdinalIgnoreCase) ||
-                fileName.EndsWith(".tsv", StringComparison.OrdinalIgnoreCase))
+            if (!AppleArchivableExtensions.Contains(ext)) return;
+
+            bool isImportantAppleArtifact = AppleImportantFileKeywords.Any(k =>
+                fileName.Contains(k, StringComparison.OrdinalIgnoreCase) ||
+                fullPath.Contains(k, StringComparison.OrdinalIgnoreCase));
+
+            if (!isImportantAppleArtifact && !ext.Equals(".shsh2", StringComparison.OrdinalIgnoreCase) &&
+                !ext.Equals(".im4p", StringComparison.OrdinalIgnoreCase) &&
+                !ext.Equals(".img4", StringComparison.OrdinalIgnoreCase) &&
+                !ext.Equals(".sisv", StringComparison.OrdinalIgnoreCase))
             {
-                if (fileName.Contains("activation", StringComparison.OrdinalIgnoreCase) ||
-                    fileName.Contains("data_ark", StringComparison.OrdinalIgnoreCase) ||
-                    fileName.Contains("commcenter", StringComparison.OrdinalIgnoreCase) ||
-                    fileName.Contains("IC-Info", StringComparison.OrdinalIgnoreCase) ||
-                    fileName.Contains("purplebuddy", StringComparison.OrdinalIgnoreCase) ||
-                    fileName.Contains("MobileGestalt", StringComparison.OrdinalIgnoreCase) ||
-                    fileName.Contains("disabled", StringComparison.OrdinalIgnoreCase))
-                {
-                    string key = $"{fullPath}:{new FileInfo(fullPath).Length}";
-                    if (_seenArtifacts.TryAdd(key, 1))
+                return;
+            }
+
+            var fi = new FileInfo(fullPath);
+            if (!fi.Exists || fi.Length <= 0) return;
+
+            string key = $"{fullPath}:{fi.Length}";
+            if (_seenArtifacts.TryAdd(key, 1))
+            {
+                string savedBanner = ArchiveAppleFileToSharedSession(fullPath, callerPid, callerName, "Apple Artifact Auto-Archiver");
+
+                EmitLogicalCommand(
+                    operation: $"Apple:ArtifactSaved:{fileName}",
+                    summary: $"[iOS ARTIFACT SAVED] {fileName} ({fi.Length:N0} bytes) {savedBanner}",
+                    direction: PacketDirection.HOST_TO_DEVICE,
+                    details: new Dictionary<string, string>
                     {
-                        long len = new FileInfo(fullPath).Length;
-                        EmitLogicalCommand(
-                            operation: $"Ramdisk:TicketArtifact:{fileName}",
-                            summary: $"[iOS RAMDISK SSH] Activation Artifact: {fileName} ({len} bytes staged/restored)",
-                            details: new Dictionary<string, string>
-                            {
-                                ["File"] = fullPath,
-                                ["Artifact"] = fileName,
-                                ["Size"] = $"{len} bytes",
-                                ["Caller"] = callerName
-                            }
-                        );
+                        ["File"] = fullPath,
+                        ["Artifact"] = fileName,
+                        ["Size"] = $"{fi.Length:N0} bytes",
+                        ["Caller"] = callerName,
+                        ["SharedSessionVault"] = SmartFilePushArchiver.ActiveSessionDirectory
                     }
-                }
+                );
             }
         }
         catch { }
+    }
+
+    /// <summary>
+    /// Saves any Apple servicing file (Activation record, IC-Info.sisv, SHSH2, IM4P/IMG4, Ramdisk, etc.)
+    /// into the unified `CapturedArtifacts\Session_...` directory shared with ADB and Layer 24.
+    /// </summary>
+    public static string ArchiveAppleFileToSharedSession(string filePath, int processId, string callerName, string originLabel)
+    {
+        try
+        {
+            if (SmartFilePushArchiver.ArchiveL24ExtractedOrUsedFile(
+                    filePath,
+                    fallbackBytes: null,
+                    processId: processId,
+                    callerOrigin: $"{callerName} ({originLabel})",
+                    out var saved) && saved != null)
+            {
+                return $"-> [Saved: CapturedArtifacts\\{saved.SessionFolderName}\\{saved.SavedFileName}]";
+            }
+        }
+        catch { }
+        return string.Empty;
     }
 
     private void ParseSummaryFile(string summaryPath, string callerName)
@@ -279,12 +355,14 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
                     {
                         EmitLogicalCommand(
                             operation: "Ramdisk:StepCompleted",
-                            summary: $"[iOS RAMDISK SSH] Operation Complete: {tr.TrimStart('+', ' ')}",
+                            summary: $"[iOS RAMDISK RSP] Phone Operation Result: {tr.TrimStart('+', ' ')}",
+                            direction: PacketDirection.DEVICE_TO_HOST,
                             details: new Dictionary<string, string>
                             {
                                 ["SummaryLine"] = tr,
                                 ["SummaryFile"] = summaryPath,
-                                ["Caller"] = callerName
+                                ["Caller"] = callerName,
+                                ["IsResponse"] = "true"
                             }
                         );
                     }
@@ -310,6 +388,7 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
                 EmitLogicalCommand(
                     operation: "Ramdisk:SSHConnected",
                     summary: $"[iOS RAMDISK SSH] Active SSH Client Connection Established on 127.0.0.1:{port} by {callerName}",
+                    direction: PacketDirection.HOST_TO_DEVICE,
                     details: new Dictionary<string, string>
                     {
                         ["Port"] = port.ToString(),
@@ -324,6 +403,7 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
                 EmitLogicalCommand(
                     operation: "Ramdisk:SSHClosed",
                     summary: $"[iOS RAMDISK SSH] SSH Session Finished on port {port} (Total Duration: {duration.TotalSeconds:F1}s)",
+                    direction: PacketDirection.DEVICE_TO_HOST,
                     details: new Dictionary<string, string>
                     {
                         ["Port"] = port.ToString(),
@@ -350,7 +430,7 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
         }
     }
 
-    private void EmitLogicalCommand(string operation, string summary, Dictionary<string, string> details)
+    private void EmitLogicalCommand(string operation, string summary, PacketDirection direction, Dictionary<string, string> details)
     {
         ulong seq = Interlocked.Increment(ref _sequenceCounter);
         var cmd = _bus.Correlation.Correlate(
@@ -360,7 +440,7 @@ public sealed class AppleRamdiskSessionWatcher : IDisposable
             transport: TransportType.TCP,
             device: "APPLE_RAMDISK_DEVICE",
             session: "RAMDISK_SESS_01",
-            direction: PacketDirection.BIDIRECTIONAL,
+            direction: direction,
             rawEvidenceSequences: [seq],
             evidenceHashes: [Guid.NewGuid().ToString("N")[..8]],
             confidence: 0.99

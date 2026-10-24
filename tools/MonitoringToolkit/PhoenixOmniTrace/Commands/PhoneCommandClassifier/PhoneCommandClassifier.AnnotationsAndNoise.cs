@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using PhoenixGSM.OmniTrace.Decoders;
 
 namespace PhoenixGSM.OmniTrace.Commands;
 
@@ -36,9 +37,11 @@ public static partial class PhoneCommandClassifier
         }
 
         // 3. Any non-whitespace control character (< 0x20 or >= 0x7F) or '?' replacement character
-        //    (except legitimate AT queries ending in '?' or '=?' or URL query strings in shell commands)
-        bool isShellOrAt = trimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
-                           trimmed.StartsWith("AT", StringComparison.OrdinalIgnoreCase);
+        bool isShellOrPtyOrAt = ShellStreamReconstructor.IsShellOrPtyOpenService(trimmed, out _, out _, out _, out _) ||
+                                trimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
+                                trimmed.StartsWith("shell,", StringComparison.OrdinalIgnoreCase) ||
+                                trimmed.StartsWith("pty:", StringComparison.OrdinalIgnoreCase) ||
+                                trimmed.StartsWith("AT", StringComparison.OrdinalIgnoreCase);
 
         int questionCount = 0;
         foreach (char c in trimmed)
@@ -53,18 +56,16 @@ public static partial class PhoneCommandClassifier
 
         if (questionCount > 0)
         {
-            if (!isShellOrAt) return true;
-            if (questionCount > 2) return true;
+            if (!isShellOrPtyOrAt && questionCount > 2) return true;
         }
 
-        if (trimmed.Length < 2) return true;
+        // السماح بإدخالات PTY التفاعلية المكونة من رقم أو حرف واحد (مثل اختيار 1 أو y أو w)
+        if (trimmed.Length == 1 && !char.IsLetterOrDigit(trimmed[0]))
+            return true;
 
         return false;
     }
 
-    /// <summary>
-    /// Returns a clear, standardized Command Type label for organized export (e.g. ADB-SHELL, ADB-AT-RIL, MODEM-AT, MTK-BROM).
-    /// </summary>
     public static string ClassifyCommandTypeTag(
         string command,
         string protocol,
@@ -81,7 +82,8 @@ public static partial class PhoneCommandClassifier
         if (cat.Equals("ArtifactVault", StringComparison.OrdinalIgnoreCase) ||
             proto.Equals("ADB-SYNC", StringComparison.OrdinalIgnoreCase) ||
             cmd.StartsWith("PUSH ", StringComparison.OrdinalIgnoreCase) ||
-            (!cmd.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) &&
+            (!cmd.StartsWith("shell", StringComparison.OrdinalIgnoreCase) &&
+             !cmd.StartsWith("pty:", StringComparison.OrdinalIgnoreCase) &&
              !isAtToolExecution &&
              (cmd.StartsWith("/data/local/tmp/", StringComparison.OrdinalIgnoreCase) ||
               cmd.StartsWith("/sdcard/", StringComparison.OrdinalIgnoreCase))))
@@ -97,6 +99,13 @@ public static partial class PhoneCommandClassifier
             (cmd.Length >= 64 && cmd.All(Uri.IsHexDigit)))
         {
             return "ADB-AT-RIL";
+        }
+
+        if (proto.Equals("ADB-PTY-CMD", StringComparison.OrdinalIgnoreCase) ||
+            cmd.StartsWith("pty:", StringComparison.OrdinalIgnoreCase) ||
+            cmd.Contains(",pty:", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ADB-PTY";
         }
 
         if (cat.Equals("MediaTek", StringComparison.OrdinalIgnoreCase) || proto.Contains("MTK", StringComparison.OrdinalIgnoreCase))
@@ -143,7 +152,7 @@ public static partial class PhoneCommandClassifier
             return "ADB-AT-TOOL";
         }
 
-        if (cmd.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
+        if (cmd.StartsWith("shell", StringComparison.OrdinalIgnoreCase) ||
             proto.Contains("ADB", StringComparison.OrdinalIgnoreCase) ||
             cat.Equals("AdbProxy", StringComparison.OrdinalIgnoreCase))
         {

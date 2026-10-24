@@ -56,19 +56,21 @@
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                     <!-- Tab 1: General Forensic Stream -->
-                    <RadioButton Content="🌐 التدفق الجنائي الشامل (All Forensic Events)" 
+                    <RadioButton Content="🌐 التدفق الجنائي الشامل" 
                                  IsChecked="{Binding IsGeneralForensicViewActive, Mode=OneWay}"
                                  Command="{Binding SwitchToGeneralViewCommand}"
                                  GroupName="ViewTabs"
-                                 Style="{StaticResource TabRadioBtn}" Margin="0,0,6,0" />
+                                 Style="{StaticResource TabRadioBtn}" Margin="0,0,6,0"
+                                 ToolTip="عرض البث الجنائي الكامل لكافة الأجهزة والعمليات (All Forensic Events)" />
 
                     <!-- Tab 2: Dedicated Technician to Phone Audit -->
                     <RadioButton IsChecked="{Binding IsTechnicianAuditViewActive, Mode=OneWay}"
                                  Command="{Binding SwitchToTechnicianAuditViewCommand}"
                                  GroupName="ViewTabs"
-                                 Style="{StaticResource TabRadioBtn}" Margin="0,0,6,0">
+                                 Style="{StaticResource TabRadioBtn}" Margin="0,0,6,0"
+                                 ToolTip="سجل تدقيق الأوامر الحقيقية المنفذة على هاتف العميل فقط (Technician ➔ Phone Audit)">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="🛡️ أوامر الفني لهاتف العميل (Technician ➔ Phone Audit)" FontWeight="Bold" Foreground="#00FFC2" VerticalAlignment="Center" />
+                            <TextBlock Text="🛡️ أوامر الفني لهاتف العميل" FontWeight="Bold" Foreground="#00FFC2" VerticalAlignment="Center" />
                             <Border Background="{Binding TechnicianAuditTabBadgeBg}" BorderBrush="{Binding TechnicianAuditTabBadgeBorder}" BorderThickness="1" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center">
                                 <TextBlock Text="{Binding TechnicianAuditTabBadgeText}" FontWeight="Bold" FontSize="10.5" Foreground="{Binding TechnicianAuditTabBadgeForeground}" />
                             </Border>
@@ -79,9 +81,10 @@
                     <RadioButton IsChecked="{Binding IsToolSourceInterceptionViewActive, Mode=OneWay}"
                                  Command="{Binding SwitchToToolSourceViewCommand}"
                                  GroupName="ViewTabs"
-                                 Style="{StaticResource TabRadioBtn}">
+                                 Style="{StaticResource TabRadioBtn}"
+                                 ToolTip="اعتراض أوامر الأدوات من المصدر (Tool-Source: MTP / MTK / Odin / Port)">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="⚡ أوامر الأدوات من المصدر (Tool-Source: MTP/MTK/Odin/Port)" FontWeight="Bold" Foreground="#00FFE5" VerticalAlignment="Center" />
+                            <TextBlock Text="⚡ أوامر الأدوات من المصدر" FontWeight="Bold" Foreground="#00FFE5" VerticalAlignment="Center" />
                             <Border Background="#002E2E" BorderBrush="#00FFE5" BorderThickness="1" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center">
                                 <TextBlock Text="{Binding ToolSourceTotalCount, StringFormat='{}{0} Cmds'}" FontWeight="Bold" FontSize="10.5" Foreground="#00FFE5" />
                             </Border>
@@ -91,16 +94,69 @@
 
                 <!-- Pop-out Window & Quick Actions -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Content="📁 سجلات المصدر" 
-                            Command="{Binding OpenToolSourceLogFolderCommand}" 
-                            Style="{StaticResource ModernBtn}" Height="25" FontSize="10.5" Padding="8,2" Margin="0,0,6,0" />
-                    <Button Content="🗗 فتح أوامر الفني بنافذة مستقلة" 
+                    <!-- UNIFIED L24 RADAR & POWER HUB (ALWAYS FIRST & PROMINENT) -->
+                    <Border Background="#161B28" BorderBrush="{Binding L24MasterButtonBorder}" 
+                            BorderThickness="1" CornerRadius="5" Height="26" Margin="0,0,6,0">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <!-- 1. Open L24 Radar Window Button -->
+                            <Button Command="{Binding OpenSourceSentinelWindowCommand}"
+                                    Foreground="#00FFE5" FontWeight="Bold" FontSize="11"
+                                    Padding="9,0" Height="24" Cursor="Hand"
+                                    ToolTip="فتح نافذة رادار واعتراض المصدر المستقلة (L24 Source Sentinel)">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="bd" Background="Transparent" CornerRadius="4,0,0,4" Padding="{TemplateBinding Padding}">
+                                            <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="bd" Property="Background" Value="#252F48" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="🛡️ فتح رادار المصدر L24" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+
+                            <!-- Vertical Divider -->
+                            <Rectangle Width="1" Fill="#2F364E" Height="16" VerticalAlignment="Center" />
+
+                            <!-- 2. Power Toggle Button -->
+                            <Button Command="{Binding ToggleL24ActiveCommand}"
+                                    Foreground="{Binding L24MasterStatusColor}"
+                                    FontWeight="Bold" FontSize="10"
+                                    Padding="7,0" Height="24" Cursor="Hand"
+                                    ToolTip="{Binding L24MasterTooltip}">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="bd" Background="{Binding L24MasterButtonBackground}" CornerRadius="0,4,4,0" Padding="{TemplateBinding Padding}">
+                                            <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="bd" Property="Opacity" Value="0.85" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                                <TextBlock Text="{Binding L24MasterStatusText}" VerticalAlignment="Center" />
+                            </Button>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Pop-out Technician Audit Window -->
+                    <Button Content="🗗 نافذة الفني" 
                             Command="{Binding OpenTechnicianAuditWindowCommand}" 
-                            Style="{StaticResource ModernBtn}" Height="25" FontSize="10.5" Padding="8,2" Margin="0,0,6,0" />
-                    <Button Content="🛡️ فتح رادار المصدر L24" 
-                            Command="{Binding OpenSourceSentinelWindowCommand}" 
-                            Style="{StaticResource CyanActionBtn}" Height="25" FontSize="10.5" Padding="8,2"
-                            ToolTip="فتح نافذة طبقة الاعتراض المستقلة من المصدر (L24 Source Sentinel)" />
+                            Style="{StaticResource ModernBtn}" Height="26" FontSize="10.5" Padding="8,2" Margin="0,0,6,0"
+                            ToolTip="فتح أوامر الفني لهاتف العميل بنافذة مستقلة" />
+
+                    <!-- Source Logs Folder -->
+                    <Button Content="📁 السجلات" 
+                            Command="{Binding OpenToolSourceLogFolderCommand}" 
+                            Style="{StaticResource ModernBtn}" Height="26" FontSize="10.5" Padding="8,2"
+                            ToolTip="فتح مجلد سجلات التقاط الأدوات والمصدر" />
                 </StackPanel>
             </Grid>
         </Border>

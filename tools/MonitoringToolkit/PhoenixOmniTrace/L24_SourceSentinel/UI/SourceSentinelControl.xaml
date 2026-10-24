@@ -5,7 +5,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:local="clr-namespace:PhoenixOmniTrace.L24_SourceSentinel.UI"
              mc:Ignorable="d" 
-             d:DesignHeight="750" d:DesignWidth="1280"
+             d:DesignHeight="780" d:DesignWidth="1360"
              Background="#0B0E14" Foreground="#E2E8F0">
 
     <UserControl.Resources>
@@ -16,9 +16,9 @@
             <Setter Property="Foreground" Value="#F8FAFC" />
             <Setter Property="BorderBrush" Value="#2D3748" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="Padding" Value="9,4" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="FontSize" Value="11" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -76,29 +76,21 @@
 
     <Grid Margin="10">
         <Grid.RowDefinitions>
-            <!-- 0: Header & Action Bar -->
             <RowDefinition Height="Auto" />
-            <!-- 1: Live Events DataGrid -->
-            <RowDefinition Height="55*" MinHeight="180" />
-            <!-- 2: Splitter -->
+            <RowDefinition Height="60*" MinHeight="220" />
             <RowDefinition Height="6" />
-            <!-- 3: Bottom Dual Panels (Radar & Hex Inspector) -->
-            <RowDefinition Height="45*" MinHeight="160" />
-            <!-- 4: Status Footer -->
+            <RowDefinition Height="40*" MinHeight="150" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- ══════════════════════════════════════════════════════════════ -->
-        <!-- ROW 0: TOP CONTROL & ACTION TOOLBAR (شريط التحكم العلوي المستقل) -->
-        <!-- ══════════════════════════════════════════════════════════════ -->
-        <Border Grid.Row="0" Background="#111622" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,8">
+        <!-- TOP CONTROL & DISCOVERY MODE TOOLBAR -->
+        <Border Grid.Row="0" Background="#111622" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,0,0,8">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <!-- Row 0: Branding & Execution Triggers -->
                 <Grid Grid.Row="0" Margin="0,0,0,8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -106,175 +98,421 @@
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="🛡️" FontSize="22" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <TextBlock Text="🛡️" FontSize="20" VerticalAlignment="Center" Margin="0,0,8,0" />
                         <StackPanel VerticalAlignment="Center">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="L24 Source Sentinel" FontSize="16" FontWeight="Bold" Foreground="#38BDF8" VerticalAlignment="Center" />
+                                <TextBlock Text="L24 Source Sentinel" FontSize="15" FontWeight="Bold" Foreground="#38BDF8" VerticalAlignment="Center" />
                                 <Border Background="#1C382F" BorderBrush="#00FF9D" BorderThickness="1" CornerRadius="4" Margin="10,0,0,0" Padding="6,1" VerticalAlignment="Center">
-                                    <TextBlock Text="DIRECT SOURCE INTERCEPTION" FontSize="9" FontWeight="Bold" Foreground="#00FF9D" />
+                                    <TextBlock Text="ORGANIZED TABS + UNFILTERED RAW STREAM + AUTO FILE ARCHIVER" FontSize="9" FontWeight="Bold" Foreground="#00FF9D" />
                                 </Border>
                             </StackPanel>
-                            <TextBlock Text="التقاط أوامر الأداة من المصدر بالرام قبل نزولها للكيرنل (AT, MTK BROM, WinUSB, SetupAPI, Pipes)" 
+                            <TextBlock Text="عزل الأوامر المنفذة والمكتشفة + حفظ تلقائي لكافة الملفات + تبويب وملف مستقل للسجل الشامل الخام بدون فلترة" 
                                        FontSize="10.5" Foreground="#64748B" Margin="0,2,0,0" />
                         </StackPanel>
                     </StackPanel>
 
-                    <!-- Main Action Buttons -->
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Button Content="🚀 تشغيل واعتراض الأداة (Launch &amp; Intercept)" 
+                        <!-- زر التحكم الرئيسي لتشغيل أو إيقاف الطبقة L24 بالكامل وتوفير موارد الجهاز -->
+                        <Button Command="{Binding ToggleL24MasterCommand}"
+                                Background="{Binding L24MasterButtonBackground}"
+                                BorderBrush="{Binding L24MasterButtonBorder}"
+                                Foreground="{Binding L24MasterStatusColor}"
+                                Style="{StaticResource SentinelBtn}" 
+                                Height="28" Padding="10,2" Margin="0,0,8,0"
+                                ToolTip="{Binding L24MasterTooltip}">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding L24MasterButtonText}" FontWeight="Bold" FontSize="11" VerticalAlignment="Center" />
+                                <Border Background="{Binding L24MasterBackground}" BorderBrush="{Binding L24MasterBorder}"
+                                        BorderThickness="1" CornerRadius="3" Padding="5,1" Margin="6,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding L24MasterBadgeText}" FontSize="9" FontWeight="Bold" Foreground="{Binding L24MasterStatusColor}" />
+                                </Border>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Content="🚀 تشغيل واعتراض أداة" 
                                 Command="{Binding LaunchToolCommand}"
                                 Style="{StaticResource SentinelBtn}" 
-                                Background="#0284C7" BorderBrush="#38BDF8" Margin="0,0,6,0" />
+                                Background="#0284C7" BorderBrush="#38BDF8" Margin="0,0,5,0" />
 
-                        <Button Content="🔗 ربط بعملية بالرام (Attach PID)" 
+                        <Button Content="🔗 ربط بعملية (PID)" 
                                 Command="{Binding AttachProcessCommand}"
                                 Style="{StaticResource SentinelBtn}" 
-                                Background="#1E293B" BorderBrush="#475569" Margin="0,0,6,0" />
+                                Background="#1E293B" BorderBrush="#475569" Margin="0,0,5,0" />
 
-                        <Button Content="🗑️ مسح (Clear)" 
-                                Command="{Binding ClearEventsCommand}"
+                        <Button Content="📜 تصدير السجل الخام الشامل" 
+                                Command="{Binding ExportUnfilteredRawLogsCommand}"
                                 Style="{StaticResource SentinelBtn}" 
-                                Background="#881337" BorderBrush="#F43F5E" Margin="0,0,6,0" />
+                                Background="#7C2D12" BorderBrush="#F97316" Margin="0,0,5,0" />
 
-                        <Button Content="💾 حفظ الجلسة (Export)" 
-                                Command="{Binding ExportLogsCommand}"
+                        <Button Content="🗂️ تصدير كل فئة بملف مستقل" 
+                                Command="{Binding ExportAllDiscoveredCategoriesSeparatelyCommand}"
                                 Style="{StaticResource SentinelBtn}" 
-                                Background="#164E63" BorderBrush="#06B6D4" Margin="0,0,6,0" />
+                                Background="#3B0764" BorderBrush="#A855F7" Margin="0,0,5,0" />
 
-                        <Button Content="📁 فتح مجلد السجلات" 
+                        <Button Content="📂 الملفات المحفوظة" 
+                                Command="{Binding OpenCapturedFilesFolderCommand}"
+                                Style="{StaticResource SentinelBtn}" 
+                                Background="#065F46" BorderBrush="#10B981" Margin="0,0,5,0" />
+
+                        <Button Content="📁 مجلد السجلات" 
                                 Command="{Binding OpenLogsFolderCommand}"
                                 Style="{StaticResource SentinelBtn}" 
-                                Background="#1E293B" BorderBrush="#334155" />
+                                Background="#1E293B" BorderBrush="#334155" Margin="0,0,5,0" />
+
+                        <Button Content="🗑️ مسح" 
+                                Command="{Binding ClearEventsCommand}"
+                                Style="{StaticResource SentinelBtn}" 
+                                Background="#881337" BorderBrush="#F43F5E" />
                     </StackPanel>
                 </Grid>
 
-                <!-- Row 1: Fast Filter Switches & Metric Badges -->
                 <Grid Grid.Row="1">
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <!-- Filter Radio Buttons -->
                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                        <RadioButton Content="🌐 [الكل]" 
-                                     IsChecked="{Binding IsAllFilterSelected, Mode=OneWay}"
-                                     Command="{Binding SetFilterModeCommand}" CommandParameter="All"
-                                     Style="{StaticResource FilterPillBtn}" />
+                        <TextBlock Text="🎯 نمط اكتشاف الرام:" Foreground="#38BDF8" FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0" />
+                        <ComboBox SelectedIndex="{Binding SelectedDiscoveryModeIndex, Mode=TwoWay}"
+                                  Width="295" Height="26" FontSize="11"
+                                  Background="#0F172A" Foreground="#0F172A" BorderBrush="#38BDF8" Margin="0,0,12,0">
+                            <ComboBoxItem Content="⚡ المنفذة للهاتف فقط (إيقاف فحص الرام العام)" />
+                            <ComboBoxItem Content="📱 المنفذة + أوامر الهاتف فقط بالرام (AT/MTK/QC/Apple/ADB)" />
+                            <ComboBoxItem Content="🧠 اكتشاف شامل للرام (يشمل الروابط وتسجيل الدخول والملفات والكل)" />
+                        </ComboBox>
 
-                        <RadioButton Content="⚡ [أوامر المودم و MTK و USB]" 
-                                     IsChecked="{Binding IsModemUsbFilterSelected, Mode=OneWay}"
-                                     Command="{Binding SetFilterModeCommand}" CommandParameter="ModemUsb"
-                                     Style="{StaticResource FilterPillBtn}" />
+                        <CheckBox Content="📥 إظهار رد الهاتف (بدون تكرار)"
+                                  IsChecked="{Binding ShowPhoneResponses, Mode=TwoWay}"
+                                  Foreground="#00FFC2" FontWeight="SemiBold" FontSize="11"
+                                  VerticalAlignment="Center" Margin="0,0,12,0" />
 
-                        <RadioButton Content="📡 [رادار البحث عن المنافذ]" 
-                                     IsChecked="{Binding IsRadarFilterSelected, Mode=OneWay}"
-                                     Command="{Binding SetFilterModeCommand}" CommandParameter="Radar"
-                                     Style="{StaticResource FilterPillBtn}" />
+                        <CheckBox Content="📜 تسجيل السجل الخام آنياً"
+                                  IsChecked="{Binding IsUnfilteredRawLoggingEnabled, Mode=TwoWay}"
+                                  Foreground="#F97316" FontWeight="SemiBold" FontSize="11"
+                                  VerticalAlignment="Center" Margin="0,0,12,0"
+                                  ToolTip="تشغيل أو إيقاف تسجيل السجل الخام الشامل (Unfiltered Raw Stream) على القرص والواجهة آنياً" />
+                    </StackPanel>
 
-                        <RadioButton Content="🧠 [الملفات المستدعاة والرام]" 
-                                     IsChecked="{Binding IsRamFilterSelected, Mode=OneWay}"
-                                     Command="{Binding SetFilterModeCommand}" CommandParameter="RamModules"
-                                     Style="{StaticResource FilterPillBtn}" />
-
-                        <RadioButton Content="💻 [أوامر الكمبيوتر والأنابيب]" 
-                                     IsChecked="{Binding IsPipesFilterSelected, Mode=OneWay}"
-                                     Command="{Binding SetFilterModeCommand}" CommandParameter="PipesShell"
-                                     Style="{StaticResource FilterPillBtn}" />
-
-                        <!-- Active Origin Filter Pill -->
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                         <Border Background="#3B0764" BorderBrush="#A855F7" BorderThickness="1" CornerRadius="5" 
-                                Padding="6,2" Margin="10,0,0,0" VerticalAlignment="Center"
+                                Padding="6,2" VerticalAlignment="Center"
                                 Visibility="{Binding IsOriginFilterActive, Converter={StaticResource BoolToVis}}">
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="{Binding ActiveOriginFilter, StringFormat='🎯 مصدر محدد: {0}'}" FontSize="10.5" Foreground="#E9D5FF" VerticalAlignment="Center" />
-                                <Button Content="✕" Command="{Binding ClearOriginFilterCommand}" Background="Transparent" BorderThickness="0" Foreground="#F43F5E" FontWeight="Bold" Margin="6,0,0,0" Cursor="Hand" ToolTip="إلغاء فلترة المصدر" />
+                                <Button Content="✕" Command="{Binding ClearOriginFilterCommand}" Background="Transparent" BorderThickness="0" Foreground="#F43F5E" FontWeight="Bold" Margin="6,0,0,0" Cursor="Hand" />
                             </StackPanel>
                         </Border>
                     </StackPanel>
 
-                    <!-- Search Box -->
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="🔍 بحث:" VerticalAlignment="Center" Foreground="#94A3B8" Margin="0,0,6,0" FontSize="11" />
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="🔍 بحث شامل:" VerticalAlignment="Center" Foreground="#94A3B8" Margin="0,0,6,0" FontSize="11" />
                         <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" 
-                                 Width="180" Height="26" VerticalContentAlignment="Center"
+                                 Width="210" Height="26" VerticalContentAlignment="Center"
                                  Background="#0F172A" Foreground="#F8FAFC" BorderBrush="#334155" Padding="6,2" />
                     </StackPanel>
                 </Grid>
             </Grid>
         </Border>
 
-        <!-- ══════════════════════════════════════════════════════════════ -->
-        <!-- ROW 1: LIVE EVENTS DATA GRID (الجدول الحي للأوامر والحركات)      -->
-        <!-- ══════════════════════════════════════════════════════════════ -->
-        <Border Grid.Row="1" Background="#111622" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="8" Padding="2">
-            <DataGrid ItemsSource="{Binding FilteredEvents}"
-                      SelectedItem="{Binding SelectedEvent}"
-                      AutoGenerateColumns="False"
-                      IsReadOnly="True"
-                      SelectionMode="Single"
-                      HeadersVisibility="Column"
-                      GridLinesVisibility="Horizontal"
-                      HorizontalGridLinesBrush="#1E293B"
-                      Background="Transparent"
-                      RowBackground="#111622"
-                      AlternatingRowBackground="#0D111A"
-                      BorderThickness="0"
-                      Foreground="#E2E8F0"
-                      FontSize="11.5"
-                      RowHeight="26">
-                <DataGrid.ColumnHeaderStyle>
-                    <Style TargetType="DataGridColumnHeader">
-                        <Setter Property="Background" Value="#171F30" />
-                        <Setter Property="Foreground" Value="#94A3B8" />
-                        <Setter Property="FontWeight" Value="SemiBold" />
-                        <Setter Property="Padding" Value="8,4" />
-                        <Setter Property="BorderBrush" Value="#1E293B" />
-                        <Setter Property="BorderThickness" Value="0,0,1,1" />
-                    </Style>
-                </DataGrid.ColumnHeaderStyle>
-                <DataGrid.RowStyle>
-                    <Style TargetType="DataGridRow">
-                        <Style.Triggers>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter Property="Background" Value="#1E3A5F" />
-                                <Setter Property="Foreground" Value="#38BDF8" />
-                                <Setter Property="FontWeight" Value="SemiBold" />
-                            </Trigger>
-                        </Style.Triggers>
-                    </Style>
-                </DataGrid.RowStyle>
+        <!-- 5-TAB WORKSPACE (4 ISOLATED TABS + 1 UNFILTERED RAW EVERYTHING TAB) -->
+        <TabControl Grid.Row="1" Background="#111622" BorderBrush="#1E293B" BorderThickness="1" Padding="4">
+            <TabControl.Resources>
+                <Style TargetType="TabItem">
+                    <Setter Property="Background" Value="#0F172A" />
+                    <Setter Property="Foreground" Value="#94A3B8" />
+                    <Setter Property="FontWeight" Value="Bold" />
+                    <Setter Property="FontSize" Value="11.5" />
+                    <Setter Property="Padding" Value="12,6" />
+                    <Setter Property="Margin" Value="0,0,4,0" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="TabItem">
+                                <Border x:Name="Border" Background="{TemplateBinding Background}" BorderBrush="#1E293B" BorderThickness="1,1,1,0" CornerRadius="6,6,0,0" Padding="{TemplateBinding Padding}" Margin="{TemplateBinding Margin}">
+                                    <ContentPresenter x:Name="ContentSite" ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter TargetName="Border" Property="Background" Value="#1E3A5F" />
+                                        <Setter TargetName="Border" Property="BorderBrush" Value="#38BDF8" />
+                                        <Setter Property="Foreground" Value="#38BDF8" />
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </TabControl.Resources>
 
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="الوقت" Binding="{Binding FormattedTimestamp}" Width="95" />
-                    <DataGridTextColumn Header="PID:TID" Binding="{Binding ProcessThreadInfo}" Width="85" />
-                    <DataGridTextColumn Header="المرحلة (Stage)" Binding="{Binding StageBadge}" Width="135" />
-                    <DataGridTextColumn Header="المصدر (Caller Origin)" Binding="{Binding CallerModuleOrigin}" Width="180" />
-                    <DataGridTextColumn Header="الدالة (Hooked API)" Binding="{Binding HookedApiName}" Width="150" />
-                    <DataGridTextColumn Header="الهدف (Target)" Binding="{Binding TargetResource}" Width="180" />
-                    <DataGridTextColumn Header="التصنيف (Category)" Binding="{Binding CommandCategory}" Width="170" />
-                    <DataGridTextColumn Header="الأمر الصريح المكتشف (Decoded Command)" Binding="{Binding DecodedCommandText}" Width="*" />
-                </DataGrid.Columns>
-            </DataGrid>
-        </Border>
+            <!-- التبويب 1: الأوامر الفعلية المنفذة للجهاز -->
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="⚡ الأوامر الفعلية المنفذة للجهاز (" />
+                        <TextBlock Text="{Binding ExecutedCommandsCount}" Foreground="#00FFC2" />
+                        <TextBlock Text=")" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid>
+                    <DataGrid ItemsSource="{Binding FilteredExecutedEvents}"
+                              SelectedItem="{Binding SelectedEvent}"
+                              AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+                              HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                              HorizontalGridLinesBrush="#1E293B" Background="#0D111A"
+                              RowBackground="#111622" AlternatingRowBackground="#0D111A"
+                              BorderThickness="0" Foreground="#E2E8F0" FontSize="11.5" RowHeight="26">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="الوقت" Binding="{Binding FormattedTimestamp}" Width="90" />
+                            <DataGridTextColumn Header="PID" Binding="{Binding ProcessId}" Width="65" />
+                            <DataGridTextColumn Header="النوع" Binding="{Binding CommandGroupBadge}" Width="175" />
+                            <DataGridTextColumn Header="المصدر الفعلي" Binding="{Binding CallerModuleOrigin}" Width="170" />
+                            <DataGridTextColumn Header="المنفذ / الهدف" Binding="{Binding TargetResource}" Width="170" />
+                            <DataGridTextColumn Header="الأمر الصافي المنفذ" Binding="{Binding PureCommandText}" Width="240" />
+                            <DataGridTextColumn Header="التفاصيل" Binding="{Binding DecodedCommandText}" Width="*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
 
-        <!-- SPLITTER -->
+            <!-- التبويب 2: أوامر الهاتف الصافية للتجربة المباشرة -->
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="📱 أوامر الهاتف للتجربة (" />
+                        <TextBlock Text="{Binding PurePhoneCommandsCount}" Foreground="#38BDF8" />
+                        <TextBlock Text=")" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid>
+                    <DataGrid ItemsSource="{Binding FilteredPurePhoneEvents}"
+                              SelectedItem="{Binding SelectedEvent}"
+                              AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+                              HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                              HorizontalGridLinesBrush="#1E293B" Background="#0D111A"
+                              RowBackground="#111622" AlternatingRowBackground="#0D111A"
+                              BorderThickness="0" Foreground="#E2E8F0" FontSize="11.5" RowHeight="26">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="الوقت" Binding="{Binding FormattedTimestamp}" Width="90" />
+                            <DataGridTextColumn Header="النطاق" Binding="{Binding ScopeBadge}" Width="135" />
+                            <DataGridTextColumn Header="الفئة" Binding="{Binding CommandGroupBadge}" Width="185" />
+                            <DataGridTextColumn Header="المنفذ / الهدف" Binding="{Binding TargetResource}" Width="165" />
+                            <DataGridTextColumn Header="الأمر الجاهز للتجربة (انسخ وجرب)" Binding="{Binding PureCommandText}" Width="*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <!-- التبويب 3: الأوامر المكتشفة في الذاكرة (مع فلترة الـ 10 أنواع) -->
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="🧠 الأوامر المكتشفة في الذاكرة (" />
+                        <TextBlock Text="{Binding DiscoveredRamCommandsCount}" Foreground="#FBBF24" />
+                        <TextBlock Text=")" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Background="#0F172A" BorderBrush="#1E293B" BorderThickness="0,0,0,1" Padding="8,6">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <WrapPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                <RadioButton Content="🌐 الكل" IsChecked="{Binding IsDiscAllSelected, Mode=OneWay}"
+                                             Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="All"
+                                             Style="{StaticResource FilterPillBtn}" />
+
+                                <RadioButton Content="{Binding DiscModemCount, StringFormat='📻 المودم ({0})'}" IsChecked="{Binding IsDiscModemSelected, Mode=OneWay}"
+                                             Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="ModemAt"
+                                             Style="{StaticResource FilterPillBtn}" />
+
+                                <RadioButton Content="{Binding DiscMtkCount, StringFormat='🔶 ميدياتك ({0})'}" IsChecked="{Binding IsDiscMtkSelected, Mode=OneWay}"
+                                             Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="MediaTek"
+                                             Style="{StaticResource FilterPillBtn}" />
+
+                                <RadioButton Content="{Binding DiscQualcommCount, StringFormat='🔷 كوالكوم و EDL ({0})'}" IsChecked="{Binding IsDiscQualcommSelected, Mode=OneWay}"
+                                             Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="Qualcomm"
+                                             Style="{StaticResource FilterPillBtn}" />
+
+                                <RadioButton Content="{Binding DiscAppleCount, StringFormat='🍎 أبل Apple ({0})'}" IsChecked="{Binding IsDiscAppleSelected, Mode=OneWay}"
+                                             Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="AppleIos"
+                                             Style="{StaticResource FilterPillBtn}" />
+
+                                <RadioButton Content="{Binding DiscAdbCount, StringFormat='🤖 ADB/Fastboot ({0})'}" IsChecked="{Binding IsDiscAdbSelected, Mode=OneWay}"
+                                             Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="AdbFastboot"
+                                             Style="{StaticResource FilterPillBtn}" />
+
+                                <RadioButton Content="{Binding DiscServerCloudCount, StringFormat='🌐 الروابط وتسجيل الدخول ({0})'}" IsChecked="{Binding IsDiscServerCloudSelected, Mode=OneWay}"
+                                             Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="ServerCloudLogin"
+                                             Style="{StaticResource FilterPillBtn}" />
+
+                                <RadioButton Content="{Binding DiscTransferCount, StringFormat='📤 نقل وملفات بوت ({0})'}" IsChecked="{Binding IsDiscTransferSelected, Mode=OneWay}"
+                                             Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="FileTransfer"
+                                             Style="{StaticResource FilterPillBtn}" />
+
+                                <RadioButton Content="{Binding DiscArchiveCount, StringFormat='📦 فك ضغط ({0})'}" IsChecked="{Binding IsDiscArchiveSelected, Mode=OneWay}"
+                                             Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="ArchiveUnpack"
+                                             Style="{StaticResource FilterPillBtn}" />
+
+                                <RadioButton Content="{Binding DiscCryptoCount, StringFormat='🔐 تشفير ومفاتيح ({0})'}" IsChecked="{Binding IsDiscCryptoSelected, Mode=OneWay}"
+                                             Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="CryptoAuth"
+                                             Style="{StaticResource FilterPillBtn}" />
+
+                                <RadioButton Content="{Binding DiscOtherCount, StringFormat='🧩 أوامر أخرى ({0})'}" IsChecked="{Binding IsDiscOtherSelected, Mode=OneWay}"
+                                             Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="OtherCommands"
+                                             Style="{StaticResource FilterPillBtn}" />
+                            </WrapPanel>
+
+                            <Button Grid.Column="1" Content="📤 تصدير الفئة المحددة فقط"
+                                    Command="{Binding ExportSelectedDiscoveredCategoryCommand}"
+                                    Style="{StaticResource SentinelBtn}"
+                                    Background="#0E7490" BorderBrush="#22D3EE" Margin="8,0,0,0" />
+                        </Grid>
+                    </Border>
+
+                    <DataGrid Grid.Row="1" ItemsSource="{Binding FilteredDiscoveredRamEvents}"
+                              SelectedItem="{Binding SelectedEvent}"
+                              AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+                              HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                              HorizontalGridLinesBrush="#1E293B" Background="#0D111A"
+                              RowBackground="#111622" AlternatingRowBackground="#0D111A"
+                              BorderThickness="0" Foreground="#E2E8F0" FontSize="11.5" RowHeight="26">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="الوقت" Binding="{Binding FormattedTimestamp}" Width="88" />
+                            <DataGridTextColumn Header="تصنيف الفلتر" Binding="{Binding CommandGroupBadge}" Width="195" />
+                            <DataGridTextColumn Header="المصدر بالرام" Binding="{Binding CallerModuleOrigin}" Width="180" />
+                            <DataGridTextColumn Header="الهدف / الملف المحفوظ" Binding="{Binding TargetResource}" Width="170" />
+                            <DataGridTextColumn Header="الأمر / الرابط المكتشف الصافي" Binding="{Binding PureCommandText}" Width="260" />
+                            <DataGridTextColumn Header="الوصف" Binding="{Binding DecodedCommandText}" Width="*" />
+                            <DataGridTextColumn Header="الحجم" Binding="{Binding PayloadSize}" Width="60" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <!-- التبويب 4: رادار المنافذ والملفات المحفوظة -->
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="📡 رادار المنافذ والملفات المحفوظة (" />
+                        <TextBlock Text="{Binding RadarEventsCount}" Foreground="#A855F7" />
+                        <TextBlock Text=")" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid>
+                    <DataGrid ItemsSource="{Binding FilteredRadarEvents}"
+                              SelectedItem="{Binding SelectedEvent}"
+                              AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+                              HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                              HorizontalGridLinesBrush="#1E293B" Background="#0D111A"
+                              RowBackground="#111622" AlternatingRowBackground="#0D111A"
+                              BorderThickness="0" Foreground="#E2E8F0" FontSize="11.5" RowHeight="26">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="الوقت" Binding="{Binding FormattedTimestamp}" Width="90" />
+                            <DataGridTextColumn Header="المرحلة" Binding="{Binding StageBadge}" Width="135" />
+                            <DataGridTextColumn Header="التصنيف" Binding="{Binding CommandCategory}" Width="180" />
+                            <DataGridTextColumn Header="مسار الحفظ / المنفذ" Binding="{Binding TargetResource}" Width="240" />
+                            <DataGridTextColumn Header="التفاصيل" Binding="{Binding DecodedCommandText}" Width="*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <!-- التبويب 5: السجل الشامل الخام بدون فلترة (Unfiltered Raw Everything Stream) -->
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="📜 السجل الشامل الخام (" />
+                        <TextBlock Text="{Binding UnfilteredRawEventsCount}" Foreground="#F97316" />
+                        <TextBlock Text=")" Margin="0,0,6,0" />
+                        <Border Background="{Binding UnfilteredRawStatusBackground}" BorderBrush="{Binding UnfilteredRawStatusBorder}" BorderThickness="1" CornerRadius="3" Padding="5,1" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding UnfilteredRawStatusText}" Foreground="{Binding UnfilteredRawStatusColor}" FontSize="9.5" FontWeight="Bold" />
+                        </Border>
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Real-Time Control Bar for Raw Stream -->
+                    <Border Grid.Row="0" Background="#0C121E" BorderBrush="#1E293B" BorderThickness="0,0,0,1" Padding="10,5" Margin="0,0,0,4">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="⚡ التحكم الآني بالسجل الخام:" Foreground="#94A3B8" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0" />
+
+                                <Border Background="{Binding UnfilteredRawStatusBackground}" BorderBrush="{Binding UnfilteredRawStatusBorder}" BorderThickness="1" CornerRadius="4" Padding="8,2" Margin="0,0,8,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding UnfilteredRawStatusText}" Foreground="{Binding UnfilteredRawStatusColor}" FontWeight="Bold" FontSize="11" />
+                                </Border>
+
+                                <Button Content="{Binding UnfilteredRawToggleActionText}"
+                                        Command="{Binding ToggleUnfilteredRawLoggingCommand}"
+                                        Style="{StaticResource SentinelBtn}"
+                                        Background="{Binding UnfilteredRawToggleBtnBackground}"
+                                        BorderBrush="{Binding UnfilteredRawToggleBtnBorder}"
+                                        Margin="0,0,8,0" Padding="10,3" FontSize="11" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Content="📜 تصدير السجل الخام" 
+                                        Command="{Binding ExportUnfilteredRawLogsCommand}"
+                                        Style="{StaticResource SentinelBtn}" 
+                                        Background="#7C2D12" BorderBrush="#F97316" Margin="0,0,6,0" Padding="8,3" FontSize="10.5" />
+
+                                <Button Content="🗑️ مسح المعروض بالسجل الخام" 
+                                        Command="{Binding ClearUnfilteredRawCommand}"
+                                        Style="{StaticResource SentinelBtn}" 
+                                        Background="#1E293B" BorderBrush="#475569" Padding="8,3" FontSize="10.5" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <DataGrid Grid.Row="1" ItemsSource="{Binding FilteredUnfilteredRawEvents}"
+                              SelectedItem="{Binding SelectedEvent}"
+                              AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+                              HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                              HorizontalGridLinesBrush="#1E293B" Background="#0D111A"
+                              RowBackground="#111622" AlternatingRowBackground="#0D111A"
+                              BorderThickness="0" Foreground="#E2E8F0" FontSize="11.5" RowHeight="26">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="الوقت" Binding="{Binding FormattedTimestamp}" Width="90" />
+                            <DataGridTextColumn Header="PID" Binding="{Binding ProcessId}" Width="60" />
+                            <DataGridTextColumn Header="المرحلة" Binding="{Binding StageBadge}" Width="135" />
+                            <DataGridTextColumn Header="الدالة / الحساس" Binding="{Binding HookedApiName}" Width="165" />
+                            <DataGridTextColumn Header="المصدر" Binding="{Binding CallerModuleOrigin}" Width="175" />
+                            <DataGridTextColumn Header="التصنيف" Binding="{Binding CommandCategory}" Width="175" />
+                            <DataGridTextColumn Header="النص الخام الصافي" Binding="{Binding PureCommandText}" Width="250" />
+                            <DataGridTextColumn Header="التفاصيل الكاملة (بدون فلترة)" Binding="{Binding DecodedCommandText}" Width="*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+        </TabControl>
+
         <GridSplitter Grid.Row="2" Height="6" HorizontalAlignment="Stretch" Background="#0B0E14" Cursor="SizeNS" ShowsPreview="True" />
 
-        <!-- ══════════════════════════════════════════════════════════════ -->
-        <!-- ROW 3: BOTTOM DUAL PANELS (RADAR & HEX INSPECTOR)              -->
-        <!-- ══════════════════════════════════════════════════════════════ -->
+        <!-- BOTTOM DUAL PANELS (RADAR & HEX INSPECTOR) -->
         <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
-                <!-- Left Panel: External Files & RAM Radar (40%) -->
-                <ColumnDefinition Width="40*" MinWidth="250" />
-                <!-- Splitter -->
+                <ColumnDefinition Width="38*" MinWidth="240" />
                 <ColumnDefinition Width="6" />
-                <!-- Right Panel: Hex / ASCII Inspector (60%) -->
-                <ColumnDefinition Width="60*" MinWidth="350" />
+                <ColumnDefinition Width="62*" MinWidth="350" />
             </Grid.ColumnDefinitions>
 
-            <!-- 3A: EXTERNAL FILES & RAM RADAR PANEL (لوحة رادار الملفات الخارجية والرام) -->
             <Border Grid.Column="0" Background="#111622" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="8" Padding="10">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -283,7 +521,7 @@
                     </Grid.RowDefinitions>
 
                     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-                        <TextBlock Text="🧠 رادار الملفات المستدعاة وفك الرام" FontWeight="Bold" FontSize="12.5" Foreground="#A855F7" VerticalAlignment="Center" />
+                        <TextBlock Text="💾 الملفات المحفوظة والمكتبات المرصودة" FontWeight="Bold" FontSize="12" Foreground="#A855F7" VerticalAlignment="Center" />
                         <Border Background="#2E1065" BorderBrush="#9333EA" BorderThickness="1" CornerRadius="4" Padding="6,1" Margin="8,0,0,0">
                             <TextBlock Text="{Binding LoadedArtifacts.Count, StringFormat='{}{0} عناصر'}" FontSize="10" Foreground="#D8B4FE" />
                         </Border>
@@ -292,26 +530,14 @@
                     <ListBox Grid.Row="1" 
                              ItemsSource="{Binding FilteredArtifacts}"
                              SelectedItem="{Binding SelectedArtifact}"
-                             Background="#0B0E14" 
-                             BorderBrush="#1E293B" 
-                             BorderThickness="1"
-                             ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                             Background="#0B0E14" BorderBrush="#1E293B" BorderThickness="1">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Border Background="#131926" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="4" Padding="6,4" Margin="0,2">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0">
-                                            <TextBlock Text="{Binding ModuleName}" FontWeight="Bold" Foreground="#38BDF8" FontSize="11" />
-                                            <TextBlock Text="{Binding FilePath}" Foreground="#64748B" FontSize="9.5" TextTrimming="CharacterEllipsis" />
-                                        </StackPanel>
-                                        <Border Grid.Column="1" Background="#1E293B" CornerRadius="3" Padding="4,2" VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding FormattedSize}" Foreground="#94A3B8" FontSize="9.5" />
-                                        </Border>
-                                    </Grid>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding ModuleName}" FontWeight="Bold" Foreground="#38BDF8" FontSize="11" />
+                                        <TextBlock Text="{Binding FilePath}" Foreground="#64748B" FontSize="9.5" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
                                 </Border>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
@@ -319,10 +545,8 @@
                 </Grid>
             </Border>
 
-            <!-- SPLITTER -->
             <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="#0B0E14" Cursor="SizeWE" ShowsPreview="True" />
 
-            <!-- 3B: HEX / ASCII INSPECTOR PANEL (فاحص الحمولات الخام) -->
             <Border Grid.Column="2" Background="#111622" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="8" Padding="10">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -331,40 +555,24 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
-                    <!-- Header -->
-                    <Grid Grid.Row="0" Margin="0,0,0,6">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="🔬 فاحص الحمولات الخام (Hex / ASCII Inspector)" FontWeight="Bold" FontSize="12.5" Foreground="#00FFC2" VerticalAlignment="Center" />
-                            <Border Background="#064E3B" BorderBrush="#059669" BorderThickness="1" CornerRadius="4" Padding="6,1" Margin="8,0,0,0">
-                                <TextBlock Text="{Binding SelectedEvent.PayloadSize, StringFormat='{}{0} بايت'}" FontSize="10" Foreground="#6EE7B7" />
-                            </Border>
-                        </StackPanel>
-                    </Grid>
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="🔬 فاحص الحمولات الخام والأمر الصافي (Hex &amp; Pure Command Inspector)" FontWeight="Bold" FontSize="12" Foreground="#00FFC2" VerticalAlignment="Center" />
+                    </StackPanel>
 
-                    <!-- Details Banner -->
                     <Border Grid.Row="1" Background="#09101D" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="4" Padding="8,4" Margin="0,0,0,6">
                         <TextBlock Text="{Binding SelectedEventDetails}" FontSize="10.5" Foreground="#94A3B8" FontFamily="Consolas" TextWrapping="Wrap" />
                     </Border>
 
-                    <!-- Hex Dump Viewer -->
                     <TextBox Grid.Row="2" 
                              Text="{Binding SelectedEventHexDump, Mode=OneWay}" 
-                             IsReadOnly="True" 
-                             FontFamily="Consolas" 
-                             FontSize="11" 
-                             Background="#080C14" 
-                             Foreground="#38BDF8" 
-                             BorderBrush="#1E293B" 
-                             VerticalScrollBarVisibility="Auto" 
-                             HorizontalScrollBarVisibility="Auto" 
-                             Padding="8" />
+                             IsReadOnly="True" FontFamily="Consolas" FontSize="11" 
+                             Background="#080C14" Foreground="#38BDF8" BorderBrush="#1E293B" 
+                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Padding="8" />
                 </Grid>
             </Border>
         </Grid>
 
-        <!-- ══════════════════════════════════════════════════════════════ -->
-        <!-- ROW 4: STATUS FOOTER (شريط الحالة السفلي)                     -->
-        <!-- ══════════════════════════════════════════════════════════════ -->
+        <!-- STATUS FOOTER -->
         <Border Grid.Row="4" Background="#111622" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="6" Padding="10,4" Margin="0,8,0,0">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -378,10 +586,11 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding TotalEventsCount, StringFormat='الأحداث: {0} | '}" Foreground="#94A3B8" FontSize="11" />
-                    <TextBlock Text="{Binding RawCommandsCount, StringFormat='أوامر مباشرة: {0} | '}" Foreground="#00FFC2" FontSize="11" />
-                    <TextBlock Text="{Binding RadarScansCount, StringFormat='استطلاع منافذ: {0} | '}" Foreground="#FBBF24" FontSize="11" />
-                    <TextBlock Text="{Binding RamUnpacksCount, StringFormat='فك بالرام: {0}'}" Foreground="#A855F7" FontSize="11" />
+                    <TextBlock Text="{Binding ExecutedCommandsCount, StringFormat='⚡ منفذة: {0} | '}" Foreground="#00FFC2" FontSize="11" FontWeight="Bold" />
+                    <TextBlock Text="{Binding PurePhoneCommandsCount, StringFormat='📱 للتجربة: {0} | '}" Foreground="#38BDF8" FontSize="11" FontWeight="Bold" />
+                    <TextBlock Text="{Binding DiscoveredRamCommandsCount, StringFormat='🧠 بالرام: {0} | '}" Foreground="#FBBF24" FontSize="11" FontWeight="Bold" />
+                    <TextBlock Text="{Binding RadarEventsCount, StringFormat='💾 ملفات/رادار: {0} | '}" Foreground="#A855F7" FontSize="11" FontWeight="Bold" />
+                    <TextBlock Text="{Binding UnfilteredRawEventsCount, StringFormat='📜 السجل الخام الشامل: {0}'}" Foreground="#F97316" FontSize="11" FontWeight="Bold" />
                 </StackPanel>
             </Grid>
         </Border>

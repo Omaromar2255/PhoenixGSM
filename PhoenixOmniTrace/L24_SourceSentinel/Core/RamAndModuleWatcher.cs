@@ -108,10 +108,15 @@ public sealed class RamAndModuleWatcher : IDisposable
         });
     }
 
+    public void Reset()
+    {
+        _seenModules.Clear();
+        _monitoredPids.Clear();
+    }
+
     public void Dispose()
     {
         _isDisposed = true;
-        _seenModules.Clear();
-        _monitoredPids.Clear();
+        Reset();
     }
 }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using PhoenixGSM.MonitoringStudio.Models;
+using PhoenixGSM.OmniTrace.Decoders;
 
 namespace PhoenixGSM.MonitoringStudio.Services;
 
@@ -23,40 +24,81 @@ public partial class MonitoringEngine
         }
 
         bool isAdbHeader = chunk.Length >= 24 && PhoenixGSM.UsbMonitor.Protocol.AdbProtocolParser.ValidateHeader(chunk, 0, out _, out _, out _, out _, out _);
-        bool isSahara = chunk.Length >= 8 && PhoenixGSM.OmniTrace.Decoders.QualcommEdlDecoder.EvaluateSahara(chunk) >= 0.8;
-        bool isFirehose = chunk.Length >= 5 && (Encoding.ASCII.GetString(chunk[..Math.Min(chunk.Length, 64)]).StartsWith("<?xml", StringComparison.OrdinalIgnoreCase) || Encoding.ASCII.GetString(chunk[..Math.Min(chunk.Length, 64)]).Contains("<data>"));
-        string rawAsciiPreview = chunk.Length > 0 ? Encoding.ASCII.GetString(chunk[..Math.Min(chunk.Length, 128)]) : "";
 
-        string cleanLine = chunk.Length > 0 ? Encoding.ASCII.GetString(chunk).Trim('\r', '\n', '\t', '\0', ' ') : "";
+        // 1. Check if packet is wrapped in ADB Shell Protocol v2 (5-byte header: [streamId:1B][len:4B]) used in modern PTY sessions
+        byte[] effectiveChunk = chunk;
+        bool isShellV2Packet = false;
+        if (!isAdbHeader && !isUpperFilterPort && !_isInsideFileSyncTransfer &&
+            ShellStreamReconstructor.TryUnpackShellV2Frames(chunk, out byte v2StreamId, out byte[] unpackedV2, out bool isV2ControlOnly, out _))
+        {
+            isShellV2Packet = true;
+            _isAdbSessionActive = true;
+            _isShellV2SessionActive = true;
+            _isPtySessionActive = true;
+            if (string.IsNullOrEmpty(_activeInteractiveShellCommand))
+            {
+                _activeInteractiveShellCommand = "shell,v2,pty:";
+            }
+
+            // Ignore pure terminal window resize (ID_WINDOW_SIZE_CHANGE = 5) or stdin-close control frames
+            if (isV2ControlOnly)
+            {
+                return;
+            }
+
+            if (unpackedV2.Length > 0)
+            {
+                effectiveChunk = unpackedV2;
+            }
+        }
+
+        bool isSahara = effectiveChunk.Length >= 8 && PhoenixGSM.OmniTrace.Decoders.QualcommEdlDecoder.EvaluateSahara(effectiveChunk) >= 0.8;
+        bool isFirehose = effectiveChunk.Length >= 5 && (Encoding.ASCII.GetString(effectiveChunk[..Math.Min(effectiveChunk.Length, 64)]).StartsWith("<?xml", StringComparison.OrdinalIgnoreCase) || Encoding.ASCII.GetString(effectiveChunk[..Math.Min(effectiveChunk.Length, 64)]).Contains("<data>"));
+        string rawAsciiPreview = effectiveChunk.Length > 0
+            ? ShellStreamReconstructor.CleanTerminalOutput(Encoding.UTF8.GetString(effectiveChunk[..Math.Min(effectiveChunk.Length, 128)]))
+            : "";
+
+        string cleanLine = effectiveChunk.Length > 0
+            ? ShellStreamReconstructor.CleanTerminalOutput(Encoding.UTF8.GetString(effectiveChunk)).Trim('\r', '\n', '\t', '\0', ' ')
+            : "";
         string cleanLineTrimmed = cleanLine.Trim();
 
-        // Compute non-printable ratio early to prevent binary ELF chunks from polluting interactive shell commands
+        // Compute non-printable ratio early (allowing PTY control bytes: ESC 0x1B, Backspace 0x08/0x7F, Ctrl-C/D/U/W)
         int nonPrintableCount = 0;
         bool hasElfMagic = false;
-        for (int i = 0; i < chunk.Length; i++)
+        for (int i = 0; i < effectiveChunk.Length; i++)
         {
-            byte b = chunk[i];
-            if (b < 0x20 && b != 9 && b != 10 && b != 13 && b != 0) nonPrintableCount++;
-            else if (b > 0x7E) nonPrintableCount++;
-            if (i + 3 < chunk.Length && chunk[i] == 0x7F && chunk[i + 1] == 0x45 && chunk[i + 2] == 0x4C && chunk[i + 3] == 0x46)
+            byte b = effectiveChunk[i];
+            bool isPtyControlByte = b is 0x1B or 0x08 or 0x7F or 0x03 or 0x04 or 0x15 or 0x17;
+            if (b < 0x20 && b != 9 && b != 10 && b != 13 && b != 0 && !isPtyControlByte) nonPrintableCount++;
+            else if (b > 0x7E && b != 0x7F) nonPrintableCount++;
+            if (i + 3 < effectiveChunk.Length && effectiveChunk[i] == 0x7F && effectiveChunk[i + 1] == 0x45 && effectiveChunk[i + 2] == 0x4C && effectiveChunk[i + 3] == 0x46)
             {
                 hasElfMagic = true;
             }
         }
-        double nonPrintableRatio = chunk.Length > 0 ? (double)nonPrintableCount / chunk.Length : 0.0;
-        bool isBinaryPayloadChunk = hasElfMagic || nonPrintableRatio > 0.20 ||
+        double nonPrintableRatio = effectiveChunk.Length > 0 ? (double)nonPrintableCount / effectiveChunk.Length : 0.0;
+        bool isBinaryPayloadChunk = hasElfMagic || (!isShellV2Packet && nonPrintableRatio > 0.20) ||
                                     cleanLineTrimmed.Contains(",33188DATA", StringComparison.Ordinal) ||
                                     cleanLineTrimmed.Contains(",33261DATA", StringComparison.Ordinal) ||
                                     rawAsciiPreview.Contains("ELF");
 
-        // Detect ADB Sync start/stop transitions BEFORE evaluating interactive shell commands
+        // Detect ADB Sync start/stop transitions BEFORE evaluating interactive shell/PTY commands
         bool isSyncOpen = cleanLineTrimmed.Equals("sync:", StringComparison.OrdinalIgnoreCase) ||
                           rawAsciiPreview.StartsWith("sync:", StringComparison.OrdinalIgnoreCase);
 
-        if (isAdbHeader || isSyncOpen ||
-            cleanLineTrimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
-            rawAsciiPreview.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
-            rawAsciiPreview.Contains("shell:") || rawAsciiPreview.Contains("sync:"))
+        // Detect all Shell & PTY Open service headers (shell:, shell,v2,pty:, shell,v2,TERM=...,pty:, shell,pty:, pty:, exec:)
+        string openSvcHdr = string.Empty;
+        string openInnerCmd = string.Empty;
+        bool openIsPty = false;
+        bool openIsV2 = false;
+        bool isShellOrPtyOpen = !isBinaryPayloadChunk &&
+                                (ShellStreamReconstructor.IsShellOrPtyOpenService(cleanLineTrimmed, out openSvcHdr, out openInnerCmd, out openIsPty, out openIsV2) ||
+                                 ShellStreamReconstructor.IsShellOrPtyOpenService(rawAsciiPreview, out openSvcHdr, out openInnerCmd, out openIsPty, out openIsV2));
+
+        if (isAdbHeader || isSyncOpen || isShellOrPtyOpen || isShellV2Packet ||
+            rawAsciiPreview.Contains("shell:") || rawAsciiPreview.Contains("shell,") ||
+            rawAsciiPreview.Contains("pty:") || rawAsciiPreview.Contains("sync:"))
         {
             _isAdbSessionActive = true;
         }
@@ -88,26 +130,27 @@ public partial class MonitoringEngine
         {
             _isInsideFileSyncTransfer = true;
             _activeInteractiveShellCommand = string.Empty;
+            _isPtySessionActive = false;
         }
 
         // Feed outbound non-shell packets into SmartFilePushArchiver BEFORE evaluating isAdbInteractiveCmd/isAdbStream
         if (dir == "OUT" && !isUpperFilterPort && !(isAdbHeader && chunk.Length == 24) &&
-            !cleanLineTrimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
+            !isShellOrPtyOpen && !isShellV2Packet)
         {
             _smartFileArchiver.ProcessOutboundSyncOrBulkChunk(chunk, dir, epHex, pkt.ActualLength, out _);
             _isInsideFileSyncTransfer = _smartFileArchiver.IsInsideTransfer;
         }
 
-        // Track channel state transitions for explicit shell commands
-        if (!isBinaryPayloadChunk && !isAdbSyncToken &&
-            (cleanLineTrimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
-             rawAsciiPreview.StartsWith("shell:", StringComparison.OrdinalIgnoreCase)))
+        // Track channel state transitions for explicit shell / PTY open commands
+        if (!isBinaryPayloadChunk && !isAdbSyncToken && isShellOrPtyOpen)
         {
-            string sCmd = cleanLineTrimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase)
-                ? cleanLineTrimmed
-                : rawAsciiPreview[rawAsciiPreview.IndexOf("shell:", StringComparison.OrdinalIgnoreCase)..].Split(new[] { '\0', '\r', '\n' })[0].Trim();
+            string sCmd = !string.IsNullOrWhiteSpace(openInnerCmd)
+                ? $"{openSvcHdr}{openInnerCmd}"
+                : openSvcHdr;
 
             _activeInteractiveShellCommand = sCmd;
+            _isPtySessionActive = openIsPty;
+            _isShellV2SessionActive = openIsV2;
             _isInsideFileSyncTransfer = false;
 
             if (sCmd.Contains("/data/local/tmp/AT", StringComparison.OrdinalIgnoreCase) &&
@@ -134,7 +177,7 @@ public partial class MonitoringEngine
         if (_isAggregatingGetprop)
         {
             if ((DateTime.UtcNow - _lastGetpropChunkTime).TotalMilliseconds > 400 ||
-                cleanLineTrimmed.StartsWith("shell:") || cleanLineTrimmed.StartsWith("<<") ||
+                isShellOrPtyOpen || cleanLineTrimmed.StartsWith("<<") ||
                 cleanLineTrimmed.StartsWith("AT") || cleanLineTrimmed.StartsWith("SEND"))
             {
                 FlushGetpropSummary(epHex, dir);
@@ -182,14 +225,22 @@ public partial class MonitoringEngine
                            cleanLineTrimmed.StartsWith("AF6DBB85", StringComparison.OrdinalIgnoreCase) ||
                            cleanLineTrimmed.StartsWith("62E83911", StringComparison.OrdinalIgnoreCase) ||
                            cleanLineTrimmed.StartsWith("<<", StringComparison.Ordinal) ||
-                           (chunk.Length >= 4 && chunk.Length <= 64 && chunk[0] == 0x11 && chunk[1] == 0x63));
+                           (effectiveChunk.Length >= 4 && effectiveChunk.Length <= 64 && effectiveChunk[0] == 0x11 && effectiveChunk[1] == 0x63));
 
-        bool isAsciiText = chunk.Length > 0 && !isBinaryPayloadChunk &&
-                           chunk.All(b => b == 0 || b == 9 || b == 10 || b == 13 || (b >= 32 && b < 127));
+        bool isAsciiOrPtyText = effectiveChunk.Length > 0 && !isBinaryPayloadChunk &&
+                                effectiveChunk.All(b => b == 0 || b == 9 || b == 10 || b == 13 ||
+                                                        b == 0x1B || b == 0x08 || b == 0x7F || b == 0x03 || b == 0x04 || b == 0x15 || b == 0x17 ||
+                                                        (b >= 32 && b < 127));
 
-        bool isInteractiveShellActive = !string.IsNullOrEmpty(_activeInteractiveShellCommand) || !string.IsNullOrEmpty(_lastActiveAtBinaryCommand);
+        bool isInteractiveShellActive = _isPtySessionActive ||
+                                        !string.IsNullOrEmpty(_activeInteractiveShellCommand) ||
+                                        !string.IsNullOrEmpty(_lastActiveAtBinaryCommand);
 
-        // Clean Interactive / Shell Command Rule in OUT direction:
+        // In PTY mode, a keystroke packet can be just "\r", "\n", Backspace (0x08/0x7F), or a single character!
+        bool isPtyKeystrokePacket = _isPtySessionActive && dir == "OUT" && !isAdbHeader && !isAdbSync && !_isInsideFileSyncTransfer &&
+                                    effectiveChunk.Length > 0 && isAsciiOrPtyText;
+
+        // Clean Interactive / Shell / PTY Command Rule in OUT direction:
         bool isBareSyncPath = _isInsideFileSyncTransfer && cleanLineTrimmed.Equals("/data/local/tmp/AT", StringComparison.OrdinalIgnoreCase);
         bool isAdbInteractiveCmd = dir == "OUT" &&
                                    !isAdbHeader &&
@@ -197,11 +248,10 @@ public partial class MonitoringEngine
                                    !_isInsideFileSyncTransfer &&
                                    !isAdbSync &&
                                    !isBareSyncPath &&
-                                   chunk.Length > 0 &&
-                                   cleanLineTrimmed.Length > 0 &&
+                                   effectiveChunk.Length > 0 &&
+                                   (cleanLineTrimmed.Length > 0 || isPtyKeystrokePacket) &&
                                    !cleanLineTrimmed.Equals("host::", StringComparison.OrdinalIgnoreCase) &&
-                                   (isAsciiText || isAdbRilIpc ||
-                                    cleanLineTrimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
+                                   (isAsciiOrPtyText || isAdbRilIpc || isShellOrPtyOpen || isShellV2Packet ||
                                     cleanLineTrimmed.StartsWith("usb:", StringComparison.OrdinalIgnoreCase) ||
                                     cleanLineTrimmed.StartsWith("reboot:", StringComparison.OrdinalIgnoreCase) ||
                                     cleanLineTrimmed.StartsWith("<<", StringComparison.Ordinal));
@@ -223,20 +273,21 @@ public partial class MonitoringEngine
                                (rawAsciiPreview.Contains("]: [") && !cleanLineTrimmed.StartsWith("AT", StringComparison.OrdinalIgnoreCase)) ||
                                (cleanLineTrimmed.StartsWith("[ro.") || cleanLineTrimmed.StartsWith("[gsm.") || cleanLineTrimmed.StartsWith("[sys.") || cleanLineTrimmed.StartsWith("[ril.")));
 
-        // Check if incoming packet is a readable phone response in ADB mode
-        string cleanedInboundText = CleanInboundPhoneResponse(chunk);
+        // Check if incoming packet is a readable phone response in ADB / PTY mode
+        string cleanedInboundText = CleanInboundPhoneResponse(effectiveChunk);
         bool isReadableInboundAdbResponse = dir == "IN" &&
                                             !isAdbHeader &&
                                             !isAdbSync &&
                                             !_isInsideFileSyncTransfer &&
                                             !isBinaryPayloadChunk &&
                                             isInteractiveShellActive &&
-                                            cleanedInboundText.Length >= 2 &&
+                                            cleanedInboundText.Length >= 1 &&
                                             !cleanedInboundText.StartsWith("STAT", StringComparison.Ordinal);
 
         bool isAdbStream = !isAdbRilIpc && !isAdbInteractiveCmd && !isBinaryPayloadChunk && (
                            isGetpropOutput ||
                            isReadableInboundAdbResponse ||
+                           (dir == "IN" && isShellV2Packet) ||
                            cleanLineTrimmed == "]" ||
                            cleanLineTrimmed.Contains("0x0000") ||
                            cleanLineTrimmed.Equals("Enforcing", StringComparison.OrdinalIgnoreCase) ||
@@ -266,7 +317,7 @@ public partial class MonitoringEngine
                            cleanLineTrimmed.Equals("#", StringComparison.Ordinal) ||
                            cleanLineTrimmed.Equals("<<", StringComparison.Ordinal) ||
                            cleanLineTrimmed.Contains("****") ||
-                           rawAsciiPreview.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
+                           isShellOrPtyOpen ||
                            rawAsciiPreview.StartsWith("Result: Parcel(", StringComparison.OrdinalIgnoreCase) ||
                            rawAsciiPreview.StartsWith("[DEVICE_PROVISIONED]", StringComparison.OrdinalIgnoreCase) ||
                            rawAsciiPreview.StartsWith("while [ \"$(getprop", StringComparison.OrdinalIgnoreCase) ||
@@ -297,10 +348,10 @@ public partial class MonitoringEngine
         );
 
         isUpperFilterPort = (pkt.TransferType == 4);
-        bool isNonAtUsbProtocol = isAdbHeader || isAdbStream || isAdbRilIpc || isAdbInteractiveCmd || isAdbSync || isSahara || isFirehose || isFastboot || isSocketBridgeChannel;
+        bool isNonAtUsbProtocol = isAdbHeader || isAdbStream || isAdbRilIpc || isAdbInteractiveCmd || isAdbSync || isSahara || isFirehose || isFastboot || isSocketBridgeChannel || isShellV2Packet;
 
-        double atConf = chunk.Length > 0 
-            ? PhoenixGSM.OmniTrace.Detection.ProtocolDetector.EvaluateSerialAt(chunk, PhoenixGSM.OmniTrace.Models.SensorType.Serial, PhoenixGSM.OmniTrace.Models.TransportType.SERIAL) 
+        double atConf = effectiveChunk.Length > 0 
+            ? PhoenixGSM.OmniTrace.Detection.ProtocolDetector.EvaluateSerialAt(effectiveChunk, PhoenixGSM.OmniTrace.Models.SensorType.Serial, PhoenixGSM.OmniTrace.Models.TransportType.SERIAL) 
             : 0.0;
 
         bool hasAdbOrPrintableKeywords = cleanLineTrimmed.Contains("Product", StringComparison.OrdinalIgnoreCase) ||
@@ -310,18 +361,18 @@ public partial class MonitoringEngine
                                          cleanLineTrimmed.Contains("samsung", StringComparison.OrdinalIgnoreCase) ||
                                          cleanLineTrimmed.Contains("restarting in USB mode", StringComparison.OrdinalIgnoreCase) ||
                                          cleanLineTrimmed.Contains("<<") ||
-                                         cleanLineTrimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
+                                         isShellOrPtyOpen ||
                                          cleanLineTrimmed.StartsWith("/data/local/tmp", StringComparison.OrdinalIgnoreCase);
 
         bool isDeviceInAdb = (_isAdbSessionActive && !isUpperFilterPort) || isInteractiveShellActive || _isInsideFileSyncTransfer || isAdbHeader || isAdbStream || isAdbRilIpc || isAdbInteractiveCmd || hasAdbOrPrintableKeywords || isSocketBridgeChannel;
 
-        double mtkConf = (chunk.Length > 0 && !isDeviceInAdb && !hasAdbOrPrintableKeywords)
-            ? PhoenixGSM.OmniTrace.Decoders.MtkProtocolDecoder.EvaluateMtk(chunk)
+        double mtkConf = (effectiveChunk.Length > 0 && !isDeviceInAdb && !hasAdbOrPrintableKeywords)
+            ? PhoenixGSM.OmniTrace.Decoders.MtkProtocolDecoder.EvaluateMtk(effectiveChunk)
             : 0.0;
         bool isMtk = mtkConf >= 0.70;
 
         // Absolute rule: Multi-byte buffer starting with 'P' (0x50) is NEVER MTK
-        if (chunk.Length > 1 && (chunk[0] == 0x50 || chunk[0] == (byte)'P'))
+        if (effectiveChunk.Length > 1 && (effectiveChunk[0] == 0x50 || effectiveChunk[0] == (byte)'P'))
         {
             isMtk = false;
             if (cleanLineTrimmed.StartsWith("Product Name", StringComparison.OrdinalIgnoreCase) || rawAsciiPreview.Contains("Product Name"))
@@ -346,33 +397,33 @@ public partial class MonitoringEngine
         );
 
         // Protocol Dispatching
-        if (chunk.Length > 0 && isMtk)
+        if (effectiveChunk.Length > 0 && isMtk)
         {
-            HandleMtkPacket(pkt, chunk, dir, epHex, pDir, isUpperFilterPort, mtkConf, cleanLine);
+            HandleMtkPacket(pkt, effectiveChunk, dir, epHex, pDir, isUpperFilterPort, mtkConf, cleanLine);
         }
-        else if (chunk.Length > 0 && isSocketBridgeChannel && !isAdbHeader && dir == "OUT")
+        else if (effectiveChunk.Length > 0 && isSocketBridgeChannel && !isAdbHeader && dir == "OUT")
         {
-            HandleSocketBridgePacket(chunk, dir, epHex, cleanLine, cleanLineTrimmed);
+            HandleSocketBridgePacket(effectiveChunk, dir, epHex, cleanLine, cleanLineTrimmed);
         }
-        else if (chunk.Length > 0 && isAppPrivilegeCmd && !isAdbHeader)
+        else if (effectiveChunk.Length > 0 && isAppPrivilegeCmd && !isAdbHeader)
         {
-            HandleAppPrivilegePacket(chunk, dir, epHex, cleanLine, cleanLineTrimmed);
+            HandleAppPrivilegePacket(effectiveChunk, dir, epHex, cleanLine, cleanLineTrimmed);
         }
-        else if (chunk.Length > 0 && (isAdbRilIpc || isAdbInteractiveCmd))
+        else if (effectiveChunk.Length > 0 && (isAdbRilIpc || isAdbInteractiveCmd))
         {
-            HandleAdbRilOrInteractivePacket(pkt, chunk, dir, epHex, pDir, isAdbRilIpc, cleanLine, cleanLineTrimmed);
+            HandleAdbRilOrInteractivePacket(pkt, effectiveChunk, dir, epHex, pDir, isAdbRilIpc, cleanLine, cleanLineTrimmed);
         }
-        else if (chunk.Length > 0 && isGetpropOutput)
+        else if (effectiveChunk.Length > 0 && isGetpropOutput)
         {
-            HandleGetpropPacket(chunk, dir, epHex, cleanLine, cleanLineTrimmed);
+            HandleGetpropPacket(effectiveChunk, dir, epHex, cleanLine, cleanLineTrimmed);
         }
-        else if (chunk.Length > 0 && isAdbStream)
+        else if (effectiveChunk.Length > 0 && isAdbStream)
         {
-            HandleAdbStreamPacket(pkt, chunk, dir, epHex, pDir, isReadableInboundAdbResponse, cleanedInboundText, cleanLine);
+            HandleAdbStreamPacket(pkt, effectiveChunk, dir, epHex, pDir, isReadableInboundAdbResponse, cleanedInboundText, cleanLine);
         }
-        else if (chunk.Length > 0 && isAt)
+        else if (effectiveChunk.Length > 0 && isAt)
         {
-            HandleAtOrModemPacket(pkt, chunk, dir, epHex, pDir, isAsciiText, atConf, cleanLine);
+            HandleAtOrModemPacket(pkt, effectiveChunk, dir, epHex, pDir, isAsciiOrPtyText, atConf, cleanLine);
         }
         else
         {

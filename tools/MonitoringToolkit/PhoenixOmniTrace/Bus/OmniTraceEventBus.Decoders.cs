@@ -14,7 +14,6 @@ public sealed partial class OmniTraceEventBus
 {
     private void DecodeAdbStream(CaptureSessionKey key, byte[] stream, RawCaptureEvent evt)
     {
-        // Try wire decoding first
         var wirePackets = AdbDecoder.DecodePackets(stream, out int wireConsumed);
         if (wirePackets.Count > 0)
         {
@@ -29,10 +28,23 @@ public sealed partial class OmniTraceEventBus
             {
                 var ch = ChannelStateMachine.ProcessWirePacket(wp, evt.Direction);
 
-                // Handle WRTE payload (e.g. interactive shell / sub-binary session commands and responses)
                 if (wp.Command == AdbWirePacket.A_WRTE && wp.Payload.Length > 0)
                 {
                     bool isHostToDevice = evt.Direction == PacketDirection.HOST_TO_DEVICE;
+
+                    // فك ترويسة Shell v2 (5 بايت) إن وجدت في جلسات PTY الحديثة
+                    byte[] effectivePayload = wp.Payload;
+                    bool isShellV2 = false;
+                    if (ShellStreamReconstructor.TryUnpackShellV2Frames(wp.Payload, out _, out byte[] unpackedV2, out bool isCtrlOnly, out _))
+                    {
+                        if (isCtrlOnly)
+                            continue;
+                        isShellV2 = true;
+                        effectivePayload = unpackedV2;
+                    }
+
+                    bool isPtyChannel = isShellV2 ||
+                                        ShellStreamReconstructor.IsShellOrPtyOpenService(ch.Service, out _, out _, out bool chIsPty, out _) && chIsPty;
 
                     if (isHostToDevice)
                     {
@@ -42,11 +54,12 @@ public sealed partial class OmniTraceEventBus
                             int pid = 0;
                             if (evt.Metadata != null && evt.Metadata.TryGetValue("ProcessId", out var pStr)) int.TryParse(pStr, out pid);
                             ArtifactSensor?.ProcessSyncWirePayload(wp.Arg0, wp.Payload, pName, pid, evt.DeviceIdentity, out _);
+                            continue;
                         }
 
-                        // 1. Host writing into sub-shell / binary (>> STDIN)
+                        // 1. تمرير الحروف أو الأسطر عبر ShellReconstructor لتجميع أوامر الـ PTY التفاعلية عند ضغط Enter
                         ShellReconstructor.ProcessInputBytes(
-                            wp.Payload,
+                            effectivePayload,
                             evt.SequenceNumber,
                             evt.PayloadHash,
                             out string? cmdText,
@@ -55,10 +68,10 @@ public sealed partial class OmniTraceEventBus
                             out var shellHashes);
 
                         string? finalCmd = cmdText;
-                        if (string.IsNullOrEmpty(finalCmd))
+                        if (string.IsNullOrEmpty(finalCmd) && !isPtyChannel)
                         {
-                            // Capture non-newline-terminated payloads (e.g. auth keys, tokens, interactive choices)
-                            string rawStr = ShellStreamReconstructor.CleanTerminalOutput(Encoding.UTF8.GetString(wp.Payload)).Trim();
+                            // في القنوات غير المعتمدة على الكتابة حرفاً بحرف، نلتقط الأوامر التي لا تنتهي بـ \n إذا كان طولها >= 2
+                            string rawStr = ShellStreamReconstructor.CleanTerminalOutput(Encoding.UTF8.GetString(effectivePayload)).Trim();
                             if (!string.IsNullOrWhiteSpace(rawStr) && rawStr.Length >= 2)
                             {
                                 finalCmd = rawStr;
@@ -82,16 +95,26 @@ public sealed partial class OmniTraceEventBus
                                 evidenceHshs,
                                 confidence: 0.99
                             );
+                            if (isPtyChannel)
+                            {
+                                cmd.Details["ProtocolName"] = "ADB-PTY-CMD";
+                                cmd.Details["CommandLine"] = finalCmd;
+                            }
                             OnLogicalCommand?.Invoke(cmd);
                         }
                     }
                     else
                     {
-                        // 2. Device returning stdout / prompts / status to host (<< STDOUT)
-                        string outputText = ShellStreamReconstructor.CleanTerminalOutput(Encoding.UTF8.GetString(wp.Payload)).Trim();
+                        // 2. مخرجات الهاتف الواردة (STDOUT / STDERR) بعد فك Shell v2 وتنظيف أكواد ANSI
+                        if (isPtyChannel && ShellReconstructor.HasPendingInput && effectivePayload.Length <= 4)
+                        {
+                            // تجاهل صدى الحرف الواحد أثناء الكتابة في PTY
+                            continue;
+                        }
+
+                        string outputText = ShellStreamReconstructor.CleanTerminalOutput(Encoding.UTF8.GetString(effectivePayload)).Trim('\r', '\n', '\0');
                         if (!string.IsNullOrWhiteSpace(outputText) && outputText.Length >= 2)
                         {
-                            // Suppress raw ADB wire headers leaked into payload (WRTE, CLSE, OKAY, OPEN, CNXN)
                             if (outputText.StartsWith("WRTE") || outputText.StartsWith("CLSE") ||
                                 outputText.StartsWith("OKAY") || outputText.StartsWith("CNXN") ||
                                 outputText.StartsWith("OPEN"))
@@ -130,6 +153,12 @@ public sealed partial class OmniTraceEventBus
                         sessionHashes,
                         confidence: 0.99
                     );
+                    if (ShellStreamReconstructor.IsShellOrPtyOpenService(svc, out _, out string innerCmd, out bool isPty, out _) && isPty)
+                    {
+                        cmd.Details["ProtocolName"] = "ADB-PTY-CMD";
+                        if (!string.IsNullOrWhiteSpace(innerCmd))
+                            cmd.Details["CommandLine"] = innerCmd;
+                    }
                     OnLogicalCommand?.Invoke(cmd);
                 }
             }
@@ -224,8 +253,6 @@ public sealed partial class OmniTraceEventBus
             string cleanLine = rawLine.Trim();
             if (string.IsNullOrEmpty(cleanLine)) continue;
 
-            // Strict ADB Isolation Rule:
-            // Reject getprop fragments, hex streams, parcel results, and non-modem text
             if (cleanLine.Contains("]: [") || cleanLine == "]" || cleanLine.Contains("0x0000") ||
                 cleanLine.Contains("Enforcing", StringComparison.OrdinalIgnoreCase) ||
                 cleanLine.Contains("Permissive", StringComparison.OrdinalIgnoreCase) ||
@@ -244,13 +271,11 @@ public sealed partial class OmniTraceEventBus
                 continue;
             }
 
-            // Reject long hex streams (e.g. >= 32 hex chars)
             if (cleanLine.Length >= 32 && cleanLine.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
             {
                 continue;
             }
 
-            // Must start with standard AT command or modem response prefix
             string upper = cleanLine.ToUpperInvariant();
             bool isModemAt = upper.StartsWith("AT+") || upper.StartsWith("AT*") || upper.StartsWith("AT#") ||
                              upper.StartsWith("AT$") || upper.StartsWith("AT%") || upper.StartsWith("AT^") ||

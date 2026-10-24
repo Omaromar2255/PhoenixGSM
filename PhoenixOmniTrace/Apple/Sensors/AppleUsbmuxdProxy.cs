@@ -26,7 +26,7 @@ public sealed class AppleUsbmuxdProxy : IDisposable
     public bool IsPortBoundByAnotherProcess { get; private set; }
     public string StatusMessage { get; private set; } = "Not Started";
 
-    public AppleUsbmuxdProxy(OmniTraceEventBus bus, int listenPort = 27016, int targetPort = 27015)
+    public AppleUsbmuxdProxy(OmniTraceEventBus bus, int listenPort = 27015, int targetPort = 27016)
     {
         _bus = bus;
         _listenPort = listenPort;
@@ -44,7 +44,7 @@ public sealed class AppleUsbmuxdProxy : IDisposable
             _listener.Start();
             IsRunning = true;
             IsPortBoundByAnotherProcess = false;
-            StatusMessage = $"Listening on 127.0.0.1:{_listenPort}, target 27015";
+            StatusMessage = $"Listening on 127.0.0.1:{_listenPort}, target {_targetPort}";
             _ = Task.Run(() => AcceptClientsAsync(_cts.Token), _cts.Token);
         }
         catch (SocketException sex) when (sex.SocketErrorCode == SocketError.AddressAlreadyInUse ||

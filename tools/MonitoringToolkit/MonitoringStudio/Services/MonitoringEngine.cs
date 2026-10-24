@@ -128,7 +128,9 @@ public partial class MonitoringEngine : IDisposable
             _omniService.CommandLineSniffer.OnProcessCommandCaptured += (_, cmdInfo) =>
             {
                 if (!string.IsNullOrWhiteSpace(cmdInfo.CommandLine) &&
-                    cmdInfo.CommandLine.Contains("push", StringComparison.OrdinalIgnoreCase))
+                    (cmdInfo.CommandLine.Contains("push", StringComparison.OrdinalIgnoreCase) ||
+                     cmdInfo.CommandLine.Contains("install", StringComparison.OrdinalIgnoreCase) ||
+                     cmdInfo.CommandLine.Contains("ideviceinstaller", StringComparison.OrdinalIgnoreCase)))
                 {
                     _smartFileArchiver.NotifyAdbPushCommandLine(cmdInfo.CommandLine, cmdInfo.ProcessId, 0, null, IsDriverConnected);
                 }

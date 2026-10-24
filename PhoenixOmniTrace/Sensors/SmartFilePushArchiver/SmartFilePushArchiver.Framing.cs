@@ -11,10 +11,6 @@ public sealed partial class SmartFilePushArchiver
         @"((?:/data/local/tmp/|/data/|/sdcard/|/storage/|/system/|/vendor/|/tmp/)[A-Za-z0-9_\-\./]+),(\d+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    public static readonly Regex ExactSendPathAndModeRegex = new(
-        @"^((?:/data/local/tmp/|/data/|/sdcard/|/storage/|/system/|/vendor/|/tmp/)[A-Za-z0-9_\-\./]+),(\d+)$",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
     public static readonly Regex StatPathRegex = new(
         @"(?:STAT|SEND).{0,8}?((?:/data/local/tmp/|/data/|/sdcard/|/storage/|/system/|/vendor/|/tmp/)[A-Za-z0-9_\-\./]+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
@@ -27,6 +23,17 @@ public sealed partial class SmartFilePushArchiver
         @"echo\s+['""]?([A-Za-z0-9+/=]{8,})['""]?\s*\|\s*(?:toybox\s+|busybox\s+)?base64\s+(?:-d|--decode)\s*>\s*([^\s;&|]+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    /// <summary>
+    /// Matches direct streamed APK installation over ADB `exec:`, `shell:`, or Android 11+ `abb_exec:` / `abb:` channels:
+    /// Examples:
+    /// - `exec:cmd package 'install-write' -S 4521984 10293847 'base.apk' '-'`
+    /// - `abb_exec:package install-write -S 4521984 10293847 base.apk -`
+    /// - `exec:pm install -S 4521984`
+    /// </summary>
+    public static readonly Regex StreamedApkInstallWriteRegex = new(
+        @"(?:exec:|shell:|abb_exec:|abb:).*?(?:install-write\b.*?-S\s+(\d+)\s+(\d+)\s+['""]?([^\s'""\-]+(?:\.apk)?)['""]?|pm\s+install\b.*?-S\s+(\d+))",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
     private static bool IsIgnoredNoiseFile(string pathOrName)
     {
         if (string.IsNullOrWhiteSpace(pathOrName)) return true;
@@ -37,25 +44,79 @@ public sealed partial class SmartFilePushArchiver
                fname.StartsWith(".phx_keep_", StringComparison.OrdinalIgnoreCase) ||
                fname.StartsWith("phx_pull_", StringComparison.OrdinalIgnoreCase) ||
                fname.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
-               fname.EndsWith(".tmp_write", StringComparison.OrdinalIgnoreCase) ||
                fname.EndsWith(".etl", StringComparison.OrdinalIgnoreCase);
     }
 
-    public static string BuildNumberedFileName(string originalFileName, int uploadSequenceNumber)
+    private static string BuildNumberedFileName(string originalFileName, int sequenceNumber)
     {
-        if (string.IsNullOrWhiteSpace(originalFileName)) return $"pushed_file_{Math.Max(1, uploadSequenceNumber)}";
-        if (uploadSequenceNumber <= 1) return originalFileName;
-
+        if (sequenceNumber <= 1) return originalFileName;
         string ext = Path.GetExtension(originalFileName);
         string stem = Path.GetFileNameWithoutExtension(originalFileName);
-        if (string.IsNullOrEmpty(stem))
+        return string.IsNullOrEmpty(ext)
+            ? $"{originalFileName}_{sequenceNumber}"
+            : $"{stem}_{sequenceNumber}{ext}";
+    }
+
+    /// <summary>
+    /// Converts internal Null-byte (`\0`) argument separators used by Android 11+ `abb:` / `abb_exec:` Binder bridge packets
+    /// into spaces so the full command and `-S <size> <session> <apkName>` parameters are preserved.
+    /// </summary>
+    public static string DecodeAsciiPreservingAbbArguments(byte[] chunk, int maxLen = 0)
+    {
+        if (chunk == null || chunk.Length == 0) return string.Empty;
+        int len = maxLen > 0 ? Math.Min(chunk.Length, maxLen) : chunk.Length;
+        var sb = new StringBuilder(len);
+
+        for (int i = 0; i < len; i++)
         {
-            return $"{originalFileName}_{uploadSequenceNumber}";
+            byte b = chunk[i];
+            if (b == 0)
+            {
+                if (sb.Length > 0 && sb[^1] != ' ')
+                {
+                    sb.Append(' ');
+                }
+            }
+            else if (b >= 32 && b < 127)
+            {
+                sb.Append((char)b);
+            }
+            else if (b == '\r' || b == '\n' || b == '\t')
+            {
+                sb.Append((char)b);
+            }
         }
 
-        return string.IsNullOrEmpty(ext)
-            ? $"{stem}_{uploadSequenceNumber}"
-            : $"{stem}_{uploadSequenceNumber}{ext}";
+        return sb.ToString().Trim();
+    }
+
+    public static bool TryFindStructuredSendHeader(byte[] chunk, out int sendOffset, out string path, out string mode)
+    {
+        sendOffset = -1;
+        path = string.Empty;
+        mode = "33188";
+        if (chunk == null || chunk.Length < 12) return false;
+
+        int idx = FindAsciiTokenOffset(chunk, "SEND", 0, chunk.Length - 8);
+        if (idx < 0 || idx + 8 > chunk.Length) return false;
+
+        uint pathAndModeLen = BitConverter.ToUInt32(chunk, idx + 4);
+        if (pathAndModeLen < 3 || pathAndModeLen > 512 || idx + 8 + pathAndModeLen > chunk.Length)
+            return false;
+
+        string spec = Encoding.ASCII.GetString(chunk, idx + 8, (int)pathAndModeLen);
+        int commaIdx = spec.LastIndexOf(',');
+        if (commaIdx <= 0) return false;
+
+        string candidatePath = spec[..commaIdx].Trim();
+        string candidateMode = spec[(commaIdx + 1)..].Trim();
+        if (!candidatePath.StartsWith("/") || string.IsNullOrWhiteSpace(candidateMode))
+            return false;
+
+        sendOffset = idx;
+        path = candidatePath;
+        mode = candidateMode;
+        return true;
     }
 
     private static int IndexOfSequence(ReadOnlySpan<byte> buffer, ReadOnlySpan<byte> pattern)
@@ -94,58 +155,6 @@ public sealed partial class SmartFilePushArchiver
         return -1;
     }
 
-    /// <summary>
-    /// Verifies whether a chunk contains a genuine ADB Sync SEND header ("SEND" + uint32 len + "/path,mode")
-    /// when already inside a multi-packet binary transfer, preventing false splits on binary data.
-    /// </summary>
-    public static bool TryFindStructuredSendHeader(
-        byte[] chunk,
-        out int sendOffset,
-        out string targetPath,
-        out string mode)
-    {
-        sendOffset = -1;
-        targetPath = string.Empty;
-        mode = "33188";
-
-        if (chunk == null || chunk.Length < 12) return false;
-
-        for (int i = 0; i <= chunk.Length - 12; i++)
-        {
-            if (chunk[i] == (byte)'S' && chunk[i + 1] == (byte)'E' && chunk[i + 2] == (byte)'N' && chunk[i + 3] == (byte)'D')
-            {
-                uint pathModeLen = BitConverter.ToUInt32(chunk, i + 4);
-                if (pathModeLen >= 4 && pathModeLen <= 512 && i + 8 + (int)pathModeLen <= chunk.Length)
-                {
-                    string candidate = Encoding.ASCII.GetString(chunk, i + 8, (int)pathModeLen).Trim('\0', ' ');
-                    Match m = ExactSendPathAndModeRegex.Match(candidate);
-                    if (m.Success)
-                    {
-                        sendOffset = i;
-                        targetPath = m.Groups[1].Value.Trim();
-                        mode = m.Groups[2].Value.Trim();
-                        return true;
-                    }
-                }
-            }
-        }
-
-        if (StartsWithAscii(chunk, "SEND"))
-        {
-            string ascii = Encoding.ASCII.GetString(chunk, 0, Math.Min(chunk.Length, 256));
-            Match m = SendPathAndModeRegex.Match(ascii);
-            if (m.Success && m.Index <= 12)
-            {
-                sendOffset = 0;
-                targetPath = m.Groups[1].Value.Trim();
-                mode = m.Groups[2].Value.Trim();
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     public static int FindDataHeaderOffset(byte[] chunk, int startOffset = 0)
     {
         if (chunk == null || chunk.Length < startOffset + 8) return -1;
@@ -154,11 +163,7 @@ public sealed partial class SmartFilePushArchiver
         {
             if (chunk[i] == 'D' && chunk[i + 1] == 'A' && chunk[i + 2] == 'T' && chunk[i + 3] == 'A')
             {
-                uint dLen = BitConverter.ToUInt32(chunk, i + 4);
-                if (dLen > 0 && dLen <= 64 * 1024 * 1024)
-                {
-                    return i;
-                }
+                return i;
             }
         }
         return -1;
@@ -180,18 +185,7 @@ public sealed partial class SmartFilePushArchiver
         {
             if (chunk[i] == 'D' && chunk[i + 1] == 'O' && chunk[i + 2] == 'N' && chunk[i + 3] == 'E')
             {
-                int afterDone = i + 8;
-                if (afterDone == chunk.Length) return i;
-                if (afterDone + 4 <= chunk.Length)
-                {
-                    if ((chunk[afterDone] == 'S' && chunk[afterDone + 1] == 'E' && chunk[afterDone + 2] == 'N' && chunk[afterDone + 3] == 'D') ||
-                        (chunk[afterDone] == 'S' && chunk[afterDone + 1] == 'T' && chunk[afterDone + 2] == 'A' && chunk[afterDone + 3] == 'T') ||
-                        (chunk[afterDone] == 'Q' && chunk[afterDone + 1] == 'U' && chunk[afterDone + 2] == 'I' && chunk[afterDone + 3] == 'T') ||
-                        IsAdbWireHeader(chunk, afterDone))
-                    {
-                        return i;
-                    }
-                }
+                return i;
             }
         }
         return -1;
@@ -202,8 +196,7 @@ public sealed partial class SmartFilePushArchiver
         if (buffer == null || offset + 24 > buffer.Length) return false;
         uint cmd = BitConverter.ToUInt32(buffer, offset);
         uint magic = BitConverter.ToUInt32(buffer, offset + 20);
-        return (cmd ^ 0xFFFFFFFF) == magic &&
-               (cmd == 0x4E584E43 || cmd == 0x4E45504F || cmd == 0x45545257 || cmd == 0x45534C43 || cmd == 0x59414B4F);
+        return (cmd ^ 0xFFFFFFFF) == magic;
     }
 
     public static byte[] StripDoneTrailer(byte[] data)

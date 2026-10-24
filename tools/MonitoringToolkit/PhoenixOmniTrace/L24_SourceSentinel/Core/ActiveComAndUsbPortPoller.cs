@@ -11,7 +11,16 @@ public sealed class ActiveComAndUsbPortPoller : IDisposable
 {
     private CancellationTokenSource? _cts;
     private readonly ConcurrentDictionary<string, string> _knownPorts = new();
+    private static volatile string _latestActivePortLabel = string.Empty;
+
     public event Action<SourceTelemetryEvent>? OnPortActivityDetected;
+
+    public static string GetPrimaryActivePortLabel()
+    {
+        return !string.IsNullOrWhiteSpace(_latestActivePortLabel)
+            ? _latestActivePortLabel
+            : "Active Modem Buffer";
+    }
 
     public void StartPolling(int targetPid, string processName)
     {
@@ -24,7 +33,7 @@ public sealed class ActiveComAndUsbPortPoller : IDisposable
             while (!token.IsCancellationRequested)
             {
                 CheckActiveSerialCommPorts(targetPid, processName);
-                await Task.Delay(800, token);
+                await Task.Delay(700, token).ConfigureAwait(false);
             }
         }, token);
     }
@@ -43,11 +52,12 @@ public sealed class ActiveComAndUsbPortPoller : IDisposable
                 string portName = key.GetValue(kernelDeviceName)?.ToString() ?? string.Empty;
                 if (string.IsNullOrEmpty(portName)) continue;
 
+                var (category, description) = ClassifyKernelPort(kernelDeviceName, portName, processName);
+                _latestActivePortLabel = $"{portName} ({category})";
+
                 string compositeKey = $"{kernelDeviceName}=>{portName}";
                 if (_knownPorts.TryAdd(compositeKey, portName))
                 {
-                    var (category, description) = ClassifyKernelPort(kernelDeviceName, portName, processName);
-
                     OnPortActivityDetected?.Invoke(new SourceTelemetryEvent
                     {
                         ProcessId = pid,
@@ -58,6 +68,7 @@ public sealed class ActiveComAndUsbPortPoller : IDisposable
                         TargetResource = $"{kernelDeviceName} -> {portName}",
                         CommandCategory = category,
                         DecodedCommandText = description,
+                        PureCommandText = $"{portName} ({kernelDeviceName})",
                         PayloadSize = portName.Length
                     });
                 }
@@ -68,16 +79,15 @@ public sealed class ActiveComAndUsbPortPoller : IDisposable
 
     public static (string Category, string Description) ClassifyKernelPort(string kernelPath, string comPort, string processName)
     {
-        // 1. بورت معالجات MediaTek (CDC-ACM / Preloader / BROM VCOM) مثل \Device\cdcacm1 -> COM59
         if (kernelPath.Contains("cdcacm", StringComparison.OrdinalIgnoreCase) ||
             kernelPath.Contains("mtk", StringComparison.OrdinalIgnoreCase) ||
-            kernelPath.Contains("vcom", StringComparison.OrdinalIgnoreCase))
+            kernelPath.Contains("vcom", StringComparison.OrdinalIgnoreCase) ||
+            kernelPath.Contains("0e8d", StringComparison.OrdinalIgnoreCase))
         {
             return ("MediaTek BROM / Preloader Port",
                 $"رصد منفذ MediaTek (BROM / Preloader / DA) نشط للأداة [{processName}]: {comPort} (المسار الكيرنلي: {kernelPath})");
         }
 
-        // 2. بورت مودم سامسونج مثل \Device\ssudmdm0000 -> COM103
         if (kernelPath.Contains("ssudmdm", StringComparison.OrdinalIgnoreCase) ||
             kernelPath.Contains("ssud", StringComparison.OrdinalIgnoreCase))
         {
@@ -85,7 +95,6 @@ public sealed class ActiveComAndUsbPortPoller : IDisposable
                 $"رصد منفذ مودم سامسونج نشط للأداة [{processName}]: {comPort} (المسار الكيرنلي: {kernelPath})");
         }
 
-        // 3. بورت كوالكوم (EDL 9008 / QMI / DIAG)
         if (kernelPath.Contains("QCUSB", StringComparison.OrdinalIgnoreCase) ||
             kernelPath.Contains("qcusb", StringComparison.OrdinalIgnoreCase) ||
             kernelPath.Contains("qcom", StringComparison.OrdinalIgnoreCase))
@@ -94,7 +103,6 @@ public sealed class ActiveComAndUsbPortPoller : IDisposable
                 $"رصد منفذ كوالكوم (EDL / DIAG) نشط للأداة [{processName}]: {comPort} (المسار الكيرنلي: {kernelPath})");
         }
 
-        // 4. بورت USB Serial عام (USBSER)
         if (kernelPath.Contains("USBSER", StringComparison.OrdinalIgnoreCase))
         {
             return ("USB Serial / Bootrom Port",
@@ -105,5 +113,17 @@ public sealed class ActiveComAndUsbPortPoller : IDisposable
             $"رصد منفذ تسلسلي نشط متاح للأداة [{processName}]: {comPort} (المسار الكيرنلي: {kernelPath})");
     }
 
-    public void Dispose() => _cts?.Cancel();
+    public void Stop()
+    {
+        try
+        {
+            _cts?.Cancel();
+            _cts?.Dispose();
+        }
+        catch { }
+        _cts = null;
+        _knownPorts.Clear();
+    }
+
+    public void Dispose() => Stop();
 }
