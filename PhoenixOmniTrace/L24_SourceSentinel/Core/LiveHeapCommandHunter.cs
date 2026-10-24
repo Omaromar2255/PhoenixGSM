@@ -25,6 +25,13 @@ public sealed class LiveHeapCommandHunter : IDisposable
     public event Action<SourceTelemetryEvent>? OnCommandCaptured;
 
     public L24DiscoveryMode DiscoveryMode { get; set; } = L24DiscoveryMode.FullRamDiscovery;
+    public Func<L24CommandGroup, bool>? IsCategoryEnabled { get; set; }
+    public bool ExcludeUrls { get; set; } = false;
+
+    public bool IsGroupEnabled(L24CommandGroup group)
+    {
+        return IsCategoryEnabled == null || IsCategoryEnabled(group);
+    }
 
     public bool IsWinUsbOrChildAdbActive
     {
@@ -312,7 +319,7 @@ public sealed class LiveHeapCommandHunter : IDisposable
         for (int i = 0; i < len - 16; i++)
         {
             // 1. حزمة بروتوكول MediaTek XFlash / DA2 الثنائية (EF EE EE FE)
-            if (buf[i] == 0xEF && buf[i + 1] == 0xEE && buf[i + 2] == 0xEE && buf[i + 3] == 0xFE)
+            if (IsGroupEnabled(L24CommandGroup.MediaTek) && buf[i] == 0xEF && buf[i + 1] == 0xEE && buf[i + 2] == 0xEE && buf[i + 3] == 0xFE)
             {
                 int cmdId = BitConverter.ToInt32(buf, i + 4);
                 int dataLen = BitConverter.ToInt32(buf, i + 8);
@@ -328,7 +335,7 @@ public sealed class LiveHeapCommandHunter : IDisposable
             }
 
             // 2. مصافحة MediaTek BROM الكاملة (A0 0A 50 05)
-            if (buf[i] == 0xA0 && buf[i + 1] == 0x0A && buf[i + 2] == 0x50 && buf[i + 3] == 0x05)
+            if (IsGroupEnabled(L24CommandGroup.MediaTek) && buf[i] == 0xA0 && buf[i + 1] == 0x0A && buf[i + 2] == 0x50 && buf[i + 3] == 0x05)
             {
                 byte nextByte = i + 4 < len ? buf[i + 4] : (byte)0;
                 if (nextByte is >= 0xC1 and <= 0xDF or 0xA0 or 0x5F)
@@ -343,7 +350,7 @@ public sealed class LiveHeapCommandHunter : IDisposable
             }
 
             // 3. ترويسة Apple AFC الثنائية (CFA6LPAA)
-            if (buf[i] == 'C' && buf[i + 1] == 'F' && buf[i + 2] == 'A' && buf[i + 3] == '6' &&
+            if (IsGroupEnabled(L24CommandGroup.AppleIos) && buf[i] == 'C' && buf[i + 1] == 'F' && buf[i + 2] == 'A' && buf[i + 3] == '6' &&
                 buf[i + 4] == 'L' && buf[i + 5] == 'P' && buf[i + 6] == 'A' && buf[i + 7] == 'A')
             {
                 int snapLen = Math.Min(48, len - i);
@@ -362,205 +369,239 @@ public sealed class LiveHeapCommandHunter : IDisposable
         if (mode == L24DiscoveryMode.ExecutedOnly) return;
 
         // 1. أوامر المودم AT وردود الهاتف وأوامر RIL IPC الهيكس
-        foreach (Match m in StrictAtCommandRegex.Matches(text))
+        if (IsGroupEnabled(L24CommandGroup.ModemAt))
         {
-            string val = CleanToken(m.Value);
-            if (val.Length < 2 || TruncatedAtPrefixes.Contains(val)) continue;
+            foreach (Match m in StrictAtCommandRegex.Matches(text))
+            {
+                string val = CleanToken(m.Value);
+                if (val.Length < 2 || TruncatedAtPrefixes.Contains(val)) continue;
 
-            bool isReply = val.StartsWith("+");
-            if (isReply && !ForensicNoiseGate.ShowPhoneResponses) continue;
+                bool isReply = val.StartsWith("+");
+                if (isReply && !ForensicNoiseGate.ShowPhoneResponses) continue;
 
-            bool isRilHex = val.StartsWith("060100", StringComparison.OrdinalIgnoreCase) ||
-                            val.StartsWith("120D00", StringComparison.OrdinalIgnoreCase) ||
-                            val.StartsWith("514200", StringComparison.OrdinalIgnoreCase) ||
-                            val.StartsWith("516400", StringComparison.OrdinalIgnoreCase);
+                bool isRilHex = val.StartsWith("060100", StringComparison.OrdinalIgnoreCase) ||
+                                val.StartsWith("120D00", StringComparison.OrdinalIgnoreCase) ||
+                                val.StartsWith("514200", StringComparison.OrdinalIgnoreCase) ||
+                                val.StartsWith("516400", StringComparison.OrdinalIgnoreCase);
 
-            string cat = isRilHex ? "ADB RIL / AT IPC Command" : (isReply ? "Modem Phone Response" : "Modem AT Command");
-            string desc = isRilHex
-                ? $"أمر RIL/AT هيكس مكتشف في الذاكرة: {val}"
-                : (isReply ? $"رد الهاتف المكتشف في ذاكرة الأداة: {val}" : $"أمر مودم صريح مكتشف في ذاكرة الأداة: {val}");
+                string cat = isRilHex ? "ADB RIL / AT IPC Command" : (isReply ? "Modem Phone Response" : "Modem AT Command");
+                string desc = isRilHex
+                    ? $"أمر RIL/AT هيكس مكتشف في الذاكرة: {val}"
+                    : (isReply ? $"رد الهاتف المكتشف في ذاكرة الأداة: {val}" : $"أمر مودم صريح مكتشف في ذاكرة الأداة: {val}");
 
-            string targetPort = isRilHex ? "/data/local/tmp/AT" : ActiveComAndUsbPortPoller.GetPrimaryActivePortLabel();
-            EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution, cat, desc, val, targetPort);
+                string targetPort = isRilHex ? "/data/local/tmp/AT" : ActiveComAndUsbPortPoller.GetPrimaryActivePortLabel();
+                EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution, cat, desc, val, targetPort);
+            }
         }
 
         // 2. أوامر وبروتوكولات وسجلات تنفيذ MediaTek
-        foreach (Match m in MtkProtocolRegex.Matches(text))
+        if (IsGroupEnabled(L24CommandGroup.MediaTek))
         {
-            string val = CleanToken(m.Value);
-            if (val.Length < 5 || !IsCleanRamString(val)) continue;
+            foreach (Match m in MtkProtocolRegex.Matches(text))
+            {
+                string val = CleanToken(m.Value);
+                if (val.Length < 5 || !IsCleanRamString(val)) continue;
 
-            EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution,
-                "MediaTek BROM / DA Command",
-                $"🔶 أمر/عملية MediaTek مكتشفة في ذاكرة الأداة: {val}",
-                val, "MTK Preloader / DA Engine");
+                EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution,
+                    "MediaTek BROM / DA Command",
+                    $"🔶 أمر/عملية MediaTek مكتشفة في ذاكرة الأداة: {val}",
+                    val, "MTK Preloader / DA Engine");
+            }
         }
 
         // 3. أوامر ADB و Fastboot و Shell
-        foreach (Match m in DeepAdbAndShellRegex.Matches(text))
+        if (IsGroupEnabled(L24CommandGroup.AdbFastboot))
         {
-            string val = CleanToken(m.Value, allowNewLines: true);
-            if (val.Length < 4 || !IsCleanRamString(val)) continue;
+            foreach (Match m in DeepAdbAndShellRegex.Matches(text))
+            {
+                string val = CleanToken(m.Value, allowNewLines: true);
+                if (val.Length < 4 || !IsCleanRamString(val)) continue;
 
-            EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution,
-                "ADB / Fastboot / Shell Command",
-                $"🤖 أمر ADB/Fastboot/Shell مكتشف في ذاكرة الأداة: {val}",
-                val, "ADB / Fastboot Engine");
+                EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution,
+                    "ADB / Fastboot / Shell Command",
+                    $"🤖 أمر ADB/Fastboot/Shell مكتشف في ذاكرة الأداة: {val}",
+                    val, "ADB / Fastboot Engine");
+            }
         }
 
         // 4. أوامر كوالكوم و EDL الموسعة
-        foreach (Match m in QualcommCommandRegex.Matches(text))
+        if (IsGroupEnabled(L24CommandGroup.Qualcomm))
         {
-            bool isXml = m.Value.StartsWith("<", StringComparison.Ordinal);
-            string val = CleanToken(m.Value, allowNewLines: isXml);
-            if (val.Length < 6 || !IsCleanRamString(val)) continue;
+            foreach (Match m in QualcommCommandRegex.Matches(text))
+            {
+                bool isXml = m.Value.StartsWith("<", StringComparison.Ordinal);
+                string val = CleanToken(m.Value, allowNewLines: isXml);
+                if (val.Length < 6 || !IsCleanRamString(val)) continue;
 
-            bool isResp = val.StartsWith("<response", StringComparison.OrdinalIgnoreCase);
-            if (isResp && !ForensicNoiseGate.ShowPhoneResponses) continue;
+                bool isResp = val.StartsWith("<response", StringComparison.OrdinalIgnoreCase);
+                if (isResp && !ForensicNoiseGate.ShowPhoneResponses) continue;
 
-            string cat = isResp ? "Firehose Device Response" : "Qualcomm EDL / Sahara / Firehose Command";
-            EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution,
-                cat, $"🔷 أمر/عملية كوالكوم EDL مكتشفة في ذاكرة الأداة: {val}", val, "Qualcomm EDL 9008 / DIAG");
+                string cat = isResp ? "Firehose Device Response" : "Qualcomm EDL / Sahara / Firehose Command";
+                EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution,
+                    cat, $"🔷 أمر/عملية كوالكوم EDL مكتشفة في ذاكرة الأداة: {val}", val, "Qualcomm EDL 9008 / DIAG");
+            }
         }
 
         // 5. أوامر وبروتوكولات Apple iOS (الأطوار الـ 7)
-        foreach (Match m in AppleIosRamRegex.Matches(text))
+        if (IsGroupEnabled(L24CommandGroup.AppleIos))
         {
-            string val = CleanToken(m.Value, allowNewLines: true);
-            if (val.Length < 4 || !IsCleanRamString(val)) continue;
+            foreach (Match m in AppleIosRamRegex.Matches(text))
+            {
+                string val = CleanToken(m.Value, allowNewLines: true);
+                if (val.Length < 4 || !IsCleanRamString(val)) continue;
 
-            EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution,
-                "Apple iOS / Lockdown / DFU / Pongo Command",
-                $"🍎 أمر/بروتوكول Apple iOS مكتشف في الذاكرة: {val}",
-                val, "Apple USB / Lockdown / DFU Engine");
+                EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution,
+                    "Apple iOS / Lockdown / DFU / Pongo Command",
+                    $"🍎 أمر/بروتوكول Apple iOS مكتشف في الذاكرة: {val}",
+                    val, "Apple USB / Lockdown / DFU Engine");
+            }
         }
 
         if (mode == L24DiscoveryMode.PhoneCommandsInRam)
             return;
 
         // 6. الروابط واستدعاءات الملفات السحابية من الخوادم (URLs & Cloud Files)
-        foreach (Match m in CloudAndServerUrlRegex.Matches(text))
+        if (!ExcludeUrls && IsGroupEnabled(L24CommandGroup.ServerCloudLogin))
         {
-            string val = CleanToken(m.Value, preserveUrlChars: true);
-            if (val.Length < 10 || !IsCleanRamString(val)) continue;
-
-            if (val.Contains("w3.org", StringComparison.OrdinalIgnoreCase) ||
-                val.Contains("schemas.microsoft.com", StringComparison.OrdinalIgnoreCase) ||
-                val.Contains("schemas.xmlsoap.org", StringComparison.OrdinalIgnoreCase) ||
-                val.Contains("ns.adobe.com", StringComparison.OrdinalIgnoreCase) ||
-                val.Contains("digicert.com", StringComparison.OrdinalIgnoreCase) ||
-                val.Contains("sectigo.com", StringComparison.OrdinalIgnoreCase) ||
-                val.Contains("verisign.com", StringComparison.OrdinalIgnoreCase))
+            foreach (Match m in CloudAndServerUrlRegex.Matches(text))
             {
-                continue;
+                string val = CleanToken(m.Value, preserveUrlChars: true);
+                if (val.Length < 10 || !IsCleanRamString(val)) continue;
+
+                if (val.Contains("w3.org", StringComparison.OrdinalIgnoreCase) ||
+                    val.Contains("schemas.microsoft.com", StringComparison.OrdinalIgnoreCase) ||
+                    val.Contains("schemas.xmlsoap.org", StringComparison.OrdinalIgnoreCase) ||
+                    val.Contains("ns.adobe.com", StringComparison.OrdinalIgnoreCase) ||
+                    val.Contains("digicert.com", StringComparison.OrdinalIgnoreCase) ||
+                    val.Contains("sectigo.com", StringComparison.OrdinalIgnoreCase) ||
+                    val.Contains("verisign.com", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                bool isCloudFile = val.Contains(".bin", StringComparison.OrdinalIgnoreCase) ||
+                                   val.Contains(".mbn", StringComparison.OrdinalIgnoreCase) ||
+                                   val.Contains(".elf", StringComparison.OrdinalIgnoreCase) ||
+                                   val.Contains(".zip", StringComparison.OrdinalIgnoreCase) ||
+                                   val.Contains(".7z", StringComparison.OrdinalIgnoreCase) ||
+                                   val.Contains(".auth", StringComparison.OrdinalIgnoreCase) ||
+                                   val.Contains(".plist", StringComparison.OrdinalIgnoreCase) ||
+                                   val.Contains(".shsh", StringComparison.OrdinalIgnoreCase) ||
+                                   val.Contains("download", StringComparison.OrdinalIgnoreCase) ||
+                                   val.Contains("loader", StringComparison.OrdinalIgnoreCase) ||
+                                   val.Contains("firehose", StringComparison.OrdinalIgnoreCase);
+
+                string cat = isCloudFile ? "Cloud External File Request" : "Server / API Endpoint URL";
+                string desc = isCloudFile
+                    ? $"🌐 استدعاء/تحميل ملف خارجي من خادم سحابي: {val}"
+                    : $"🌐 رابط خادم خارجي / نقطة API مكتشفة بالذاكرة: {val}";
+
+                EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.NetworkPreEncryption, cat, desc, val, val);
             }
-
-            bool isCloudFile = val.Contains(".bin", StringComparison.OrdinalIgnoreCase) ||
-                               val.Contains(".mbn", StringComparison.OrdinalIgnoreCase) ||
-                               val.Contains(".elf", StringComparison.OrdinalIgnoreCase) ||
-                               val.Contains(".zip", StringComparison.OrdinalIgnoreCase) ||
-                               val.Contains(".7z", StringComparison.OrdinalIgnoreCase) ||
-                               val.Contains(".auth", StringComparison.OrdinalIgnoreCase) ||
-                               val.Contains(".plist", StringComparison.OrdinalIgnoreCase) ||
-                               val.Contains(".shsh", StringComparison.OrdinalIgnoreCase) ||
-                               val.Contains("download", StringComparison.OrdinalIgnoreCase) ||
-                               val.Contains("loader", StringComparison.OrdinalIgnoreCase) ||
-                               val.Contains("firehose", StringComparison.OrdinalIgnoreCase);
-
-            string cat = isCloudFile ? "Cloud External File Request" : "Server / API Endpoint URL";
-            string desc = isCloudFile
-                ? $"🌐 استدعاء/تحميل ملف خارجي من خادم سحابي: {val}"
-                : $"🌐 رابط خادم خارجي / نقطة API مكتشفة بالذاكرة: {val}";
-
-            EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.NetworkPreEncryption, cat, desc, val, val);
         }
 
         // 7. عمليات تسجيل الدخول والمصادقة والحسابات والبيانات المرسلة/المستلمة للخوادم
-        foreach (Match m in LoginAndServerAuthRegex.Matches(text))
+        if (IsGroupEnabled(L24CommandGroup.ServerCloudLogin))
         {
-            string val = CleanToken(m.Value, allowNewLines: true, preserveUrlChars: true);
-            if (val.Length < 10 || !IsCleanRamString(val)) continue;
+            foreach (Match m in LoginAndServerAuthRegex.Matches(text))
+            {
+                string val = CleanToken(m.Value, allowNewLines: true, preserveUrlChars: true);
+                if (val.Length < 10 || !IsCleanRamString(val)) continue;
 
-            bool isLoginOrToken = val.Contains("login", StringComparison.OrdinalIgnoreCase) ||
-                                  val.Contains("password", StringComparison.OrdinalIgnoreCase) ||
-                                  val.Contains("passwd", StringComparison.OrdinalIgnoreCase) ||
-                                  val.Contains("username", StringComparison.OrdinalIgnoreCase) ||
-                                  val.Contains("Bearer", StringComparison.OrdinalIgnoreCase) ||
-                                  val.Contains("token", StringComparison.OrdinalIgnoreCase) ||
-                                  val.Contains("license", StringComparison.OrdinalIgnoreCase) ||
-                                  val.Contains("hwid", StringComparison.OrdinalIgnoreCase);
+                bool isLoginOrToken = val.Contains("login", StringComparison.OrdinalIgnoreCase) ||
+                                      val.Contains("password", StringComparison.OrdinalIgnoreCase) ||
+                                      val.Contains("passwd", StringComparison.OrdinalIgnoreCase) ||
+                                      val.Contains("username", StringComparison.OrdinalIgnoreCase) ||
+                                      val.Contains("Bearer", StringComparison.OrdinalIgnoreCase) ||
+                                      val.Contains("token", StringComparison.OrdinalIgnoreCase) ||
+                                      val.Contains("license", StringComparison.OrdinalIgnoreCase) ||
+                                      val.Contains("hwid", StringComparison.OrdinalIgnoreCase);
 
-            string cat = isLoginOrToken
-                ? "Tool Login / Auth / Account Session"
-                : "Server HTTP / JSON Data Exchange";
-            string desc = isLoginOrToken
-                ? $"🔑 عملية تسجيل دخول / مصادقة حساب / توكن مكتشفة بالذاكرة: {val}"
-                : $"📡 بيانات متبادلة مع الخادم (HTTP/JSON Payload): {val}";
+                string cat = isLoginOrToken
+                    ? "Tool Login / Auth / Account Session"
+                    : "Server HTTP / JSON Data Exchange";
+                string desc = isLoginOrToken
+                    ? $"🔑 عملية تسجيل دخول / مصادقة حساب / توكن مكتشفة بالذاكرة: {val}"
+                    : $"📡 بيانات متبادلة مع الخادم (HTTP/JSON Payload): {val}";
 
-            EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.NetworkPreEncryption, cat, desc, val, "Server / Account Auth");
+                EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.NetworkPreEncryption, cat, desc, val, "Server / Account Auth");
+            }
         }
 
         // 8. أوامر رفع وتحميل ونقل الملفات وتجهيز اللودرات (مع محاولة حفظ الملف تلقائياً عبر L24FileArchiver!)
-        foreach (Match m in FileTransferAndLoaderRegex.Matches(text))
+        if (IsGroupEnabled(L24CommandGroup.FileTransfer))
         {
-            string val = CleanToken(m.Value);
-            if (val.Length < 6 || !IsCleanRamString(val)) continue;
-            if (val.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) || val.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
-
-            string savedFile = string.Empty;
-            long savedSize = 0;
-            if (L24FileArchiver.TryArchiveDiscoveredFile(val, $"RAM_Hunter ({processName})", out string sPath, out long sLen, out _))
+            foreach (Match m in FileTransferAndLoaderRegex.Matches(text))
             {
-                savedFile = sPath;
-                savedSize = sLen;
+                string val = CleanToken(m.Value);
+                if (val.Length < 6 || !IsCleanRamString(val)) continue;
+                if (val.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) || val.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
+
+                string savedFile = string.Empty;
+                long savedSize = 0;
+                if (L24FileArchiver.TryArchiveDiscoveredFile(val, $"RAM_Hunter ({processName})", out string sPath, out long sLen, out _))
+                {
+                    savedFile = sPath;
+                    savedSize = sLen;
+                }
+
+                string saveBadge = !string.IsNullOrWhiteSpace(savedFile)
+                    ? $" | 💾 تم حفظ الملف تلقائياً في: [{Path.GetFileName(savedFile)}] ({savedSize:N0} بايت)"
+                    : "";
+
+                EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution,
+                    "File Transfer / Loader Preparation",
+                    $"📤 أمر نقل/رفع/تحميل أو تجهيز ملف لودر في الذاكرة: {val}{saveBadge}",
+                    val, !string.IsNullOrWhiteSpace(savedFile) ? savedFile : "File Transfer / Loader Engine",
+                    savedFilePath: savedFile);
             }
-
-            string saveBadge = !string.IsNullOrWhiteSpace(savedFile)
-                ? $" | 💾 تم حفظ الملف تلقائياً في: [{Path.GetFileName(savedFile)}] ({savedSize:N0} بايت)"
-                : "";
-
-            EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution,
-                "File Transfer / Loader Preparation",
-                $"📤 أمر نقل/رفع/تحميل أو تجهيز ملف لودر في الذاكرة: {val}{saveBadge}",
-                val, !string.IsNullOrWhiteSpace(savedFile) ? savedFile : "File Transfer / Loader Engine",
-                savedFilePath: savedFile);
         }
 
         // 9. أوامر فتح الضغط والضغط وتفكيك الصور
-        foreach (Match m in ArchiveAndUnpackCommandRegex.Matches(text))
+        if (IsGroupEnabled(L24CommandGroup.ArchiveUnpack))
         {
-            string val = CleanToken(m.Value);
-            if (val.Length < 6 || !IsCleanRamString(val)) continue;
+            foreach (Match m in ArchiveAndUnpackCommandRegex.Matches(text))
+            {
+                string val = CleanToken(m.Value);
+                if (val.Length < 6 || !IsCleanRamString(val)) continue;
 
-            EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution,
-                "Archive / Unpack Command",
-                $"📦 أمر فك ضغط/تفكيك صور مكتشف في الذاكرة: {val}",
-                val, "Archive / Image Unpacker");
+                EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution,
+                    "Archive / Unpack Command",
+                    $"📦 أمر فك ضغط/تفكيك صور مكتشف في الذاكرة: {val}",
+                    val, "Archive / Image Unpacker");
+            }
         }
 
         // 10. أوامر التشفير وفك التشفير والمفاتيح والبذور الأمنية
-        foreach (Match m in CryptoAndDecryptionCommandRegex.Matches(text))
+        if (IsGroupEnabled(L24CommandGroup.CryptoAuth))
         {
-            string val = CleanToken(m.Value);
-            if (val.Length < 6 || !IsCleanRamString(val)) continue;
+            foreach (Match m in CryptoAndDecryptionCommandRegex.Matches(text))
+            {
+                string val = CleanToken(m.Value);
+                if (val.Length < 6 || !IsCleanRamString(val)) continue;
 
-            EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution,
-                "Encryption / Decryption / Security Seed",
-                $"🔐 عملية تشفير/فك تشفير أو بذرة أمنية مكتشفة في الذاكرة: {val}",
-                val, "Crypto / Security Engine");
+                EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution,
+                    "Encryption / Decryption / Security Seed",
+                    $"🔐 عملية تشفير/فك تشفير أو بذرة أمنية مكتشفة في الذاكرة: {val}",
+                    val, "Crypto / Security Engine");
+            }
         }
 
         // 11. بروتوكولات Odin / Unisoc SPD / المسارات الحساسة / أوامر أخرى
-        foreach (Match m in OdinSpdAndOtherRegex.Matches(text))
+        if (IsGroupEnabled(L24CommandGroup.OtherCommands))
         {
-            string val = CleanToken(m.Value);
-            if (val.Length < 6 || !IsCleanRamString(val)) continue;
+            foreach (Match m in OdinSpdAndOtherRegex.Matches(text))
+            {
+                string val = CleanToken(m.Value);
+                if (val.Length < 6 || !IsCleanRamString(val)) continue;
 
-            EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution,
-                "Other Discovered Command",
-                $"🧩 أمر/مسار مكتشف في ذاكرة الأداة: {val}",
-                val, "General Tool Command");
+                EmitDiscovered(pid, processName, memAddress + m.Index, SentinelStage.RawCommandExecution,
+                    "Other Discovered Command",
+                    $"🧩 أمر/مسار مكتشف في ذاكرة الأداة: {val}",
+                    val, "General Tool Command");
+            }
         }
+    }
     }
 
     private static string CleanToken(string input, bool allowNewLines = false, bool preserveUrlChars = false)

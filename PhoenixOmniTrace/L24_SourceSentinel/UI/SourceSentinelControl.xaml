@@ -193,6 +193,12 @@
                                   Foreground="#F97316" FontWeight="SemiBold" FontSize="11"
                                   VerticalAlignment="Center" Margin="0,0,12,0"
                                   ToolTip="تشغيل أو إيقاف تسجيل السجل الخام الشامل (Unfiltered Raw Stream) على القرص والواجهة آنياً" />
+
+                        <CheckBox Content="🚫 استثناء الروابط (خام)"
+                                  IsChecked="{Binding ExcludeUrlsFromRawLog, Mode=TwoWay}"
+                                  Foreground="#FBBF24" FontWeight="SemiBold" FontSize="11"
+                                  VerticalAlignment="Center" Margin="0,0,12,0"
+                                  ToolTip="استثناء الروابط واستدعاءات الخوادم من السجل الخام الشامل (مفعل افتراضياً)" />
                     </StackPanel>
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -315,6 +321,7 @@
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
@@ -326,59 +333,192 @@
                             </Grid.ColumnDefinitions>
 
                             <WrapPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                                <RadioButton Content="🌐 الكل" IsChecked="{Binding IsDiscAllSelected, Mode=OneWay}"
+                                <RadioButton Content="{Binding DiscAllButtonText}" IsChecked="{Binding IsDiscAllSelected, Mode=OneWay}"
                                              Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="All"
-                                             Style="{StaticResource FilterPillBtn}" />
+                                             Style="{StaticResource FilterPillBtn}">
+                                    <RadioButton.ContextMenu>
+                                        <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
+                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                            <MenuItem Header="🚫 استثناء فئة الروابط من الرصد" Command="{Binding ExcludeUrlsCommand}" />
+                                        </ContextMenu>
+                                    </RadioButton.ContextMenu>
+                                </RadioButton>
 
-                                <RadioButton Content="{Binding DiscModemCount, StringFormat='📻 المودم ({0})'}" IsChecked="{Binding IsDiscModemSelected, Mode=OneWay}"
+                                <RadioButton Content="{Binding DiscModemButtonText}" IsChecked="{Binding IsDiscModemSelected, Mode=OneWay}"
                                              Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="ModemAt"
-                                             Style="{StaticResource FilterPillBtn}" />
+                                             Style="{StaticResource FilterPillBtn}">
+                                    <RadioButton.ContextMenu>
+                                        <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
+                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد أوامر المودم" Command="{Binding ToggleCategoryCommand}" CommandParameter="ModemAt" />
+                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                        </ContextMenu>
+                                    </RadioButton.ContextMenu>
+                                </RadioButton>
 
-                                <RadioButton Content="{Binding DiscMtkCount, StringFormat='🔶 ميدياتك ({0})'}" IsChecked="{Binding IsDiscMtkSelected, Mode=OneWay}"
+                                <RadioButton Content="{Binding DiscMtkButtonText}" IsChecked="{Binding IsDiscMtkSelected, Mode=OneWay}"
                                              Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="MediaTek"
-                                             Style="{StaticResource FilterPillBtn}" />
+                                             Style="{StaticResource FilterPillBtn}">
+                                    <RadioButton.ContextMenu>
+                                        <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
+                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد أوامر MTK ميدياتك" Command="{Binding ToggleCategoryCommand}" CommandParameter="MediaTek" />
+                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                        </ContextMenu>
+                                    </RadioButton.ContextMenu>
+                                </RadioButton>
 
-                                <RadioButton Content="{Binding DiscQualcommCount, StringFormat='🔷 كوالكوم و EDL ({0})'}" IsChecked="{Binding IsDiscQualcommSelected, Mode=OneWay}"
+                                <RadioButton Content="{Binding DiscQualcommButtonText}" IsChecked="{Binding IsDiscQualcommSelected, Mode=OneWay}"
                                              Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="Qualcomm"
-                                             Style="{StaticResource FilterPillBtn}" />
+                                             Style="{StaticResource FilterPillBtn}">
+                                    <RadioButton.ContextMenu>
+                                        <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
+                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد أوامر كوالكوم EDL" Command="{Binding ToggleCategoryCommand}" CommandParameter="Qualcomm" />
+                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                        </ContextMenu>
+                                    </RadioButton.ContextMenu>
+                                </RadioButton>
 
-                                <RadioButton Content="{Binding DiscAppleCount, StringFormat='🍎 أبل Apple ({0})'}" IsChecked="{Binding IsDiscAppleSelected, Mode=OneWay}"
+                                <RadioButton Content="{Binding DiscAppleButtonText}" IsChecked="{Binding IsDiscAppleSelected, Mode=OneWay}"
                                              Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="AppleIos"
-                                             Style="{StaticResource FilterPillBtn}" />
+                                             Style="{StaticResource FilterPillBtn}">
+                                    <RadioButton.ContextMenu>
+                                        <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
+                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد أوامر أبل Apple" Command="{Binding ToggleCategoryCommand}" CommandParameter="AppleIos" />
+                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                        </ContextMenu>
+                                    </RadioButton.ContextMenu>
+                                </RadioButton>
 
-                                <RadioButton Content="{Binding DiscAdbCount, StringFormat='🤖 ADB/Fastboot ({0})'}" IsChecked="{Binding IsDiscAdbSelected, Mode=OneWay}"
+                                <RadioButton Content="{Binding DiscAdbButtonText}" IsChecked="{Binding IsDiscAdbSelected, Mode=OneWay}"
                                              Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="AdbFastboot"
-                                             Style="{StaticResource FilterPillBtn}" />
+                                             Style="{StaticResource FilterPillBtn}">
+                                    <RadioButton.ContextMenu>
+                                        <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
+                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد أوامر ADB و Fastboot" Command="{Binding ToggleCategoryCommand}" CommandParameter="AdbFastboot" />
+                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                        </ContextMenu>
+                                    </RadioButton.ContextMenu>
+                                </RadioButton>
 
-                                <RadioButton Content="{Binding DiscServerCloudCount, StringFormat='🌐 الروابط وتسجيل الدخول ({0})'}" IsChecked="{Binding IsDiscServerCloudSelected, Mode=OneWay}"
+                                <RadioButton Content="{Binding DiscServerCloudButtonText}" IsChecked="{Binding IsDiscServerCloudSelected, Mode=OneWay}"
                                              Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="ServerCloudLogin"
-                                             Style="{StaticResource FilterPillBtn}" />
+                                             Style="{StaticResource FilterPillBtn}">
+                                    <RadioButton.ContextMenu>
+                                        <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
+                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد الروابط والخوادم" Command="{Binding ToggleCategoryCommand}" CommandParameter="ServerCloudLogin" />
+                                            <MenuItem Header="🚫 استثناء فئة الروابط من الرصد فوراً" Command="{Binding ExcludeUrlsCommand}" />
+                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                        </ContextMenu>
+                                    </RadioButton.ContextMenu>
+                                </RadioButton>
 
-                                <RadioButton Content="{Binding DiscTransferCount, StringFormat='📤 نقل وملفات بوت ({0})'}" IsChecked="{Binding IsDiscTransferSelected, Mode=OneWay}"
+                                <RadioButton Content="{Binding DiscTransferButtonText}" IsChecked="{Binding IsDiscTransferSelected, Mode=OneWay}"
                                              Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="FileTransfer"
-                                             Style="{StaticResource FilterPillBtn}" />
+                                             Style="{StaticResource FilterPillBtn}">
+                                    <RadioButton.ContextMenu>
+                                        <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
+                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد ملفات النقل واللودر" Command="{Binding ToggleCategoryCommand}" CommandParameter="FileTransfer" />
+                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                        </ContextMenu>
+                                    </RadioButton.ContextMenu>
+                                </RadioButton>
 
-                                <RadioButton Content="{Binding DiscArchiveCount, StringFormat='📦 فك ضغط ({0})'}" IsChecked="{Binding IsDiscArchiveSelected, Mode=OneWay}"
+                                <RadioButton Content="{Binding DiscArchiveButtonText}" IsChecked="{Binding IsDiscArchiveSelected, Mode=OneWay}"
                                              Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="ArchiveUnpack"
-                                             Style="{StaticResource FilterPillBtn}" />
+                                             Style="{StaticResource FilterPillBtn}">
+                                    <RadioButton.ContextMenu>
+                                        <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
+                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد فك الضغط" Command="{Binding ToggleCategoryCommand}" CommandParameter="ArchiveUnpack" />
+                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                        </ContextMenu>
+                                    </RadioButton.ContextMenu>
+                                </RadioButton>
 
-                                <RadioButton Content="{Binding DiscCryptoCount, StringFormat='🔐 تشفير ومفاتيح ({0})'}" IsChecked="{Binding IsDiscCryptoSelected, Mode=OneWay}"
+                                <RadioButton Content="{Binding DiscCryptoButtonText}" IsChecked="{Binding IsDiscCryptoSelected, Mode=OneWay}"
                                              Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="CryptoAuth"
-                                             Style="{StaticResource FilterPillBtn}" />
+                                             Style="{StaticResource FilterPillBtn}">
+                                    <RadioButton.ContextMenu>
+                                        <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
+                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد التشفير والمفاتيح" Command="{Binding ToggleCategoryCommand}" CommandParameter="CryptoAuth" />
+                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                        </ContextMenu>
+                                    </RadioButton.ContextMenu>
+                                </RadioButton>
 
-                                <RadioButton Content="{Binding DiscOtherCount, StringFormat='🧩 أوامر أخرى ({0})'}" IsChecked="{Binding IsDiscOtherSelected, Mode=OneWay}"
+                                <RadioButton Content="{Binding DiscOtherButtonText}" IsChecked="{Binding IsDiscOtherSelected, Mode=OneWay}"
                                              Command="{Binding SetDiscoveredCategoryFilterCommand}" CommandParameter="OtherCommands"
-                                             Style="{StaticResource FilterPillBtn}" />
+                                             Style="{StaticResource FilterPillBtn}">
+                                    <RadioButton.ContextMenu>
+                                        <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
+                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد الأوامر الأخرى" Command="{Binding ToggleCategoryCommand}" CommandParameter="OtherCommands" />
+                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                        </ContextMenu>
+                                    </RadioButton.ContextMenu>
+                                </RadioButton>
                             </WrapPanel>
 
-                            <Button Grid.Column="1" Content="📤 تصدير الفئة المحددة فقط"
-                                    Command="{Binding ExportSelectedDiscoveredCategoryCommand}"
-                                    Style="{StaticResource SentinelBtn}"
-                                    Background="#0E7490" BorderBrush="#22D3EE" Margin="8,0,0,0" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <CheckBox Content="🚫 استثناء الروابط"
+                                          IsChecked="{Binding ExcludeUrlsFromDiscovered, Mode=TwoWay}"
+                                          Foreground="#FBBF24" FontWeight="SemiBold" FontSize="11"
+                                          VerticalAlignment="Center" Margin="0,0,8,0"
+                                          ToolTip="استثناء الروابط والخوادم وتسجيل الدخول من الأوامر المكتشفة في الذاكرة" />
+
+                                <Button Content="⚙️ فئات الرصد (إيقاف/تفعيل)"
+                                        Command="{Binding ToggleCategoryConfigPanelCommand}"
+                                        Style="{StaticResource SentinelBtn}"
+                                        Background="#1E293B" BorderBrush="#38BDF8" Margin="0,0,8,0"
+                                        ToolTip="إيقاف أو تفعيل أي فئة من فئات الرصد وتوفير موارد الجهاز" />
+
+                                <Button Content="📤 تصدير الفئة المحددة فقط"
+                                        Command="{Binding ExportSelectedDiscoveredCategoryCommand}"
+                                        Style="{StaticResource SentinelBtn}"
+                                        Background="#0E7490" BorderBrush="#22D3EE" />
+                            </StackPanel>
                         </Grid>
                     </Border>
 
-                    <DataGrid Grid.Row="1" ItemsSource="{Binding FilteredDiscoveredRamEvents}"
+                    <!-- لوحة التحكم وتخصيص تفعيل/إيقاف فئات الرصد بالذاكرة -->
+                    <Border Grid.Row="1" Background="#0A0F1D" BorderBrush="#38BDF8" BorderThickness="1" CornerRadius="6"
+                            Padding="12,8" Margin="0,0,0,6"
+                            Visibility="{Binding IsCategoryConfigPanelVisible, Converter={StaticResource BoolToVis}}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0" Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="🛡️ خيارات إيقاف وتفعيل فئات الرصد بالذاكرة (إلغاء التحديد يوقف رصد الفئة فوراً ويوفر موارد المعالج):"
+                                               Foreground="#38BDF8" FontWeight="Bold" FontSize="11.5" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Content="تفعيل كافة الفئات" Command="{Binding EnableAllCategoriesCommand}" Style="{StaticResource SentinelBtn}" Background="#065F46" BorderBrush="#10B981" Margin="0,0,5,0" Padding="8,2" FontSize="10.5" />
+                                    <Button Content="🚫 إيقاف الروابط فقط" Command="{Binding ExcludeUrlsCommand}" Style="{StaticResource SentinelBtn}" Background="#7C2D12" BorderBrush="#F97316" Margin="0,0,5,0" Padding="8,2" FontSize="10.5" />
+                                    <Button Content="✕ إغلاق اللوحة" Command="{Binding ToggleCategoryConfigPanelCommand}" Style="{StaticResource SentinelBtn}" Background="#1E293B" BorderBrush="#475569" Padding="8,2" FontSize="10.5" />
+                                </StackPanel>
+                            </Grid>
+
+                            <WrapPanel Grid.Row="1" Orientation="Horizontal">
+                                <CheckBox Content="📻 أوامر المودم (Modem / AT)" IsChecked="{Binding IsModemCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="🔶 ميدياتك (MTK / BROM / DA)" IsChecked="{Binding IsMtkCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="🔷 كوالكوم و EDL (Firehose)" IsChecked="{Binding IsQualcommCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="🍎 أبل Apple (iOS / DFU / AFC)" IsChecked="{Binding IsAppleCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="🤖 ADB / Fastboot / Shell" IsChecked="{Binding IsAdbCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="🌐 الروابط والخوادم وتسجيل الدخول" IsChecked="{Binding IsServerCloudCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="📤 نقل وملفات بوت ولودر" IsChecked="{Binding IsTransferCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="📦 فك ضغط وتفكيك صور" IsChecked="{Binding IsArchiveCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="🔐 تشفير ومفاتيح وبذور" IsChecked="{Binding IsCryptoCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="🧩 أوامر وعمليات أخرى" IsChecked="{Binding IsOtherCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                            </WrapPanel>
+                        </Grid>
+                    </Border>
+
+                    <DataGrid Grid.Row="2" ItemsSource="{Binding FilteredDiscoveredRamEvents}"
                               SelectedItem="{Binding SelectedEvent}"
                               AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
                               HeadersVisibility="Column" GridLinesVisibility="Horizontal"
@@ -465,6 +605,12 @@
                                         Background="{Binding UnfilteredRawToggleBtnBackground}"
                                         BorderBrush="{Binding UnfilteredRawToggleBtnBorder}"
                                         Margin="0,0,8,0" Padding="10,3" FontSize="11" />
+
+                                <CheckBox Content="🚫 استثناء الروابط من السجل الخام"
+                                          IsChecked="{Binding ExcludeUrlsFromRawLog, Mode=TwoWay}"
+                                          Foreground="#FBBF24" FontWeight="SemiBold" FontSize="11"
+                                          VerticalAlignment="Center" Margin="0,0,8,0"
+                                          ToolTip="استثناء الروابط واستدعاءات الخوادم من السجل الخام الشامل (مفعل افتراضياً)" />
                             </StackPanel>
 
                             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">

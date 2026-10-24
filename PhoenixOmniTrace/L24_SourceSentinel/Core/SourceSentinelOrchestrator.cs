@@ -129,6 +129,58 @@ public sealed class SourceSentinelOrchestrator : IDisposable
         }
     }
 
+    private readonly ConcurrentDictionary<L24CommandGroup, bool> _enabledCategories = new();
+    private volatile bool _excludeUrlsFromDiscovered = false;
+    private volatile bool _excludeUrlsFromRawLog = true; // default true: "او اجعل افتراضي مفعل"
+
+    /// <summary>
+    /// خيار استثناء الروابط من السجل الخام الشامل (مفعل افتراضياً حسب طلب المستخدم)
+    /// </summary>
+    public bool ExcludeUrlsFromRawLog
+    {
+        get => _excludeUrlsFromRawLog;
+        set
+        {
+            if (_excludeUrlsFromRawLog != value)
+            {
+                _excludeUrlsFromRawLog = value;
+                OnLogMessage?.Invoke(value
+                    ? "[L24 SourceSentinel] تم تفعيل استثناء الروابط من السجل الخام."
+                    : "[L24 SourceSentinel] تم إيقاف استثناء الروابط من السجل الخام (تسجيل كافة الروابط).");
+            }
+        }
+    }
+
+    /// <summary>
+    /// خيار استثناء الروابط واستدعاءات الخوادم من الأوامر المكتشفة في الذاكرة
+    /// </summary>
+    public bool ExcludeUrlsFromDiscovered
+    {
+        get => _excludeUrlsFromDiscovered;
+        set
+        {
+            if (_excludeUrlsFromDiscovered != value)
+            {
+                _excludeUrlsFromDiscovered = value;
+                _heapHunter.ExcludeUrls = value;
+                OnLogMessage?.Invoke(value
+                    ? "[L24 SourceSentinel] تم تفعيل استثناء الروابط من الأوامر المكتشفة بالذاكرة."
+                    : "[L24 SourceSentinel] تم إيقاف استثناء الروابط من الأوامر المكتشفة.");
+            }
+        }
+    }
+
+    public bool IsCategoryDetectionEnabled(L24CommandGroup group)
+    {
+        return _enabledCategories.TryGetValue(group, out bool enabled) ? enabled : true;
+    }
+
+    public void SetCategoryDetectionEnabled(L24CommandGroup group, bool enabled)
+    {
+        _enabledCategories[group] = enabled;
+        OnLogMessage?.Invoke($"[L24 SourceSentinel] فئة [{L24CommandClassifier.GetGroupArabicTitle(group)}]: {(enabled ? "مفعلة ▶️" : "معطلة ⏸️ (تم إيقاف رصدها)")}");
+    }
+
     public SourceSentinelOrchestrator(string? customLogDir = null)
     {
         _adbBridge = new WinUsbFilterAdbBridge(HandleIncomingEvent);
@@ -191,6 +243,9 @@ public sealed class SourceSentinelOrchestrator : IDisposable
 
             _dllAuditor.AuditLoadedModule(pid, procName, dllPath);
         };
+
+        _heapHunter.IsCategoryEnabled = IsCategoryDetectionEnabled;
+        _heapHunter.ExcludeUrls = _excludeUrlsFromDiscovered;
     }
 
     private static string ResolveDefaultLogDirectory()
@@ -315,6 +370,16 @@ public sealed class SourceSentinelOrchestrator : IDisposable
         // ══════════════════════════════════════════════════════════════════════
         RecordUnfilteredRawEvent(evt);
 
+        // إيقاف الفئات غير المفعلة من الرصد بالذاكرة أو استثناء الروابط
+        if (evt.Scope == L24CommandScope.DiscoveredInRam)
+        {
+            if (!IsCategoryDetectionEnabled(evt.CommandGroup))
+                return;
+
+            if (_excludeUrlsFromDiscovered && (evt.CommandGroup == L24CommandGroup.ServerCloudLogin || L24CommandClassifier.IsUrlOrNetworkOrAuth(evt)))
+                return;
+        }
+
         // ══════════════════════════════════════════════════════════════════════
         // المسار الثاني: بوابة التصفية والتنظيم للتبويبات الـ 4 المعزولة
         // ══════════════════════════════════════════════════════════════════════
@@ -331,6 +396,9 @@ public sealed class SourceSentinelOrchestrator : IDisposable
         if (!_isActive || !_isUnfilteredRawLoggingEnabled || _isDisposed || evt == null) return;
         try
         {
+            // استثناء الروابط واستدعاءات الخوادم من السجل الخام عند تفعيل الخيار (مفعل افتراضياً)
+            if (_excludeUrlsFromRawLog && (evt.CommandGroup == L24CommandGroup.ServerCloudLogin || L24CommandClassifier.IsUrlOrNetworkOrAuth(evt)))
+                return;
             string rawKey = $"{evt.HookedApiName}|{evt.CommandCategory}|{evt.TargetResource}|{evt.DecodedCommandText}";
             DateTime now = DateTime.UtcNow;
 

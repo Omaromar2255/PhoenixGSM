@@ -207,6 +207,136 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
     public int DiscCryptoCount => DiscoveredRamEvents.Count(e => e.CommandGroup == L24CommandGroup.CryptoAuth);
     public int DiscOtherCount => DiscoveredRamEvents.Count(e => e.CommandGroup == L24CommandGroup.OtherCommands);
 
+    // نصوص الأزرار الكاملة موضح بها اسم النوع والعدد وحالة التفعيل لتجنب ظهور أرقام مجردة
+    public string DiscAllButtonText => $"🌐 الكل ({DiscoveredRamCommandsCount})";
+    public string DiscModemButtonText => $"📻 المودم ({DiscModemCount}){(IsModemCategoryEnabled ? "" : " [معطل]")}";
+    public string DiscMtkButtonText => $"🔶 ميدياتك ({DiscMtkCount}){(IsMtkCategoryEnabled ? "" : " [معطل]")}";
+    public string DiscQualcommButtonText => $"🔷 كوالكوم و EDL ({DiscQualcommCount}){(IsQualcommCategoryEnabled ? "" : " [معطل]")}";
+    public string DiscAppleButtonText => $"🍎 أبل Apple ({DiscAppleCount}){(IsAppleCategoryEnabled ? "" : " [معطل]")}";
+    public string DiscAdbButtonText => $"🤖 ADB/Fastboot ({DiscAdbCount}){(IsAdbCategoryEnabled ? "" : " [معطل]")}";
+    public string DiscServerCloudButtonText => $"🌐 الروابط والخوادم ({DiscServerCloudCount}){(IsServerCloudCategoryEnabled && !ExcludeUrlsFromDiscovered ? "" : " [معطل]")}";
+    public string DiscTransferButtonText => $"📤 نقل وملفات بوت ({DiscTransferCount}){(IsTransferCategoryEnabled ? "" : " [معطل]")}";
+    public string DiscArchiveButtonText => $"📦 فك ضغط ({DiscArchiveCount}){(IsArchiveCategoryEnabled ? "" : " [معطل]")}";
+    public string DiscCryptoButtonText => $"🔐 تشفير ومفاتيح ({DiscCryptoCount}){(IsCryptoCategoryEnabled ? "" : " [معطل]")}";
+    public string DiscOtherButtonText => $"🧩 أوامر أخرى ({DiscOtherCount}){(IsOtherCategoryEnabled ? "" : " [معطل]")}";
+
+    // التحكم في تفعيل وإيقاف رصد كل فئة من فئات الأوامر بالذاكرة
+    public bool IsModemCategoryEnabled
+    {
+        get => _orchestrator.IsCategoryDetectionEnabled(L24CommandGroup.ModemAt);
+        set => SetCategoryState(L24CommandGroup.ModemAt, value, nameof(IsModemCategoryEnabled), nameof(DiscModemButtonText));
+    }
+
+    public bool IsMtkCategoryEnabled
+    {
+        get => _orchestrator.IsCategoryDetectionEnabled(L24CommandGroup.MediaTek);
+        set => SetCategoryState(L24CommandGroup.MediaTek, value, nameof(IsMtkCategoryEnabled), nameof(DiscMtkButtonText));
+    }
+
+    public bool IsQualcommCategoryEnabled
+    {
+        get => _orchestrator.IsCategoryDetectionEnabled(L24CommandGroup.Qualcomm);
+        set => SetCategoryState(L24CommandGroup.Qualcomm, value, nameof(IsQualcommCategoryEnabled), nameof(DiscQualcommButtonText));
+    }
+
+    public bool IsAppleCategoryEnabled
+    {
+        get => _orchestrator.IsCategoryDetectionEnabled(L24CommandGroup.AppleIos);
+        set => SetCategoryState(L24CommandGroup.AppleIos, value, nameof(IsAppleCategoryEnabled), nameof(DiscAppleButtonText));
+    }
+
+    public bool IsAdbCategoryEnabled
+    {
+        get => _orchestrator.IsCategoryDetectionEnabled(L24CommandGroup.AdbFastboot);
+        set => SetCategoryState(L24CommandGroup.AdbFastboot, value, nameof(IsAdbCategoryEnabled), nameof(DiscAdbButtonText));
+    }
+
+    public bool IsServerCloudCategoryEnabled
+    {
+        get => _orchestrator.IsCategoryDetectionEnabled(L24CommandGroup.ServerCloudLogin);
+        set => SetCategoryState(L24CommandGroup.ServerCloudLogin, value, nameof(IsServerCloudCategoryEnabled), nameof(DiscServerCloudButtonText));
+    }
+
+    public bool IsTransferCategoryEnabled
+    {
+        get => _orchestrator.IsCategoryDetectionEnabled(L24CommandGroup.FileTransfer);
+        set => SetCategoryState(L24CommandGroup.FileTransfer, value, nameof(IsTransferCategoryEnabled), nameof(DiscTransferButtonText));
+    }
+
+    public bool IsArchiveCategoryEnabled
+    {
+        get => _orchestrator.IsCategoryDetectionEnabled(L24CommandGroup.ArchiveUnpack);
+        set => SetCategoryState(L24CommandGroup.ArchiveUnpack, value, nameof(IsArchiveCategoryEnabled), nameof(DiscArchiveButtonText));
+    }
+
+    public bool IsCryptoCategoryEnabled
+    {
+        get => _orchestrator.IsCategoryDetectionEnabled(L24CommandGroup.CryptoAuth);
+        set => SetCategoryState(L24CommandGroup.CryptoAuth, value, nameof(IsCryptoCategoryEnabled), nameof(DiscCryptoButtonText));
+    }
+
+    public bool IsOtherCategoryEnabled
+    {
+        get => _orchestrator.IsCategoryDetectionEnabled(L24CommandGroup.OtherCommands);
+        set => SetCategoryState(L24CommandGroup.OtherCommands, value, nameof(IsOtherCategoryEnabled), nameof(DiscOtherButtonText));
+    }
+
+    private void SetCategoryState(L24CommandGroup group, bool enabled, string propName, string buttonPropName)
+    {
+        if (_orchestrator.IsCategoryDetectionEnabled(group) != enabled)
+        {
+            _orchestrator.SetCategoryDetectionEnabled(group, enabled);
+            OnPropertyChanged(propName);
+            OnPropertyChanged(buttonPropName);
+            FilteredDiscoveredRamEvents.Refresh();
+        }
+    }
+
+    // استثناء الروابط من الأوامر المكتشفة في الذاكرة
+    public bool ExcludeUrlsFromDiscovered
+    {
+        get => _orchestrator.ExcludeUrlsFromDiscovered;
+        set
+        {
+            if (_orchestrator.ExcludeUrlsFromDiscovered != value)
+            {
+                _orchestrator.ExcludeUrlsFromDiscovered = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(DiscServerCloudButtonText));
+                FilteredDiscoveredRamEvents.Refresh();
+            }
+        }
+    }
+
+    // استثناء الروابط من السجل الخام (مفعل افتراضياً)
+    public bool ExcludeUrlsFromRawLog
+    {
+        get => _orchestrator.ExcludeUrlsFromRawLog;
+        set
+        {
+            if (_orchestrator.ExcludeUrlsFromRawLog != value)
+            {
+                _orchestrator.ExcludeUrlsFromRawLog = value;
+                OnPropertyChanged();
+                FilteredUnfilteredRawEvents.Refresh();
+            }
+        }
+    }
+
+    private bool _isCategoryConfigPanelVisible;
+    public bool IsCategoryConfigPanelVisible
+    {
+        get => _isCategoryConfigPanelVisible;
+        set
+        {
+            if (_isCategoryConfigPanelVisible != value)
+            {
+                _isCategoryConfigPanelVisible = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
     public bool IsL24Active => _orchestrator.IsActive;
 
     public string L24MasterStatusText => IsL24Active ? "🟢 الطبقة 24 تعمل وتراقب الآن" : "⏹️ الطبقة 24 معطلة (توفير الموارد)";
@@ -271,6 +401,12 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
 
     public ICommand ToggleUnfilteredRawLoggingCommand { get; }
     public ICommand ClearUnfilteredRawCommand { get; }
+
+    public ICommand ToggleCategoryConfigPanelCommand { get; }
+    public ICommand EnableAllCategoriesCommand { get; }
+    public ICommand DisableAllCategoriesCommand { get; }
+    public ICommand ExcludeUrlsCommand { get; }
+    public ICommand ToggleCategoryCommand { get; }
 
     public ICommand ClearEventsCommand { get; }
     public ICommand ExportLogsCommand { get; }
@@ -355,6 +491,44 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
             }
         });
 
+        ToggleCategoryConfigPanelCommand = new RelayCommand(_ => IsCategoryConfigPanelVisible = !IsCategoryConfigPanelVisible);
+
+        EnableAllCategoriesCommand = new RelayCommand(_ =>
+        {
+            foreach (L24CommandGroup grp in Enum.GetValues<L24CommandGroup>())
+                _orchestrator.SetCategoryDetectionEnabled(grp, true);
+            ExcludeUrlsFromDiscovered = false;
+            NotifyAllCategoryProperties();
+            FilteredDiscoveredRamEvents.Refresh();
+        });
+
+        DisableAllCategoriesCommand = new RelayCommand(_ =>
+        {
+            foreach (L24CommandGroup grp in Enum.GetValues<L24CommandGroup>())
+                _orchestrator.SetCategoryDetectionEnabled(grp, false);
+            NotifyAllCategoryProperties();
+            FilteredDiscoveredRamEvents.Refresh();
+        });
+
+        ExcludeUrlsCommand = new RelayCommand(_ =>
+        {
+            ExcludeUrlsFromDiscovered = true;
+            IsServerCloudCategoryEnabled = false;
+            NotifyAllCategoryProperties();
+            FilteredDiscoveredRamEvents.Refresh();
+        });
+
+        ToggleCategoryCommand = new RelayCommand(param =>
+        {
+            if (param is string catStr && Enum.TryParse<L24CommandGroup>(catStr, out var grp))
+            {
+                bool curr = _orchestrator.IsCategoryDetectionEnabled(grp);
+                _orchestrator.SetCategoryDetectionEnabled(grp, !curr);
+                NotifyAllCategoryProperties();
+                FilteredDiscoveredRamEvents.Refresh();
+            }
+        });
+
         ClearEventsCommand = new RelayCommand(_ => ExecuteClearEvents());
         ExportLogsCommand = new RelayCommand(_ => ExecuteExportLogs());
         ExportPurePhoneCommandsCommand = new RelayCommand(_ => ExecuteExportPurePhoneCommands());
@@ -409,14 +583,23 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
                         }
                         else
                         {
-                            DiscoveredRamEvents.Add(evt);
-                            UpdateDiscoveredCategoryCounters();
+                            if (_orchestrator.IsCategoryDetectionEnabled(L24CommandGroup.ServerCloudLogin) && !ExcludeUrlsFromDiscovered)
+                            {
+                                DiscoveredRamEvents.Add(evt);
+                                UpdateDiscoveredCategoryCounters();
+                            }
                         }
                         break;
 
                     case L24CommandScope.DiscoveredInRam:
-                        DiscoveredRamEvents.Add(evt);
-                        UpdateDiscoveredCategoryCounters();
+                        if (_orchestrator.IsCategoryDetectionEnabled(evt.CommandGroup))
+                        {
+                            if (!ExcludeUrlsFromDiscovered || (evt.CommandGroup != L24CommandGroup.ServerCloudLogin && !L24CommandClassifier.IsUrlOrNetworkOrAuth(evt)))
+                            {
+                                DiscoveredRamEvents.Add(evt);
+                                UpdateDiscoveredCategoryCounters();
+                            }
+                        }
                         break;
 
                     case L24CommandScope.RadarAndFiles:
@@ -456,6 +639,23 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
         OnPropertyChanged(nameof(UnfilteredRawEventsCount));
     }
 
+    public void NotifyAllCategoryProperties()
+    {
+        OnPropertyChanged(nameof(IsModemCategoryEnabled));
+        OnPropertyChanged(nameof(IsMtkCategoryEnabled));
+        OnPropertyChanged(nameof(IsQualcommCategoryEnabled));
+        OnPropertyChanged(nameof(IsAppleCategoryEnabled));
+        OnPropertyChanged(nameof(IsAdbCategoryEnabled));
+        OnPropertyChanged(nameof(IsServerCloudCategoryEnabled));
+        OnPropertyChanged(nameof(IsTransferCategoryEnabled));
+        OnPropertyChanged(nameof(IsArchiveCategoryEnabled));
+        OnPropertyChanged(nameof(IsCryptoCategoryEnabled));
+        OnPropertyChanged(nameof(IsOtherCategoryEnabled));
+        OnPropertyChanged(nameof(ExcludeUrlsFromDiscovered));
+        OnPropertyChanged(nameof(ExcludeUrlsFromRawLog));
+        UpdateDiscoveredCategoryCounters();
+    }
+
     private void UpdateDiscoveredCategoryCounters()
     {
         OnPropertyChanged(nameof(DiscModemCount));
@@ -468,6 +668,18 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
         OnPropertyChanged(nameof(DiscArchiveCount));
         OnPropertyChanged(nameof(DiscCryptoCount));
         OnPropertyChanged(nameof(DiscOtherCount));
+
+        OnPropertyChanged(nameof(DiscAllButtonText));
+        OnPropertyChanged(nameof(DiscModemButtonText));
+        OnPropertyChanged(nameof(DiscMtkButtonText));
+        OnPropertyChanged(nameof(DiscQualcommButtonText));
+        OnPropertyChanged(nameof(DiscAppleButtonText));
+        OnPropertyChanged(nameof(DiscAdbButtonText));
+        OnPropertyChanged(nameof(DiscServerCloudButtonText));
+        OnPropertyChanged(nameof(DiscTransferButtonText));
+        OnPropertyChanged(nameof(DiscArchiveButtonText));
+        OnPropertyChanged(nameof(DiscCryptoButtonText));
+        OnPropertyChanged(nameof(DiscOtherButtonText));
     }
 
     private void AddArtifactIfNotExists(SourceTelemetryEvent evt)
@@ -543,6 +755,14 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
         if (obj is not SourceTelemetryEvent item) return false;
         if (!FilterCommonItem(item)) return false;
 
+        // إخفاء الفئات المعطلة من العرض
+        if (!_orchestrator.IsCategoryDetectionEnabled(item.CommandGroup))
+            return false;
+
+        // استثناء الروابط عند تفعيل استثناء الروابط
+        if (ExcludeUrlsFromDiscovered && (item.CommandGroup == L24CommandGroup.ServerCloudLogin || L24CommandClassifier.IsUrlOrNetworkOrAuth(item)))
+            return false;
+
         if (_discoveredCategoryFilter != "All" && Enum.TryParse<L24CommandGroup>(_discoveredCategoryFilter, out var grp))
         {
             if (item.CommandGroup != grp) return false;
@@ -553,6 +773,11 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
     private bool FilterUnfilteredRawItem(object obj)
     {
         if (obj is not SourceTelemetryEvent item) return false;
+
+        // استثناء الروابط واستدعاءات الخوادم من السجل الخام عند تفعيل الخيار (مفعل افتراضياً)
+        if (ExcludeUrlsFromRawLog && (item.CommandGroup == L24CommandGroup.ServerCloudLogin || L24CommandClassifier.IsUrlOrNetworkOrAuth(item)))
+            return false;
+
         if (string.IsNullOrWhiteSpace(_searchText)) return true;
 
         string q = _searchText.Trim();
