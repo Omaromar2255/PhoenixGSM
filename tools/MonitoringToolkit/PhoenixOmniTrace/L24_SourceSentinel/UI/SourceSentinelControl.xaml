@@ -1,4 +1,4 @@
-<UserControl x:Class="PhoenixOmniTrace.L24_SourceSentinel.UI.SourceSentinelControl"
+﻿<UserControl x:Class="PhoenixOmniTrace.L24_SourceSentinel.UI.SourceSentinelControl"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
@@ -9,69 +9,11 @@
              Background="#0B0E14" Foreground="#E2E8F0">
 
     <UserControl.Resources>
-        <BooleanToVisibilityConverter x:Key="BoolToVis" />
-        
-        <Style x:Key="SentinelBtn" TargetType="Button">
-            <Setter Property="Background" Value="#171C28" />
-            <Setter Property="Foreground" Value="#F8FAFC" />
-            <Setter Property="BorderBrush" Value="#2D3748" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="9,4" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="5"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#242C3F" />
-                    <Setter Property="BorderBrush" Value="#38BDF8" />
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-
-        <Style x:Key="FilterPillBtn" TargetType="RadioButton">
-            <Setter Property="Background" Value="#111622" />
-            <Setter Property="Foreground" Value="#94A3B8" />
-            <Setter Property="BorderBrush" Value="#1E293B" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="8,4" />
-            <Setter Property="Margin" Value="0,0,5,0" />
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="RadioButton">
-                        <Border Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="5"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <Trigger Property="IsChecked" Value="True">
-                    <Setter Property="Background" Value="#0F382C" />
-                    <Setter Property="Foreground" Value="#00FFC2" />
-                    <Setter Property="BorderBrush" Value="#00FFC2" />
-                    <Setter Property="FontWeight" Value="Bold" />
-                </Trigger>
-            </Style.Triggers>
-        </Style>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="SourceSentinelResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
     </UserControl.Resources>
 
     <Grid Margin="10">
@@ -98,7 +40,7 @@
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="🛡️" FontSize="20" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <TextBlock Text="ðŸ›¡ï¸" FontSize="20" VerticalAlignment="Center" Margin="0,0,8,0" />
                         <StackPanel VerticalAlignment="Center">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="L24 Source Sentinel" FontSize="15" FontWeight="Bold" Foreground="#38BDF8" VerticalAlignment="Center" />
@@ -106,13 +48,13 @@
                                     <TextBlock Text="MULTI-VECTOR PRE-EXECUTION + SMART RAM HUNTER + AUTO BOOT/LOADER ARCHIVER" FontSize="9" FontWeight="Bold" Foreground="#00FF9D" />
                                 </Border>
                             </StackPanel>
-                            <TextBlock Text="اعتراض الأوامر من الأداة قبل وأثناء التنفيذ (CMD/Shell/PTY/Sockets) + اكتشاف الرام مع عزل الخمول + حفظ تلقائي لملفات البوت واللودر" 
+                            <TextBlock Text="Ø§Ø¹ØªØ±Ø§Ø¶ Ø§Ù„Ø£ÙˆØ§Ù…Ø± Ù…Ù† Ø§Ù„Ø£Ø¯Ø§Ø© Ù‚Ø¨Ù„ ÙˆØ£Ø«Ù†Ø§Ø¡ Ø§Ù„ØªÙ†ÙÙŠØ° (CMD/Shell/PTY/Sockets) + Ø§ÙƒØªØ´Ø§Ù Ø§Ù„Ø±Ø§Ù… Ù…Ø¹ Ø¹Ø²Ù„ Ø§Ù„Ø®Ù…ÙˆÙ„ + Ø­ÙØ¸ ØªÙ„Ù‚Ø§Ø¦ÙŠ Ù„Ù…Ù„ÙØ§Øª Ø§Ù„Ø¨ÙˆØª ÙˆØ§Ù„Ù„ÙˆØ¯Ø±" 
                                        FontSize="10.5" Foreground="#64748B" Margin="0,2,0,0" />
                         </StackPanel>
                     </StackPanel>
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                        <!-- زر التحكم الرئيسي لتشغيل أو إيقاف الطبقة L24 بالكامل وتوفير موارد الجهاز -->
+                        <!-- Ø²Ø± Ø§Ù„ØªØ­ÙƒÙ… Ø§Ù„Ø±Ø¦ÙŠØ³ÙŠ Ù„ØªØ´ØºÙŠÙ„ Ø£Ùˆ Ø¥ÙŠÙ‚Ø§Ù Ø§Ù„Ø·Ø¨Ù‚Ø© L24 Ø¨Ø§Ù„ÙƒØ§Ù…Ù„ ÙˆØªÙˆÙÙŠØ± Ù…ÙˆØ§Ø±Ø¯ Ø§Ù„Ø¬Ù‡Ø§Ø² -->
                         <Button Command="{Binding ToggleL24MasterCommand}"
                                 Background="{Binding L24MasterButtonBackground}"
                                 BorderBrush="{Binding L24MasterButtonBorder}"
@@ -129,46 +71,46 @@
                             </StackPanel>
                         </Button>
 
-                        <!-- زر مستقل لإيقاف أو تشغيل فاحص الرام عند الحاجة لتوفير الأداء مع بقاء رصد الأوامر المنفذة يعمل 100% -->
+                        <!-- Ø²Ø± Ù…Ø³ØªÙ‚Ù„ Ù„Ø¥ÙŠÙ‚Ø§Ù Ø£Ùˆ ØªØ´ØºÙŠÙ„ ÙØ§Ø­Øµ Ø§Ù„Ø±Ø§Ù… Ø¹Ù†Ø¯ Ø§Ù„Ø­Ø§Ø¬Ø© Ù„ØªÙˆÙÙŠØ± Ø§Ù„Ø£Ø¯Ø§Ø¡ Ù…Ø¹ Ø¨Ù‚Ø§Ø¡ Ø±ØµØ¯ Ø§Ù„Ø£ÙˆØ§Ù…Ø± Ø§Ù„Ù…Ù†ÙØ°Ø© ÙŠØ¹Ù…Ù„ 100% -->
                         <Button Content="{Binding RamHunterToggleButtonText}"
                                 Command="{Binding ToggleRamHunterCommand}"
                                 Background="{Binding RamHunterToggleBtnBackground}"
                                 BorderBrush="{Binding RamHunterToggleBtnBorder}"
                                 Style="{StaticResource SentinelBtn}"
                                 Height="28" Padding="8,2" Margin="0,0,6,0"
-                                ToolTip="إيقاف أو تشغيل فاحص الرام مؤقتاً عند الحاجة لتوفير الأداء والتركيز على التقاط الأوامر المنفذة بدقة 100%" />
+                                ToolTip="Ø¥ÙŠÙ‚Ø§Ù Ø£Ùˆ ØªØ´ØºÙŠÙ„ ÙØ§Ø­Øµ Ø§Ù„Ø±Ø§Ù… Ù…Ø¤Ù‚ØªØ§Ù‹ Ø¹Ù†Ø¯ Ø§Ù„Ø­Ø§Ø¬Ø© Ù„ØªÙˆÙÙŠØ± Ø§Ù„Ø£Ø¯Ø§Ø¡ ÙˆØ§Ù„ØªØ±ÙƒÙŠØ² Ø¹Ù„Ù‰ Ø§Ù„ØªÙ‚Ø§Ø· Ø§Ù„Ø£ÙˆØ§Ù…Ø± Ø§Ù„Ù…Ù†ÙØ°Ø© Ø¨Ø¯Ù‚Ø© 100%" />
 
-                        <Button Content="🚀 تشغيل واعتراض أداة" 
+                        <Button Content="ðŸš€ ØªØ´ØºÙŠÙ„ ÙˆØ§Ø¹ØªØ±Ø§Ø¶ Ø£Ø¯Ø§Ø©" 
                                 Command="{Binding LaunchToolCommand}"
                                 Style="{StaticResource SentinelBtn}" 
                                 Background="#0284C7" BorderBrush="#38BDF8" Margin="0,0,5,0" />
 
-                        <Button Content="🔗 ربط بعملية (PID)" 
+                        <Button Content="ðŸ”— Ø±Ø¨Ø· Ø¨Ø¹Ù…Ù„ÙŠØ© (PID)" 
                                 Command="{Binding AttachProcessCommand}"
                                 Style="{StaticResource SentinelBtn}" 
                                 Background="#1E293B" BorderBrush="#475569" Margin="0,0,5,0" />
 
-                        <Button Content="📜 تصدير السجل الخام" 
+                        <Button Content="ðŸ“œ ØªØµØ¯ÙŠØ± Ø§Ù„Ø³Ø¬Ù„ Ø§Ù„Ø®Ø§Ù…" 
                                 Command="{Binding ExportUnfilteredRawLogsCommand}"
                                 Style="{StaticResource SentinelBtn}" 
                                 Background="#7C2D12" BorderBrush="#F97316" Margin="0,0,5,0" />
 
-                        <Button Content="🗂️ تصدير الفئات" 
+                        <Button Content="ðŸ—‚ï¸ ØªØµØ¯ÙŠØ± Ø§Ù„ÙØ¦Ø§Øª" 
                                 Command="{Binding ExportAllDiscoveredCategoriesSeparatelyCommand}"
                                 Style="{StaticResource SentinelBtn}" 
                                 Background="#3B0764" BorderBrush="#A855F7" Margin="0,0,5,0" />
 
-                        <Button Content="📂 الملفات المحفوظة" 
+                        <Button Content="ðŸ“‚ Ø§Ù„Ù…Ù„ÙØ§Øª Ø§Ù„Ù…Ø­ÙÙˆØ¸Ø©" 
                                 Command="{Binding OpenCapturedFilesFolderCommand}"
                                 Style="{StaticResource SentinelBtn}" 
                                 Background="#065F46" BorderBrush="#10B981" Margin="0,0,5,0" />
 
-                        <Button Content="📁 السجلات" 
+                        <Button Content="ðŸ“ Ø§Ù„Ø³Ø¬Ù„Ø§Øª" 
                                 Command="{Binding OpenLogsFolderCommand}"
                                 Style="{StaticResource SentinelBtn}" 
                                 Background="#1E293B" BorderBrush="#334155" Margin="0,0,5,0" />
 
-                        <Button Content="🗑️ مسح" 
+                        <Button Content="ðŸ—‘ï¸ Ù…Ø³Ø­" 
                                 Command="{Binding ClearEventsCommand}"
                                 Style="{StaticResource SentinelBtn}" 
                                 Background="#881337" BorderBrush="#F43F5E" />
@@ -183,39 +125,39 @@
                     </Grid.ColumnDefinitions>
 
                     <WrapPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="🎯 نمط الرام:" Foreground="#38BDF8" FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center" Margin="0,0,5,0" />
+                        <TextBlock Text="ðŸŽ¯ Ù†Ù…Ø· Ø§Ù„Ø±Ø§Ù…:" Foreground="#38BDF8" FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center" Margin="0,0,5,0" />
                         <ComboBox SelectedIndex="{Binding SelectedDiscoveryModeIndex, Mode=TwoWay}"
                                   Width="260" Height="25" FontSize="10.5"
                                   Background="#0F172A" Foreground="#0F172A" BorderBrush="#38BDF8" Margin="0,0,10,0">
-                            <ComboBoxItem Content="⚡ المنفذة للهاتف فقط (إيقاف فحص الرام العام)" />
-                            <ComboBoxItem Content="📱 المنفذة + أوامر الهاتف فقط بالرام (AT/MTK/QC/Apple/ADB)" />
-                            <ComboBoxItem Content="🧠 اكتشاف شامل للرام (يشمل الروابط وتسجيل الدخول والملفات والكل)" />
+                            <ComboBoxItem Content="âš¡ Ø§Ù„Ù…Ù†ÙØ°Ø© Ù„Ù„Ù‡Ø§ØªÙ ÙÙ‚Ø· (Ø¥ÙŠÙ‚Ø§Ù ÙØ­Øµ Ø§Ù„Ø±Ø§Ù… Ø§Ù„Ø¹Ø§Ù…)" />
+                            <ComboBoxItem Content="ðŸ“± Ø§Ù„Ù…Ù†ÙØ°Ø© + Ø£ÙˆØ§Ù…Ø± Ø§Ù„Ù‡Ø§ØªÙ ÙÙ‚Ø· Ø¨Ø§Ù„Ø±Ø§Ù… (AT/MTK/QC/Apple/ADB)" />
+                            <ComboBoxItem Content="ðŸ§  Ø§ÙƒØªØ´Ø§Ù Ø´Ø§Ù…Ù„ Ù„Ù„Ø±Ø§Ù… (ÙŠØ´Ù…Ù„ Ø§Ù„Ø±ÙˆØ§Ø¨Ø· ÙˆØªØ³Ø¬ÙŠÙ„ Ø§Ù„Ø¯Ø®ÙˆÙ„ ÙˆØ§Ù„Ù…Ù„ÙØ§Øª ÙˆØ§Ù„ÙƒÙ„)" />
                         </ComboBox>
 
-                        <CheckBox Content="🛡️ عزل أوامر الخمول الثابتة (Idle Filter)"
+                        <CheckBox Content="ðŸ›¡ï¸ Ø¹Ø²Ù„ Ø£ÙˆØ§Ù…Ø± Ø§Ù„Ø®Ù…ÙˆÙ„ Ø§Ù„Ø«Ø§Ø¨ØªØ© (Idle Filter)"
                                   IsChecked="{Binding SuppressIdleStaticBaseline, Mode=TwoWay}"
                                   Foreground="#34D399" FontWeight="SemiBold" FontSize="11"
                                   VerticalAlignment="Center" Margin="0,0,10,0"
-                                  ToolTip="يمنع ظهور النصوص الثابتة المخزنة داخل ملف الأداة في وضع الخمول (Idle) ويعرض فقط الأوامر التي تولدها الأداة أثناء العمل. ألغِ التحديد إذا أردت استخراج كافة نصوص الأداة الثابتة." />
+                                  ToolTip="ÙŠÙ…Ù†Ø¹ Ø¸Ù‡ÙˆØ± Ø§Ù„Ù†ØµÙˆØµ Ø§Ù„Ø«Ø§Ø¨ØªØ© Ø§Ù„Ù…Ø®Ø²Ù†Ø© Ø¯Ø§Ø®Ù„ Ù…Ù„Ù Ø§Ù„Ø£Ø¯Ø§Ø© ÙÙŠ ÙˆØ¶Ø¹ Ø§Ù„Ø®Ù…ÙˆÙ„ (Idle) ÙˆÙŠØ¹Ø±Ø¶ ÙÙ‚Ø· Ø§Ù„Ø£ÙˆØ§Ù…Ø± Ø§Ù„ØªÙŠ ØªÙˆÙ„Ø¯Ù‡Ø§ Ø§Ù„Ø£Ø¯Ø§Ø© Ø£Ø«Ù†Ø§Ø¡ Ø§Ù„Ø¹Ù…Ù„. Ø£Ù„ØºÙ Ø§Ù„ØªØ­Ø¯ÙŠØ¯ Ø¥Ø°Ø§ Ø£Ø±Ø¯Øª Ø§Ø³ØªØ®Ø±Ø§Ø¬ ÙƒØ§ÙØ© Ù†ØµÙˆØµ Ø§Ù„Ø£Ø¯Ø§Ø© Ø§Ù„Ø«Ø§Ø¨ØªØ©." />
 
-                        <CheckBox Content="⚡ فحص الـ Heap النشط فقط"
+                        <CheckBox Content="âš¡ ÙØ­Øµ Ø§Ù„Ù€ Heap Ø§Ù„Ù†Ø´Ø· ÙÙ‚Ø·"
                                   IsChecked="{Binding ScanDynamicHeapOnly, Mode=TwoWay}"
                                   Foreground="#38BDF8" FontWeight="SemiBold" FontSize="11"
                                   VerticalAlignment="Center" Margin="0,0,10,0"
-                                  ToolTip="يحصر فحص الرام في مناطق الذاكرة الديناميكية القابلة للكتابة فقط لسرعة فائقة (أقل من 150ms)" />
+                                  ToolTip="ÙŠØ­ØµØ± ÙØ­Øµ Ø§Ù„Ø±Ø§Ù… ÙÙŠ Ù…Ù†Ø§Ø·Ù‚ Ø§Ù„Ø°Ø§ÙƒØ±Ø© Ø§Ù„Ø¯ÙŠÙ†Ø§Ù…ÙŠÙƒÙŠØ© Ø§Ù„Ù‚Ø§Ø¨Ù„Ø© Ù„Ù„ÙƒØªØ§Ø¨Ø© ÙÙ‚Ø· Ù„Ø³Ø±Ø¹Ø© ÙØ§Ø¦Ù‚Ø© (Ø£Ù‚Ù„ Ù…Ù† 150ms)" />
 
-                        <Button Content="📸 تصفير/التقاط الخمول الآن"
+                        <Button Content="ðŸ“¸ ØªØµÙÙŠØ±/Ø§Ù„ØªÙ‚Ø§Ø· Ø§Ù„Ø®Ù…ÙˆÙ„ Ø§Ù„Ø¢Ù†"
                                 Command="{Binding CaptureIdleBaselineCommand}"
                                 Style="{StaticResource SentinelBtn}"
                                 Background="#1E293B" BorderBrush="#34D399" Padding="7,2" Margin="0,0,10,0" FontSize="10.5"
-                                ToolTip="التقاط حالة الرام الحالية كبصمة خمول بحيث يظهر بعدها فقط ما يستجد من أوامر" />
+                                ToolTip="Ø§Ù„ØªÙ‚Ø§Ø· Ø­Ø§Ù„Ø© Ø§Ù„Ø±Ø§Ù… Ø§Ù„Ø­Ø§Ù„ÙŠØ© ÙƒØ¨ØµÙ…Ø© Ø®Ù…ÙˆÙ„ Ø¨Ø­ÙŠØ« ÙŠØ¸Ù‡Ø± Ø¨Ø¹Ø¯Ù‡Ø§ ÙÙ‚Ø· Ù…Ø§ ÙŠØ³ØªØ¬Ø¯ Ù…Ù† Ø£ÙˆØ§Ù…Ø±" />
 
-                        <CheckBox Content="📥 رد الهاتف"
+                        <CheckBox Content="ðŸ“¥ Ø±Ø¯ Ø§Ù„Ù‡Ø§ØªÙ"
                                   IsChecked="{Binding ShowPhoneResponses, Mode=TwoWay}"
                                   Foreground="#00FFC2" FontWeight="SemiBold" FontSize="11"
                                   VerticalAlignment="Center" Margin="0,0,10,0" />
 
-                        <CheckBox Content="📜 السجل الخام"
+                        <CheckBox Content="ðŸ“œ Ø§Ù„Ø³Ø¬Ù„ Ø§Ù„Ø®Ø§Ù…"
                                   IsChecked="{Binding IsUnfilteredRawLoggingEnabled, Mode=TwoWay}"
                                   Foreground="#F97316" FontWeight="SemiBold" FontSize="11"
                                   VerticalAlignment="Center" Margin="0,0,10,0" />
@@ -226,14 +168,14 @@
                                 Padding="6,2" VerticalAlignment="Center"
                                 Visibility="{Binding IsOriginFilterActive, Converter={StaticResource BoolToVis}}">
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding ActiveOriginFilter, StringFormat='🎯 مصدر محدد: {0}'}" FontSize="10.5" Foreground="#E9D5FF" VerticalAlignment="Center" />
-                                <Button Content="✕" Command="{Binding ClearOriginFilterCommand}" Background="Transparent" BorderThickness="0" Foreground="#F43F5E" FontWeight="Bold" Margin="6,0,0,0" Cursor="Hand" />
+                                <TextBlock Text="{Binding ActiveOriginFilter, StringFormat='ðŸŽ¯ Ù…ØµØ¯Ø± Ù…Ø­Ø¯Ø¯: {0}'}" FontSize="10.5" Foreground="#E9D5FF" VerticalAlignment="Center" />
+                                <Button Content="âœ•" Command="{Binding ClearOriginFilterCommand}" Background="Transparent" BorderThickness="0" Foreground="#F43F5E" FontWeight="Bold" Margin="6,0,0,0" Cursor="Hand" />
                             </StackPanel>
                         </Border>
                     </StackPanel>
 
                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="🔍 بحث:" VerticalAlignment="Center" Foreground="#94A3B8" Margin="0,0,5,0" FontSize="11" />
+                        <TextBlock Text="ðŸ” Ø¨Ø­Ø«:" VerticalAlignment="Center" Foreground="#94A3B8" Margin="0,0,5,0" FontSize="11" />
                         <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" 
                                  Width="175" Height="25" VerticalContentAlignment="Center"
                                  Background="#0F172A" Foreground="#F8FAFC" BorderBrush="#334155" Padding="6,2" />
@@ -271,11 +213,11 @@
                 </Style>
             </TabControl.Resources>
 
-            <!-- التبويب 1: الأوامر الفعلية المنفذة للجهاز -->
+            <!-- Ø§Ù„ØªØ¨ÙˆÙŠØ¨ 1: Ø§Ù„Ø£ÙˆØ§Ù…Ø± Ø§Ù„ÙØ¹Ù„ÙŠØ© Ø§Ù„Ù…Ù†ÙØ°Ø© Ù„Ù„Ø¬Ù‡Ø§Ø² -->
             <TabItem>
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="⚡ الأوامر الفعلية المنفذة للجهاز (" />
+                        <TextBlock Text="âš¡ Ø§Ù„Ø£ÙˆØ§Ù…Ø± Ø§Ù„ÙØ¹Ù„ÙŠØ© Ø§Ù„Ù…Ù†ÙØ°Ø© Ù„Ù„Ø¬Ù‡Ø§Ø² (" />
                         <TextBlock Text="{Binding ExecutedCommandsCount}" Foreground="#00FFC2" />
                         <TextBlock Text=")" />
                     </StackPanel>
@@ -289,23 +231,23 @@
                               RowBackground="#111622" AlternatingRowBackground="#0D111A"
                               BorderThickness="0" Foreground="#E2E8F0" FontSize="11.5" RowHeight="26">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="الوقت" Binding="{Binding FormattedTimestamp}" Width="90" />
+                            <DataGridTextColumn Header="Ø§Ù„ÙˆÙ‚Øª" Binding="{Binding FormattedTimestamp}" Width="90" />
                             <DataGridTextColumn Header="PID" Binding="{Binding ProcessId}" Width="65" />
-                            <DataGridTextColumn Header="النوع" Binding="{Binding CommandGroupBadge}" Width="175" />
-                            <DataGridTextColumn Header="المصدر الفعلي" Binding="{Binding CallerModuleOrigin}" Width="170" />
-                            <DataGridTextColumn Header="المنفذ / الهدف" Binding="{Binding TargetResource}" Width="170" />
-                            <DataGridTextColumn Header="الأمر الصافي المنفذ" Binding="{Binding PureCommandText}" Width="240" />
-                            <DataGridTextColumn Header="التفاصيل" Binding="{Binding DecodedCommandText}" Width="*" />
+                            <DataGridTextColumn Header="Ø§Ù„Ù†ÙˆØ¹" Binding="{Binding CommandGroupBadge}" Width="175" />
+                            <DataGridTextColumn Header="Ø§Ù„Ù…ØµØ¯Ø± Ø§Ù„ÙØ¹Ù„ÙŠ" Binding="{Binding CallerModuleOrigin}" Width="170" />
+                            <DataGridTextColumn Header="Ø§Ù„Ù…Ù†ÙØ° / Ø§Ù„Ù‡Ø¯Ù" Binding="{Binding TargetResource}" Width="170" />
+                            <DataGridTextColumn Header="Ø§Ù„Ø£Ù…Ø± Ø§Ù„ØµØ§ÙÙŠ Ø§Ù„Ù…Ù†ÙØ°" Binding="{Binding PureCommandText}" Width="240" />
+                            <DataGridTextColumn Header="Ø§Ù„ØªÙØ§ØµÙŠÙ„" Binding="{Binding DecodedCommandText}" Width="*" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
             </TabItem>
 
-            <!-- التبويب 2: أوامر الهاتف الصافية للتجربة المباشرة -->
+            <!-- Ø§Ù„ØªØ¨ÙˆÙŠØ¨ 2: Ø£ÙˆØ§Ù…Ø± Ø§Ù„Ù‡Ø§ØªÙ Ø§Ù„ØµØ§ÙÙŠØ© Ù„Ù„ØªØ¬Ø±Ø¨Ø© Ø§Ù„Ù…Ø¨Ø§Ø´Ø±Ø© -->
             <TabItem>
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="📱 أوامر الهاتف للتجربة (" />
+                        <TextBlock Text="ðŸ“± Ø£ÙˆØ§Ù…Ø± Ø§Ù„Ù‡Ø§ØªÙ Ù„Ù„ØªØ¬Ø±Ø¨Ø© (" />
                         <TextBlock Text="{Binding PurePhoneCommandsCount}" Foreground="#38BDF8" />
                         <TextBlock Text=")" />
                     </StackPanel>
@@ -319,21 +261,21 @@
                               RowBackground="#111622" AlternatingRowBackground="#0D111A"
                               BorderThickness="0" Foreground="#E2E8F0" FontSize="11.5" RowHeight="26">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="الوقت" Binding="{Binding FormattedTimestamp}" Width="90" />
-                            <DataGridTextColumn Header="النطاق" Binding="{Binding ScopeBadge}" Width="135" />
-                            <DataGridTextColumn Header="الفئة" Binding="{Binding CommandGroupBadge}" Width="185" />
-                            <DataGridTextColumn Header="المنفذ / الهدف" Binding="{Binding TargetResource}" Width="165" />
-                            <DataGridTextColumn Header="الأمر الجاهز للتجربة (انسخ وجرب)" Binding="{Binding PureCommandText}" Width="*" />
+                            <DataGridTextColumn Header="Ø§Ù„ÙˆÙ‚Øª" Binding="{Binding FormattedTimestamp}" Width="90" />
+                            <DataGridTextColumn Header="Ø§Ù„Ù†Ø·Ø§Ù‚" Binding="{Binding ScopeBadge}" Width="135" />
+                            <DataGridTextColumn Header="Ø§Ù„ÙØ¦Ø©" Binding="{Binding CommandGroupBadge}" Width="185" />
+                            <DataGridTextColumn Header="Ø§Ù„Ù…Ù†ÙØ° / Ø§Ù„Ù‡Ø¯Ù" Binding="{Binding TargetResource}" Width="165" />
+                            <DataGridTextColumn Header="Ø§Ù„Ø£Ù…Ø± Ø§Ù„Ø¬Ø§Ù‡Ø² Ù„Ù„ØªØ¬Ø±Ø¨Ø© (Ø§Ù†Ø³Ø® ÙˆØ¬Ø±Ø¨)" Binding="{Binding PureCommandText}" Width="*" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
             </TabItem>
 
-            <!-- التبويب 3: الأوامر المكتشفة في الذاكرة (مع فلترة الـ 10 أنواع) -->
+            <!-- Ø§Ù„ØªØ¨ÙˆÙŠØ¨ 3: Ø§Ù„Ø£ÙˆØ§Ù…Ø± Ø§Ù„Ù…ÙƒØªØ´ÙØ© ÙÙŠ Ø§Ù„Ø°Ø§ÙƒØ±Ø© (Ù…Ø¹ ÙÙ„ØªØ±Ø© Ø§Ù„Ù€ 10 Ø£Ù†ÙˆØ§Ø¹) -->
             <TabItem>
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="🧠 الأوامر المكتشفة في الذاكرة (" />
+                        <TextBlock Text="ðŸ§  Ø§Ù„Ø£ÙˆØ§Ù…Ø± Ø§Ù„Ù…ÙƒØªØ´ÙØ© ÙÙŠ Ø§Ù„Ø°Ø§ÙƒØ±Ø© (" />
                         <TextBlock Text="{Binding DiscoveredRamCommandsCount}" Foreground="#FBBF24" />
                         <TextBlock Text=")" />
                     </StackPanel>
@@ -358,8 +300,8 @@
                                              Style="{StaticResource FilterPillBtn}">
                                     <RadioButton.ContextMenu>
                                         <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
-                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
-                                            <MenuItem Header="🚫 استثناء فئة الروابط من الرصد" Command="{Binding ExcludeUrlsCommand}" />
+                                            <MenuItem Header="âš™ï¸ ÙØªØ­ Ù„ÙˆØ­Ø© Ø§Ù„ØªØ­ÙƒÙ… Ø¨Ø¬Ù…ÙŠØ¹ ÙØ¦Ø§Øª Ø§Ù„Ø±ØµØ¯" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                            <MenuItem Header="ðŸš« Ø§Ø³ØªØ«Ù†Ø§Ø¡ ÙØ¦Ø© Ø§Ù„Ø±ÙˆØ§Ø¨Ø· Ù…Ù† Ø§Ù„Ø±ØµØ¯" Command="{Binding ExcludeUrlsCommand}" />
                                         </ContextMenu>
                                     </RadioButton.ContextMenu>
                                 </RadioButton>
@@ -369,8 +311,8 @@
                                              Style="{StaticResource FilterPillBtn}">
                                     <RadioButton.ContextMenu>
                                         <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
-                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد أوامر المودم" Command="{Binding ToggleCategoryCommand}" CommandParameter="ModemAt" />
-                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                            <MenuItem Header="â¸ï¸/â–¶ï¸ Ø¥ÙŠÙ‚Ø§Ù Ø£Ùˆ ØªÙØ¹ÙŠÙ„ Ø±ØµØ¯ Ø£ÙˆØ§Ù…Ø± Ø§Ù„Ù…ÙˆØ¯Ù…" Command="{Binding ToggleCategoryCommand}" CommandParameter="ModemAt" />
+                                            <MenuItem Header="âš™ï¸ ÙØªØ­ Ù„ÙˆØ­Ø© Ø§Ù„ØªØ­ÙƒÙ… Ø¨Ø¬Ù…ÙŠØ¹ ÙØ¦Ø§Øª Ø§Ù„Ø±ØµØ¯" Command="{Binding ToggleCategoryConfigPanelCommand}" />
                                         </ContextMenu>
                                     </RadioButton.ContextMenu>
                                 </RadioButton>
@@ -380,8 +322,8 @@
                                              Style="{StaticResource FilterPillBtn}">
                                     <RadioButton.ContextMenu>
                                         <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
-                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد أوامر MTK ميدياتك" Command="{Binding ToggleCategoryCommand}" CommandParameter="MediaTek" />
-                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                            <MenuItem Header="â¸ï¸/â–¶ï¸ Ø¥ÙŠÙ‚Ø§Ù Ø£Ùˆ ØªÙØ¹ÙŠÙ„ Ø±ØµØ¯ Ø£ÙˆØ§Ù…Ø± MTK Ù…ÙŠØ¯ÙŠØ§ØªÙƒ" Command="{Binding ToggleCategoryCommand}" CommandParameter="MediaTek" />
+                                            <MenuItem Header="âš™ï¸ ÙØªØ­ Ù„ÙˆØ­Ø© Ø§Ù„ØªØ­ÙƒÙ… Ø¨Ø¬Ù…ÙŠØ¹ ÙØ¦Ø§Øª Ø§Ù„Ø±ØµØ¯" Command="{Binding ToggleCategoryConfigPanelCommand}" />
                                         </ContextMenu>
                                     </RadioButton.ContextMenu>
                                 </RadioButton>
@@ -391,8 +333,8 @@
                                              Style="{StaticResource FilterPillBtn}">
                                     <RadioButton.ContextMenu>
                                         <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
-                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد أوامر كوالكوم EDL" Command="{Binding ToggleCategoryCommand}" CommandParameter="Qualcomm" />
-                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                            <MenuItem Header="â¸ï¸/â–¶ï¸ Ø¥ÙŠÙ‚Ø§Ù Ø£Ùˆ ØªÙØ¹ÙŠÙ„ Ø±ØµØ¯ Ø£ÙˆØ§Ù…Ø± ÙƒÙˆØ§Ù„ÙƒÙˆÙ… EDL" Command="{Binding ToggleCategoryCommand}" CommandParameter="Qualcomm" />
+                                            <MenuItem Header="âš™ï¸ ÙØªØ­ Ù„ÙˆØ­Ø© Ø§Ù„ØªØ­ÙƒÙ… Ø¨Ø¬Ù…ÙŠØ¹ ÙØ¦Ø§Øª Ø§Ù„Ø±ØµØ¯" Command="{Binding ToggleCategoryConfigPanelCommand}" />
                                         </ContextMenu>
                                     </RadioButton.ContextMenu>
                                 </RadioButton>
@@ -402,8 +344,8 @@
                                              Style="{StaticResource FilterPillBtn}">
                                     <RadioButton.ContextMenu>
                                         <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
-                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد أوامر أبل Apple" Command="{Binding ToggleCategoryCommand}" CommandParameter="AppleIos" />
-                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                            <MenuItem Header="â¸ï¸/â–¶ï¸ Ø¥ÙŠÙ‚Ø§Ù Ø£Ùˆ ØªÙØ¹ÙŠÙ„ Ø±ØµØ¯ Ø£ÙˆØ§Ù…Ø± Ø£Ø¨Ù„ Apple" Command="{Binding ToggleCategoryCommand}" CommandParameter="AppleIos" />
+                                            <MenuItem Header="âš™ï¸ ÙØªØ­ Ù„ÙˆØ­Ø© Ø§Ù„ØªØ­ÙƒÙ… Ø¨Ø¬Ù…ÙŠØ¹ ÙØ¦Ø§Øª Ø§Ù„Ø±ØµØ¯" Command="{Binding ToggleCategoryConfigPanelCommand}" />
                                         </ContextMenu>
                                     </RadioButton.ContextMenu>
                                 </RadioButton>
@@ -413,8 +355,8 @@
                                              Style="{StaticResource FilterPillBtn}">
                                     <RadioButton.ContextMenu>
                                         <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
-                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد أوامر ADB و Fastboot" Command="{Binding ToggleCategoryCommand}" CommandParameter="AdbFastboot" />
-                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                            <MenuItem Header="â¸ï¸/â–¶ï¸ Ø¥ÙŠÙ‚Ø§Ù Ø£Ùˆ ØªÙØ¹ÙŠÙ„ Ø±ØµØ¯ Ø£ÙˆØ§Ù…Ø± ADB Ùˆ Fastboot" Command="{Binding ToggleCategoryCommand}" CommandParameter="AdbFastboot" />
+                                            <MenuItem Header="âš™ï¸ ÙØªØ­ Ù„ÙˆØ­Ø© Ø§Ù„ØªØ­ÙƒÙ… Ø¨Ø¬Ù…ÙŠØ¹ ÙØ¦Ø§Øª Ø§Ù„Ø±ØµØ¯" Command="{Binding ToggleCategoryConfigPanelCommand}" />
                                         </ContextMenu>
                                     </RadioButton.ContextMenu>
                                 </RadioButton>
@@ -424,9 +366,9 @@
                                              Style="{StaticResource FilterPillBtn}">
                                     <RadioButton.ContextMenu>
                                         <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
-                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد الروابط والخوادم" Command="{Binding ToggleCategoryCommand}" CommandParameter="ServerCloudLogin" />
-                                            <MenuItem Header="🚫 استثناء فئة الروابط من الرصد فوراً" Command="{Binding ExcludeUrlsCommand}" />
-                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                            <MenuItem Header="â¸ï¸/â–¶ï¸ Ø¥ÙŠÙ‚Ø§Ù Ø£Ùˆ ØªÙØ¹ÙŠÙ„ Ø±ØµØ¯ Ø§Ù„Ø±ÙˆØ§Ø¨Ø· ÙˆØ§Ù„Ø®ÙˆØ§Ø¯Ù…" Command="{Binding ToggleCategoryCommand}" CommandParameter="ServerCloudLogin" />
+                                            <MenuItem Header="ðŸš« Ø§Ø³ØªØ«Ù†Ø§Ø¡ ÙØ¦Ø© Ø§Ù„Ø±ÙˆØ§Ø¨Ø· Ù…Ù† Ø§Ù„Ø±ØµØ¯ ÙÙˆØ±Ø§Ù‹" Command="{Binding ExcludeUrlsCommand}" />
+                                            <MenuItem Header="âš™ï¸ ÙØªØ­ Ù„ÙˆØ­Ø© Ø§Ù„ØªØ­ÙƒÙ… Ø¨Ø¬Ù…ÙŠØ¹ ÙØ¦Ø§Øª Ø§Ù„Ø±ØµØ¯" Command="{Binding ToggleCategoryConfigPanelCommand}" />
                                         </ContextMenu>
                                     </RadioButton.ContextMenu>
                                 </RadioButton>
@@ -436,8 +378,8 @@
                                              Style="{StaticResource FilterPillBtn}">
                                     <RadioButton.ContextMenu>
                                         <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
-                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد ملفات النقل واللودر" Command="{Binding ToggleCategoryCommand}" CommandParameter="FileTransfer" />
-                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                            <MenuItem Header="â¸ï¸/â–¶ï¸ Ø¥ÙŠÙ‚Ø§Ù Ø£Ùˆ ØªÙØ¹ÙŠÙ„ Ø±ØµØ¯ Ù…Ù„ÙØ§Øª Ø§Ù„Ù†Ù‚Ù„ ÙˆØ§Ù„Ù„ÙˆØ¯Ø±" Command="{Binding ToggleCategoryCommand}" CommandParameter="FileTransfer" />
+                                            <MenuItem Header="âš™ï¸ ÙØªØ­ Ù„ÙˆØ­Ø© Ø§Ù„ØªØ­ÙƒÙ… Ø¨Ø¬Ù…ÙŠØ¹ ÙØ¦Ø§Øª Ø§Ù„Ø±ØµØ¯" Command="{Binding ToggleCategoryConfigPanelCommand}" />
                                         </ContextMenu>
                                     </RadioButton.ContextMenu>
                                 </RadioButton>
@@ -447,8 +389,8 @@
                                              Style="{StaticResource FilterPillBtn}">
                                     <RadioButton.ContextMenu>
                                         <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
-                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد فك الضغط" Command="{Binding ToggleCategoryCommand}" CommandParameter="ArchiveUnpack" />
-                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                            <MenuItem Header="â¸ï¸/â–¶ï¸ Ø¥ÙŠÙ‚Ø§Ù Ø£Ùˆ ØªÙØ¹ÙŠÙ„ Ø±ØµØ¯ ÙÙƒ Ø§Ù„Ø¶ØºØ·" Command="{Binding ToggleCategoryCommand}" CommandParameter="ArchiveUnpack" />
+                                            <MenuItem Header="âš™ï¸ ÙØªØ­ Ù„ÙˆØ­Ø© Ø§Ù„ØªØ­ÙƒÙ… Ø¨Ø¬Ù…ÙŠØ¹ ÙØ¦Ø§Øª Ø§Ù„Ø±ØµØ¯" Command="{Binding ToggleCategoryConfigPanelCommand}" />
                                         </ContextMenu>
                                     </RadioButton.ContextMenu>
                                 </RadioButton>
@@ -458,8 +400,8 @@
                                              Style="{StaticResource FilterPillBtn}">
                                     <RadioButton.ContextMenu>
                                         <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
-                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد التشفير والمفاتيح" Command="{Binding ToggleCategoryCommand}" CommandParameter="CryptoAuth" />
-                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                            <MenuItem Header="â¸ï¸/â–¶ï¸ Ø¥ÙŠÙ‚Ø§Ù Ø£Ùˆ ØªÙØ¹ÙŠÙ„ Ø±ØµØ¯ Ø§Ù„ØªØ´ÙÙŠØ± ÙˆØ§Ù„Ù…ÙØ§ØªÙŠØ­" Command="{Binding ToggleCategoryCommand}" CommandParameter="CryptoAuth" />
+                                            <MenuItem Header="âš™ï¸ ÙØªØ­ Ù„ÙˆØ­Ø© Ø§Ù„ØªØ­ÙƒÙ… Ø¨Ø¬Ù…ÙŠØ¹ ÙØ¦Ø§Øª Ø§Ù„Ø±ØµØ¯" Command="{Binding ToggleCategoryConfigPanelCommand}" />
                                         </ContextMenu>
                                     </RadioButton.ContextMenu>
                                 </RadioButton>
@@ -469,27 +411,27 @@
                                              Style="{StaticResource FilterPillBtn}">
                                     <RadioButton.ContextMenu>
                                         <ContextMenu Background="#0F172A" Foreground="#E2E8F0" BorderBrush="#334155">
-                                            <MenuItem Header="⏸️/▶️ إيقاف أو تفعيل رصد الأوامر الأخرى" Command="{Binding ToggleCategoryCommand}" CommandParameter="OtherCommands" />
-                                            <MenuItem Header="⚙️ فتح لوحة التحكم بجميع فئات الرصد" Command="{Binding ToggleCategoryConfigPanelCommand}" />
+                                            <MenuItem Header="â¸ï¸/â–¶ï¸ Ø¥ÙŠÙ‚Ø§Ù Ø£Ùˆ ØªÙØ¹ÙŠÙ„ Ø±ØµØ¯ Ø§Ù„Ø£ÙˆØ§Ù…Ø± Ø§Ù„Ø£Ø®Ø±Ù‰" Command="{Binding ToggleCategoryCommand}" CommandParameter="OtherCommands" />
+                                            <MenuItem Header="âš™ï¸ ÙØªØ­ Ù„ÙˆØ­Ø© Ø§Ù„ØªØ­ÙƒÙ… Ø¨Ø¬Ù…ÙŠØ¹ ÙØ¦Ø§Øª Ø§Ù„Ø±ØµØ¯" Command="{Binding ToggleCategoryConfigPanelCommand}" />
                                         </ContextMenu>
                                     </RadioButton.ContextMenu>
                                 </RadioButton>
                             </WrapPanel>
 
                             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                <CheckBox Content="🚫 استثناء الروابط"
+                                <CheckBox Content="ðŸš« Ø§Ø³ØªØ«Ù†Ø§Ø¡ Ø§Ù„Ø±ÙˆØ§Ø¨Ø·"
                                           IsChecked="{Binding ExcludeUrlsFromDiscovered, Mode=TwoWay}"
                                           Foreground="#FBBF24" FontWeight="SemiBold" FontSize="11"
                                           VerticalAlignment="Center" Margin="0,0,8,0"
-                                          ToolTip="استثناء الروابط والخوادم وتسجيل الدخول من الأوامر المكتشفة في الذاكرة" />
+                                          ToolTip="Ø§Ø³ØªØ«Ù†Ø§Ø¡ Ø§Ù„Ø±ÙˆØ§Ø¨Ø· ÙˆØ§Ù„Ø®ÙˆØ§Ø¯Ù… ÙˆØªØ³Ø¬ÙŠÙ„ Ø§Ù„Ø¯Ø®ÙˆÙ„ Ù…Ù† Ø§Ù„Ø£ÙˆØ§Ù…Ø± Ø§Ù„Ù…ÙƒØªØ´ÙØ© ÙÙŠ Ø§Ù„Ø°Ø§ÙƒØ±Ø©" />
 
-                                <Button Content="⚙️ فئات الرصد (إيقاف/تفعيل)"
+                                <Button Content="âš™ï¸ ÙØ¦Ø§Øª Ø§Ù„Ø±ØµØ¯ (Ø¥ÙŠÙ‚Ø§Ù/ØªÙØ¹ÙŠÙ„)"
                                         Command="{Binding ToggleCategoryConfigPanelCommand}"
                                         Style="{StaticResource SentinelBtn}"
                                         Background="#1E293B" BorderBrush="#38BDF8" Margin="0,0,8,0"
-                                        ToolTip="إيقاف أو تفعيل أي فئة من فئات الرصد وتوفير موارد الجهاز" />
+                                        ToolTip="Ø¥ÙŠÙ‚Ø§Ù Ø£Ùˆ ØªÙØ¹ÙŠÙ„ Ø£ÙŠ ÙØ¦Ø© Ù…Ù† ÙØ¦Ø§Øª Ø§Ù„Ø±ØµØ¯ ÙˆØªÙˆÙÙŠØ± Ù…ÙˆØ§Ø±Ø¯ Ø§Ù„Ø¬Ù‡Ø§Ø²" />
 
-                                <Button Content="📤 تصدير الفئة المحددة فقط"
+                                <Button Content="ðŸ“¤ ØªØµØ¯ÙŠØ± Ø§Ù„ÙØ¦Ø© Ø§Ù„Ù…Ø­Ø¯Ø¯Ø© ÙÙ‚Ø·"
                                         Command="{Binding ExportSelectedDiscoveredCategoryCommand}"
                                         Style="{StaticResource SentinelBtn}"
                                         Background="#0E7490" BorderBrush="#22D3EE" />
@@ -497,7 +439,7 @@
                         </Grid>
                     </Border>
 
-                    <!-- لوحة التحكم وتخصيص تفعيل/إيقاف فئات الرصد بالذاكرة -->
+                    <!-- Ù„ÙˆØ­Ø© Ø§Ù„ØªØ­ÙƒÙ… ÙˆØªØ®ØµÙŠØµ ØªÙØ¹ÙŠÙ„/Ø¥ÙŠÙ‚Ø§Ù ÙØ¦Ø§Øª Ø§Ù„Ø±ØµØ¯ Ø¨Ø§Ù„Ø°Ø§ÙƒØ±Ø© -->
                     <Border Grid.Row="1" Background="#0A0F1D" BorderBrush="#38BDF8" BorderThickness="1" CornerRadius="6"
                             Padding="12,8" Margin="0,0,0,6"
                             Visibility="{Binding IsCategoryConfigPanelVisible, Converter={StaticResource BoolToVis}}">
@@ -513,28 +455,28 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <TextBlock Text="🛡️ خيارات إيقاف وتفعيل فئات الرصد بالذاكرة (إلغاء التحديد يوقف رصد الفئة فوراً ويوفر موارد المعالج):"
+                                    <TextBlock Text="ðŸ›¡ï¸ Ø®ÙŠØ§Ø±Ø§Øª Ø¥ÙŠÙ‚Ø§Ù ÙˆØªÙØ¹ÙŠÙ„ ÙØ¦Ø§Øª Ø§Ù„Ø±ØµØ¯ Ø¨Ø§Ù„Ø°Ø§ÙƒØ±Ø© (Ø¥Ù„ØºØ§Ø¡ Ø§Ù„ØªØ­Ø¯ÙŠØ¯ ÙŠÙˆÙ‚Ù Ø±ØµØ¯ Ø§Ù„ÙØ¦Ø© ÙÙˆØ±Ø§Ù‹ ÙˆÙŠÙˆÙØ± Ù…ÙˆØ§Ø±Ø¯ Ø§Ù„Ù…Ø¹Ø§Ù„Ø¬):"
                                                Foreground="#38BDF8" FontWeight="Bold" FontSize="11.5" VerticalAlignment="Center" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <Button Content="تفعيل كافة الفئات" Command="{Binding EnableAllCategoriesCommand}" Style="{StaticResource SentinelBtn}" Background="#065F46" BorderBrush="#10B981" Margin="0,0,5,0" Padding="8,2" FontSize="10.5" />
-                                    <Button Content="🚫 إيقاف الروابط فقط" Command="{Binding ExcludeUrlsCommand}" Style="{StaticResource SentinelBtn}" Background="#7C2D12" BorderBrush="#F97316" Margin="0,0,5,0" Padding="8,2" FontSize="10.5" />
-                                    <Button Content="🔄 إلغاء بصمة الخمول وإظهار الكل" Command="{Binding ResetIdleBaselineCommand}" Style="{StaticResource SentinelBtn}" Background="#3B0764" BorderBrush="#A855F7" Margin="0,0,5,0" Padding="8,2" FontSize="10.5" />
-                                    <Button Content="✕ إغلاق اللوحة" Command="{Binding ToggleCategoryConfigPanelCommand}" Style="{StaticResource SentinelBtn}" Background="#1E293B" BorderBrush="#475569" Padding="8,2" FontSize="10.5" />
+                                    <Button Content="ØªÙØ¹ÙŠÙ„ ÙƒØ§ÙØ© Ø§Ù„ÙØ¦Ø§Øª" Command="{Binding EnableAllCategoriesCommand}" Style="{StaticResource SentinelBtn}" Background="#065F46" BorderBrush="#10B981" Margin="0,0,5,0" Padding="8,2" FontSize="10.5" />
+                                    <Button Content="ðŸš« Ø¥ÙŠÙ‚Ø§Ù Ø§Ù„Ø±ÙˆØ§Ø¨Ø· ÙÙ‚Ø·" Command="{Binding ExcludeUrlsCommand}" Style="{StaticResource SentinelBtn}" Background="#7C2D12" BorderBrush="#F97316" Margin="0,0,5,0" Padding="8,2" FontSize="10.5" />
+                                    <Button Content="ðŸ”„ Ø¥Ù„ØºØ§Ø¡ Ø¨ØµÙ…Ø© Ø§Ù„Ø®Ù…ÙˆÙ„ ÙˆØ¥Ø¸Ù‡Ø§Ø± Ø§Ù„ÙƒÙ„" Command="{Binding ResetIdleBaselineCommand}" Style="{StaticResource SentinelBtn}" Background="#3B0764" BorderBrush="#A855F7" Margin="0,0,5,0" Padding="8,2" FontSize="10.5" />
+                                    <Button Content="âœ• Ø¥ØºÙ„Ø§Ù‚ Ø§Ù„Ù„ÙˆØ­Ø©" Command="{Binding ToggleCategoryConfigPanelCommand}" Style="{StaticResource SentinelBtn}" Background="#1E293B" BorderBrush="#475569" Padding="8,2" FontSize="10.5" />
                                 </StackPanel>
                             </Grid>
 
                             <WrapPanel Grid.Row="1" Orientation="Horizontal">
-                                <CheckBox Content="📻 أوامر المودم (Modem / AT)" IsChecked="{Binding IsModemCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
-                                <CheckBox Content="🔶 ميدياتك (MTK / BROM / DA)" IsChecked="{Binding IsMtkCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
-                                <CheckBox Content="🔷 كوالكوم و EDL (Firehose)" IsChecked="{Binding IsQualcommCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
-                                <CheckBox Content="🍎 أبل Apple (iOS / DFU / AFC)" IsChecked="{Binding IsAppleCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
-                                <CheckBox Content="🤖 ADB / Fastboot / Shell" IsChecked="{Binding IsAdbCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
-                                <CheckBox Content="🌐 الروابط والخوادم وتسجيل الدخول" IsChecked="{Binding IsServerCloudCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
-                                <CheckBox Content="📤 نقل وملفات بوت ولودر" IsChecked="{Binding IsTransferCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
-                                <CheckBox Content="📦 فك ضغط وتفكيك صور" IsChecked="{Binding IsArchiveCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
-                                <CheckBox Content="🔐 تشفير ومفاتيح وبذور" IsChecked="{Binding IsCryptoCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
-                                <CheckBox Content="🧩 أوامر وعمليات أخرى" IsChecked="{Binding IsOtherCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="ðŸ“» Ø£ÙˆØ§Ù…Ø± Ø§Ù„Ù…ÙˆØ¯Ù… (Modem / AT)" IsChecked="{Binding IsModemCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="ðŸ”¶ Ù…ÙŠØ¯ÙŠØ§ØªÙƒ (MTK / BROM / DA)" IsChecked="{Binding IsMtkCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="ðŸ”· ÙƒÙˆØ§Ù„ÙƒÙˆÙ… Ùˆ EDL (Firehose)" IsChecked="{Binding IsQualcommCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="ðŸŽ Ø£Ø¨Ù„ Apple (iOS / DFU / AFC)" IsChecked="{Binding IsAppleCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="ðŸ¤– ADB / Fastboot / Shell" IsChecked="{Binding IsAdbCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="ðŸŒ Ø§Ù„Ø±ÙˆØ§Ø¨Ø· ÙˆØ§Ù„Ø®ÙˆØ§Ø¯Ù… ÙˆØªØ³Ø¬ÙŠÙ„ Ø§Ù„Ø¯Ø®ÙˆÙ„" IsChecked="{Binding IsServerCloudCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="ðŸ“¤ Ù†Ù‚Ù„ ÙˆÙ…Ù„ÙØ§Øª Ø¨ÙˆØª ÙˆÙ„ÙˆØ¯Ø±" IsChecked="{Binding IsTransferCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="ðŸ“¦ ÙÙƒ Ø¶ØºØ· ÙˆØªÙÙƒÙŠÙƒ ØµÙˆØ±" IsChecked="{Binding IsArchiveCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="ðŸ” ØªØ´ÙÙŠØ± ÙˆÙ…ÙØ§ØªÙŠØ­ ÙˆØ¨Ø°ÙˆØ±" IsChecked="{Binding IsCryptoCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
+                                <CheckBox Content="ðŸ§© Ø£ÙˆØ§Ù…Ø± ÙˆØ¹Ù…Ù„ÙŠØ§Øª Ø£Ø®Ø±Ù‰" IsChecked="{Binding IsOtherCategoryEnabled, Mode=TwoWay}" Foreground="#F8FAFC" FontSize="11" Margin="0,3,16,3" />
                             </WrapPanel>
                         </Grid>
                     </Border>
@@ -547,23 +489,23 @@
                               RowBackground="#111622" AlternatingRowBackground="#0D111A"
                               BorderThickness="0" Foreground="#E2E8F0" FontSize="11.5" RowHeight="26">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="الوقت" Binding="{Binding FormattedTimestamp}" Width="88" />
-                            <DataGridTextColumn Header="تصنيف الفلتر" Binding="{Binding CommandGroupBadge}" Width="195" />
-                            <DataGridTextColumn Header="المصدر بالرام" Binding="{Binding CallerModuleOrigin}" Width="180" />
-                            <DataGridTextColumn Header="الهدف / الملف المحفوظ" Binding="{Binding TargetResource}" Width="170" />
-                            <DataGridTextColumn Header="الأمر / الرابط المكتشف الصافي" Binding="{Binding PureCommandText}" Width="260" />
-                            <DataGridTextColumn Header="الوصف" Binding="{Binding DecodedCommandText}" Width="*" />
-                            <DataGridTextColumn Header="الحجم" Binding="{Binding PayloadSize}" Width="60" />
+                            <DataGridTextColumn Header="Ø§Ù„ÙˆÙ‚Øª" Binding="{Binding FormattedTimestamp}" Width="88" />
+                            <DataGridTextColumn Header="ØªØµÙ†ÙŠÙ Ø§Ù„ÙÙ„ØªØ±" Binding="{Binding CommandGroupBadge}" Width="195" />
+                            <DataGridTextColumn Header="Ø§Ù„Ù…ØµØ¯Ø± Ø¨Ø§Ù„Ø±Ø§Ù…" Binding="{Binding CallerModuleOrigin}" Width="180" />
+                            <DataGridTextColumn Header="Ø§Ù„Ù‡Ø¯Ù / Ø§Ù„Ù…Ù„Ù Ø§Ù„Ù…Ø­ÙÙˆØ¸" Binding="{Binding TargetResource}" Width="170" />
+                            <DataGridTextColumn Header="Ø§Ù„Ø£Ù…Ø± / Ø§Ù„Ø±Ø§Ø¨Ø· Ø§Ù„Ù…ÙƒØªØ´Ù Ø§Ù„ØµØ§ÙÙŠ" Binding="{Binding PureCommandText}" Width="260" />
+                            <DataGridTextColumn Header="Ø§Ù„ÙˆØµÙ" Binding="{Binding DecodedCommandText}" Width="*" />
+                            <DataGridTextColumn Header="Ø§Ù„Ø­Ø¬Ù…" Binding="{Binding PayloadSize}" Width="60" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
             </TabItem>
 
-            <!-- التبويب 4: رادار المنافذ والملفات المحفوظة -->
+            <!-- Ø§Ù„ØªØ¨ÙˆÙŠØ¨ 4: Ø±Ø§Ø¯Ø§Ø± Ø§Ù„Ù…Ù†Ø§ÙØ° ÙˆØ§Ù„Ù…Ù„ÙØ§Øª Ø§Ù„Ù…Ø­ÙÙˆØ¸Ø© -->
             <TabItem>
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="📡 رادار المنافذ والملفات المحفوظة (" />
+                        <TextBlock Text="ðŸ“¡ Ø±Ø§Ø¯Ø§Ø± Ø§Ù„Ù…Ù†Ø§ÙØ° ÙˆØ§Ù„Ù…Ù„ÙØ§Øª Ø§Ù„Ù…Ø­ÙÙˆØ¸Ø© (" />
                         <TextBlock Text="{Binding RadarEventsCount}" Foreground="#A855F7" />
                         <TextBlock Text=")" />
                     </StackPanel>
@@ -577,21 +519,21 @@
                               RowBackground="#111622" AlternatingRowBackground="#0D111A"
                               BorderThickness="0" Foreground="#E2E8F0" FontSize="11.5" RowHeight="26">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="الوقت" Binding="{Binding FormattedTimestamp}" Width="90" />
-                            <DataGridTextColumn Header="المرحلة" Binding="{Binding StageBadge}" Width="135" />
-                            <DataGridTextColumn Header="التصنيف" Binding="{Binding CommandCategory}" Width="180" />
-                            <DataGridTextColumn Header="مسار الحفظ / المنفذ" Binding="{Binding TargetResource}" Width="240" />
-                            <DataGridTextColumn Header="التفاصيل" Binding="{Binding DecodedCommandText}" Width="*" />
+                            <DataGridTextColumn Header="Ø§Ù„ÙˆÙ‚Øª" Binding="{Binding FormattedTimestamp}" Width="90" />
+                            <DataGridTextColumn Header="Ø§Ù„Ù…Ø±Ø­Ù„Ø©" Binding="{Binding StageBadge}" Width="135" />
+                            <DataGridTextColumn Header="Ø§Ù„ØªØµÙ†ÙŠÙ" Binding="{Binding CommandCategory}" Width="180" />
+                            <DataGridTextColumn Header="Ù…Ø³Ø§Ø± Ø§Ù„Ø­ÙØ¸ / Ø§Ù„Ù…Ù†ÙØ°" Binding="{Binding TargetResource}" Width="240" />
+                            <DataGridTextColumn Header="Ø§Ù„ØªÙØ§ØµÙŠÙ„" Binding="{Binding DecodedCommandText}" Width="*" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
             </TabItem>
 
-            <!-- التبويب 5: السجل الشامل الخام بدون فلترة (Unfiltered Raw Everything Stream) -->
+            <!-- Ø§Ù„ØªØ¨ÙˆÙŠØ¨ 5: Ø§Ù„Ø³Ø¬Ù„ Ø§Ù„Ø´Ø§Ù…Ù„ Ø§Ù„Ø®Ø§Ù… Ø¨Ø¯ÙˆÙ† ÙÙ„ØªØ±Ø© (Unfiltered Raw Everything Stream) -->
             <TabItem>
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="📜 السجل الشامل الخام (" />
+                        <TextBlock Text="ðŸ“œ Ø§Ù„Ø³Ø¬Ù„ Ø§Ù„Ø´Ø§Ù…Ù„ Ø§Ù„Ø®Ø§Ù… (" />
                         <TextBlock Text="{Binding UnfilteredRawEventsCount}" Foreground="#F97316" />
                         <TextBlock Text=")" Margin="0,0,6,0" />
                         <Border Background="{Binding UnfilteredRawStatusBackground}" BorderBrush="{Binding UnfilteredRawStatusBorder}" BorderThickness="1" CornerRadius="3" Padding="5,1" VerticalAlignment="Center">
@@ -614,7 +556,7 @@
                             </Grid.ColumnDefinitions>
 
                             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                                <TextBlock Text="⚡ التحكم الآني بالسجل الخام:" Foreground="#94A3B8" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <TextBlock Text="âš¡ Ø§Ù„ØªØ­ÙƒÙ… Ø§Ù„Ø¢Ù†ÙŠ Ø¨Ø§Ù„Ø³Ø¬Ù„ Ø§Ù„Ø®Ø§Ù…:" Foreground="#94A3B8" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0" />
 
                                 <Border Background="{Binding UnfilteredRawStatusBackground}" BorderBrush="{Binding UnfilteredRawStatusBorder}" BorderThickness="1" CornerRadius="4" Padding="8,2" Margin="0,0,8,0" VerticalAlignment="Center">
                                     <TextBlock Text="{Binding UnfilteredRawStatusText}" Foreground="{Binding UnfilteredRawStatusColor}" FontWeight="Bold" FontSize="11" />
@@ -627,20 +569,20 @@
                                         BorderBrush="{Binding UnfilteredRawToggleBtnBorder}"
                                         Margin="0,0,8,0" Padding="10,3" FontSize="11" />
 
-                                <CheckBox Content="🚫 استثناء الروابط من السجل الخام"
+                                <CheckBox Content="ðŸš« Ø§Ø³ØªØ«Ù†Ø§Ø¡ Ø§Ù„Ø±ÙˆØ§Ø¨Ø· Ù…Ù† Ø§Ù„Ø³Ø¬Ù„ Ø§Ù„Ø®Ø§Ù…"
                                           IsChecked="{Binding ExcludeUrlsFromRawLog, Mode=TwoWay}"
                                           Foreground="#FBBF24" FontWeight="SemiBold" FontSize="11"
                                           VerticalAlignment="Center" Margin="0,0,8,0"
-                                          ToolTip="استثناء الروابط واستدعاءات الخوادم من السجل الخام الشامل (مفعل افتراضياً)" />
+                                          ToolTip="Ø§Ø³ØªØ«Ù†Ø§Ø¡ Ø§Ù„Ø±ÙˆØ§Ø¨Ø· ÙˆØ§Ø³ØªØ¯Ø¹Ø§Ø¡Ø§Øª Ø§Ù„Ø®ÙˆØ§Ø¯Ù… Ù…Ù† Ø§Ù„Ø³Ø¬Ù„ Ø§Ù„Ø®Ø§Ù… Ø§Ù„Ø´Ø§Ù…Ù„ (Ù…ÙØ¹Ù„ Ø§ÙØªØ±Ø§Ø¶ÙŠØ§Ù‹)" />
                             </StackPanel>
 
                             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                <Button Content="📜 تصدير السجل الخام" 
+                                <Button Content="ðŸ“œ ØªØµØ¯ÙŠØ± Ø§Ù„Ø³Ø¬Ù„ Ø§Ù„Ø®Ø§Ù…" 
                                         Command="{Binding ExportUnfilteredRawLogsCommand}"
                                         Style="{StaticResource SentinelBtn}" 
                                         Background="#7C2D12" BorderBrush="#F97316" Margin="0,0,6,0" Padding="8,3" FontSize="10.5" />
 
-                                <Button Content="🗑️ مسح المعروض بالسجل الخام" 
+                                <Button Content="ðŸ—‘ï¸ Ù…Ø³Ø­ Ø§Ù„Ù…Ø¹Ø±ÙˆØ¶ Ø¨Ø§Ù„Ø³Ø¬Ù„ Ø§Ù„Ø®Ø§Ù…" 
                                         Command="{Binding ClearUnfilteredRawCommand}"
                                         Style="{StaticResource SentinelBtn}" 
                                         Background="#1E293B" BorderBrush="#475569" Padding="8,3" FontSize="10.5" />
@@ -656,14 +598,14 @@
                               RowBackground="#111622" AlternatingRowBackground="#0D111A"
                               BorderThickness="0" Foreground="#E2E8F0" FontSize="11.5" RowHeight="26">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="الوقت" Binding="{Binding FormattedTimestamp}" Width="90" />
+                            <DataGridTextColumn Header="Ø§Ù„ÙˆÙ‚Øª" Binding="{Binding FormattedTimestamp}" Width="90" />
                             <DataGridTextColumn Header="PID" Binding="{Binding ProcessId}" Width="60" />
-                            <DataGridTextColumn Header="المرحلة" Binding="{Binding StageBadge}" Width="135" />
-                            <DataGridTextColumn Header="الدالة / الحساس" Binding="{Binding HookedApiName}" Width="165" />
-                            <DataGridTextColumn Header="المصدر" Binding="{Binding CallerModuleOrigin}" Width="175" />
-                            <DataGridTextColumn Header="التصنيف" Binding="{Binding CommandCategory}" Width="175" />
-                            <DataGridTextColumn Header="النص الخام الصافي" Binding="{Binding PureCommandText}" Width="250" />
-                            <DataGridTextColumn Header="التفاصيل الكاملة (بدون فلترة)" Binding="{Binding DecodedCommandText}" Width="*" />
+                            <DataGridTextColumn Header="Ø§Ù„Ù…Ø±Ø­Ù„Ø©" Binding="{Binding StageBadge}" Width="135" />
+                            <DataGridTextColumn Header="Ø§Ù„Ø¯Ø§Ù„Ø© / Ø§Ù„Ø­Ø³Ø§Ø³" Binding="{Binding HookedApiName}" Width="165" />
+                            <DataGridTextColumn Header="Ø§Ù„Ù…ØµØ¯Ø±" Binding="{Binding CallerModuleOrigin}" Width="175" />
+                            <DataGridTextColumn Header="Ø§Ù„ØªØµÙ†ÙŠÙ" Binding="{Binding CommandCategory}" Width="175" />
+                            <DataGridTextColumn Header="Ø§Ù„Ù†Øµ Ø§Ù„Ø®Ø§Ù… Ø§Ù„ØµØ§ÙÙŠ" Binding="{Binding PureCommandText}" Width="250" />
+                            <DataGridTextColumn Header="Ø§Ù„ØªÙØ§ØµÙŠÙ„ Ø§Ù„ÙƒØ§Ù…Ù„Ø© (Ø¨Ø¯ÙˆÙ† ÙÙ„ØªØ±Ø©)" Binding="{Binding DecodedCommandText}" Width="*" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
@@ -688,9 +630,9 @@
                     </Grid.RowDefinitions>
 
                     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-                        <TextBlock Text="💾 الملفات المحفوظة وملفات البوت واللودر" FontWeight="Bold" FontSize="12" Foreground="#A855F7" VerticalAlignment="Center" />
+                        <TextBlock Text="ðŸ’¾ Ø§Ù„Ù…Ù„ÙØ§Øª Ø§Ù„Ù…Ø­ÙÙˆØ¸Ø© ÙˆÙ…Ù„ÙØ§Øª Ø§Ù„Ø¨ÙˆØª ÙˆØ§Ù„Ù„ÙˆØ¯Ø±" FontWeight="Bold" FontSize="12" Foreground="#A855F7" VerticalAlignment="Center" />
                         <Border Background="#2E1065" BorderBrush="#9333EA" BorderThickness="1" CornerRadius="4" Padding="6,1" Margin="8,0,0,0">
-                            <TextBlock Text="{Binding LoadedArtifacts.Count, StringFormat='{}{0} عناصر'}" FontSize="10" Foreground="#D8B4FE" />
+                            <TextBlock Text="{Binding LoadedArtifacts.Count, StringFormat='{}{0} Ø¹Ù†Ø§ØµØ±'}" FontSize="10" Foreground="#D8B4FE" />
                         </Border>
                     </StackPanel>
 
@@ -723,7 +665,7 @@
                     </Grid.RowDefinitions>
 
                     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
-                        <TextBlock Text="🔬 فاحص الحمولات الخام والأمر الصافي (Hex &amp; Pure Command Inspector)" FontWeight="Bold" FontSize="12" Foreground="#00FFC2" VerticalAlignment="Center" />
+                        <TextBlock Text="ðŸ”¬ ÙØ§Ø­Øµ Ø§Ù„Ø­Ù…ÙˆÙ„Ø§Øª Ø§Ù„Ø®Ø§Ù… ÙˆØ§Ù„Ø£Ù…Ø± Ø§Ù„ØµØ§ÙÙŠ (Hex &amp; Pure Command Inspector)" FontWeight="Bold" FontSize="12" Foreground="#00FFC2" VerticalAlignment="Center" />
                     </StackPanel>
 
                     <Border Grid.Row="1" Background="#09101D" BorderBrush="#1E293B" BorderThickness="1" CornerRadius="4" Padding="8,4" Margin="0,0,0,6">
@@ -748,16 +690,16 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="⚡ الحالة:" Foreground="#64748B" FontSize="11" Margin="0,0,5,0" />
+                    <TextBlock Text="âš¡ Ø§Ù„Ø­Ø§Ù„Ø©:" Foreground="#64748B" FontSize="11" Margin="0,0,5,0" />
                     <TextBlock Text="{Binding StatusMessage}" Foreground="#38BDF8" FontSize="11" FontWeight="SemiBold" />
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding ExecutedCommandsCount, StringFormat='⚡ منفذة: {0} | '}" Foreground="#00FFC2" FontSize="11" FontWeight="Bold" />
-                    <TextBlock Text="{Binding PurePhoneCommandsCount, StringFormat='📱 للتجربة: {0} | '}" Foreground="#38BDF8" FontSize="11" FontWeight="Bold" />
-                    <TextBlock Text="{Binding DiscoveredRamCommandsCount, StringFormat='🧠 بالرام: {0} | '}" Foreground="#FBBF24" FontSize="11" FontWeight="Bold" />
-                    <TextBlock Text="{Binding RadarEventsCount, StringFormat='💾 ملفات/رادار: {0} | '}" Foreground="#A855F7" FontSize="11" FontWeight="Bold" />
-                    <TextBlock Text="{Binding UnfilteredRawEventsCount, StringFormat='📜 السجل الخام الشامل: {0}'}" Foreground="#F97316" FontSize="11" FontWeight="Bold" />
+                    <TextBlock Text="{Binding ExecutedCommandsCount, StringFormat='âš¡ Ù…Ù†ÙØ°Ø©: {0} | '}" Foreground="#00FFC2" FontSize="11" FontWeight="Bold" />
+                    <TextBlock Text="{Binding PurePhoneCommandsCount, StringFormat='ðŸ“± Ù„Ù„ØªØ¬Ø±Ø¨Ø©: {0} | '}" Foreground="#38BDF8" FontSize="11" FontWeight="Bold" />
+                    <TextBlock Text="{Binding DiscoveredRamCommandsCount, StringFormat='ðŸ§  Ø¨Ø§Ù„Ø±Ø§Ù…: {0} | '}" Foreground="#FBBF24" FontSize="11" FontWeight="Bold" />
+                    <TextBlock Text="{Binding RadarEventsCount, StringFormat='ðŸ’¾ Ù…Ù„ÙØ§Øª/Ø±Ø§Ø¯Ø§Ø±: {0} | '}" Foreground="#A855F7" FontSize="11" FontWeight="Bold" />
+                    <TextBlock Text="{Binding UnfilteredRawEventsCount, StringFormat='ðŸ“œ Ø§Ù„Ø³Ø¬Ù„ Ø§Ù„Ø®Ø§Ù… Ø§Ù„Ø´Ø§Ù…Ù„: {0}'}" Foreground="#F97316" FontSize="11" FontWeight="Bold" />
                 </StackPanel>
             </Grid>
         </Border>
