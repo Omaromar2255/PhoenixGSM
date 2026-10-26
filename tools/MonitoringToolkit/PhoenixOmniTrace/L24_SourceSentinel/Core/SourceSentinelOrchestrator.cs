@@ -4,7 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using PhoenixGSM.OmniTrace.Bus;
+using PhoenixGSM.OmniTrace.Bus; using PhoenixGSM.OmniTrace.Commands;
 using PhoenixGSM.OmniTrace.Sensors;
 using PhoenixGSM.OmniTrace.ToolSourceInterception;
 using PhoenixOmniTrace.L24_SourceSentinel.Models;

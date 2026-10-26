@@ -1,8 +1,8 @@
 Set WshShell = CreateObject("WScript.Shell")
-strCurrentDir = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName)
 Set fso = CreateObject("Scripting.FileSystemObject")
-strExe = strCurrentDir & "\tools\MonitoringToolkit\MonitoringStudio\bin\Debug\net8.0-windows\DevConfigStudio.exe"
+strBuildDir = "C:\Users\pc5\Documents\GitHub\PhoenixGSMtools\Debug\net8.0-windows"
+strExe = strBuildDir & "\DevConfigStudio.exe"
 If Not fso.FileExists(strExe) Then
-    strExe = strCurrentDir & "\tools\MonitoringToolkit\MonitoringStudio\bin\Debug\net8.0-windows\MonitoringStudio.exe"
+    strExe = strBuildDir & "\MonitoringStudio.exe"
 End If
 WshShell.Run """" & strExe & """", 1, False

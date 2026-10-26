@@ -8,6 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <AssemblyName>DevConfigStudio</AssemblyName>
+    <BaseOutputPath>C:\Users\pc5\Documents\GitHub\PhoenixGSMtools\</BaseOutputPath>
   </PropertyGroup>
 
   <Target Name="CopyOutputAlias" AfterTargets="Build">

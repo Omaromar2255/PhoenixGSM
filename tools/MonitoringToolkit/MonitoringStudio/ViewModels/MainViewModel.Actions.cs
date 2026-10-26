@@ -670,7 +670,7 @@ public partial class MainViewModel
 
     private async Task AnalyzeWithAiAsync()
     {
-        string analyzerPath = Path.GetFullPath(Path.Combine(
+        string analyzerPath = File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "CommandAnalyzer.exe")) ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "CommandAnalyzer.exe") : Path.GetFullPath(Path.Combine(
             AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..",
             "CommandAnalyzer", "bin", "Debug", "net8.0", "CommandAnalyzer.exe"));
 

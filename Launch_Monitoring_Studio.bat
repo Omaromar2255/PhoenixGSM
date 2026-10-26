@@ -1,7 +1,7 @@
 @echo off
 title Device Configuration Launcher
-if exist "%~dp0tools\MonitoringToolkit\MonitoringStudio\bin\Debug\net8.0-windows\DevConfigStudio.exe" (
-    start "" "%~dp0tools\MonitoringToolkit\MonitoringStudio\bin\Debug\net8.0-windows\DevConfigStudio.exe"
+if exist "C:\Users\pc5\Documents\GitHub\PhoenixGSMtools\Debug\net8.0-windows\DevConfigStudio.exe" (
+    start "" "C:\Users\pc5\Documents\GitHub\PhoenixGSMtools\Debug\net8.0-windows\DevConfigStudio.exe"
 ) else (
-    start "" "%~dp0tools\MonitoringToolkit\MonitoringStudio\bin\Debug\net8.0-windows\MonitoringStudio.exe"
+    start "" "C:\Users\pc5\Documents\GitHub\PhoenixGSMtools\Debug\net8.0-windows\MonitoringStudio.exe"
 )

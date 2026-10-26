@@ -55,7 +55,7 @@ public static partial class DriverManager
         if (File.Exists(siblingPath)) return siblingPath;
 
         // 3. Fallback to hardcoded workspace path
-        var devPath = @"C:\Users\pc5\softwer\PhoenixGSM\tools\MonitoringToolkit\UsbMonitor\PhoenixUsbMonitor\bin\Release\PhoenixUsbMonitor.sys";
+        var devPath = @"C:\Users\pc5\Documents\GitHub\PhoenixGSM\tools\MonitoringToolkit\UsbMonitor\PhoenixUsbMonitor\bin\Release\PhoenixUsbMonitor.sys";
         return devPath;
     }
 
