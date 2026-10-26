@@ -1,7 +1,9 @@
 using System;
+using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using PhoenixGSM.MonitoringStudio.Models;
+using PhoenixOmniTrace.L24_SourceSentinel.Core;
 using PhoenixOmniTrace.L24_SourceSentinel.Models;
 using PhoenixOmniTrace.L24_SourceSentinel.UI;
 using PhoenixGSM.OmniTrace.Models;
@@ -54,7 +56,7 @@ public partial class MainViewModel
 
     /// <summary>
     /// زر مستقل لفتح نافذة طبقة الاعتراض المستقلة من المصدر L24_SourceSentinel
-    /// مع ربطها المباشر بناقل OmniTraceEventBus لالتقاط كافة أوامر MTK والمودم والبورتات و ADB.
+    /// مع ربطها المباشر بناقل OmniTraceEventBus لالتقاط كافة أوامر الهاتف المنفذة والملفات والـ USB والـ ADB.
     /// </summary>
     public ICommand OpenSourceSentinelWindowCommand => _openSourceSentinelWindowCommand ??= new RelayCommand(_ =>
     {
@@ -68,6 +70,12 @@ public partial class MainViewModel
         win.Show();
     });
 
+    public void InitializeL24SourceSentinelLayer()
+    {
+        _ = L24SentinelViewModel;
+        NotifyL24StudioStateChanged();
+    }
+
     private SourceSentinelViewModel CreateBoundL24SentinelViewModel()
     {
         var vm = new SourceSentinelViewModel();
@@ -79,49 +87,85 @@ public partial class MainViewModel
     {
         try
         {
+            // 1. ربط ناقل OmniService.EventBus الرئيسي مباشرة بجسر الطبقة 24 لضمان عدم ضياع أي أمر منطقي أو خام
+            if (_engine.OmniService?.EventBus != null)
+            {
+                vm.AttachToOmniTraceBus(_engine.OmniService.EventBus);
+            }
+
+            // 2. تمرير كافة فئات الأحداث الحية من المحرك الرئيسي (UsbDriver, AdbProxy, Shell, Cmd, SerialPort, TempFileAt, MediaTek, QualcommEdl, UnisocSpd, AppleIos, Mtp, ToolSource, ArtifactVault)
             _engine.OnEventReceived += item =>
             {
                 try
                 {
-                    // إسقاط فوري عند تعطيل الطبقة L24 لتوفير موارد المعالج والذاكرة 100%
-                    if (!vm.IsL24Active) return;
+                    if (!vm.IsL24Active || item == null) return;
 
-                    if (item.Category is EventSourceCategory.SerialPort or
-                        EventSourceCategory.TempFileAt or
-                        EventSourceCategory.MediaTek or
-                        EventSourceCategory.QualcommEdl or
-                        EventSourceCategory.UnisocSpd)
+                    // تجاهل رسائل حالة المحرك الداخلية
+                    if (item.Protocol == "ENGINE" && (item.Command == "STARTED" || item.Command == "STOPPED"))
+                        return;
+
+                    bool isIn = item.Direction is "IN" or "<<" or "DEV->HOST";
+                    SentinelStage stage = SentinelStage.RawCommandExecution;
+                    string savedPath = string.Empty;
+
+                    if (item.Category == EventSourceCategory.NetworkUrl)
                     {
-                        bool isIn = item.Direction is "IN" or "<<";
-                        string cat = isIn
-                            ? "Modem Phone Response"
-                            : (item.Category == EventSourceCategory.MediaTek
-                                ? "MediaTek BROM / DA Command"
-                                : item.Category == EventSourceCategory.QualcommEdl
-                                    ? "Qualcomm EDL / Firehose Protocol"
-                                    : "Modem AT Command");
-
-                        string prefix = isIn
-                            ? "رد الهاتف الفعلي على أمر المودم: "
-                            : "أمر مودم صريح صادر من الأداة: ";
-
-                        vm.Orchestrator.PublishExternalTelemetryEvent(new SourceTelemetryEvent
-                        {
-                            Timestamp = item.Timestamp,
-                            Stage = SentinelStage.RawCommandExecution,
-                            HookedApiName = $"OmniBus_{item.SourceTag}",
-                            CallerModuleOrigin = $"{item.Protocol} ({item.Direction})",
-                            TargetResource = item.EndpointOrTarget,
-                            CommandCategory = cat,
-                            DecodedCommandText = item.Command.StartsWith("AT", StringComparison.OrdinalIgnoreCase) || isIn
-                                ? $"{prefix}{item.Command}"
-                                : item.Summary,
-                            RawPayloadHex = item.RawPayload != null && item.RawPayload.Length > 0
-                                ? BitConverter.ToString(item.RawPayload, 0, Math.Min(item.RawPayload.Length, 128)).Replace("-", "")
-                                : string.Empty,
-                            PayloadSize = item.RawPayload?.Length ?? item.Command.Length
-                        });
+                        stage = SentinelStage.NetworkPreEncryption;
                     }
+                    else if (item.Category == EventSourceCategory.ArtifactVault)
+                    {
+                        stage = SentinelStage.LocalFilePreparation;
+                        if (!string.IsNullOrWhiteSpace(item.EndpointOrTarget) && File.Exists(item.EndpointOrTarget))
+                        {
+                            if (L24FileArchiver.TryArchiveDiscoveredFile(item.EndpointOrTarget, $"StudioArtifactVault ({item.Protocol})", out string sPath, out _, out _))
+                                savedPath = sPath;
+                            else
+                                savedPath = item.EndpointOrTarget;
+                        }
+                        else if (item.RawPayload != null && item.RawPayload.Length > 0)
+                        {
+                            string suggested = !string.IsNullOrWhiteSpace(item.Command) ? Path.GetFileName(item.Command) : "Captured_Artifact.bin";
+                            if (L24FileArchiver.TryArchiveRawBuffer(item.RawPayload, suggested, $"StudioArtifactRaw ({item.Protocol})", out string sPath, out _, out _))
+                                savedPath = sPath;
+                        }
+                    }
+
+                    string cat = isIn
+                        ? $"{item.Protocol} Phone Response"
+                        : item.Category switch
+                        {
+                            EventSourceCategory.MediaTek => "MediaTek BROM / DA Command",
+                            EventSourceCategory.QualcommEdl => "Qualcomm EDL / Firehose Protocol",
+                            EventSourceCategory.UnisocSpd => "Unisoc / SPD BSL Frame",
+                            EventSourceCategory.AppleIos => "Apple iOS / Lockdown / DFU Command",
+                            EventSourceCategory.SerialPort or EventSourceCategory.TempFileAt => "Modem AT Command",
+                            EventSourceCategory.AdbProxy or EventSourceCategory.Shell => "ADB / Interactive Shell",
+                            EventSourceCategory.Cmd or EventSourceCategory.Process or EventSourceCategory.ToolSource => "Tool Command Execution",
+                            EventSourceCategory.Mtp => "MTP Protocol Command",
+                            EventSourceCategory.ArtifactVault => "Archived Helper / Loader File",
+                            EventSourceCategory.NetworkUrl => "Network URL / Server Connection",
+                            _ => $"{item.Protocol} Executed Command"
+                        };
+
+                    string pureCmd = !string.IsNullOrWhiteSpace(item.Command) ? item.Command.Trim() : item.Summary;
+                    string summaryDesc = !string.IsNullOrWhiteSpace(item.Summary) ? item.Summary : pureCmd;
+
+                    vm.Orchestrator.PublishExternalTelemetryEvent(new SourceTelemetryEvent
+                    {
+                        Timestamp = item.Timestamp,
+                        Stage = stage,
+                        HookedApiName = $"StudioEngine_{item.SourceTag}",
+                        CallerModuleOrigin = $"{item.Protocol} ({item.Direction})",
+                        TargetResource = !string.IsNullOrWhiteSpace(savedPath) ? savedPath : item.EndpointOrTarget,
+                        CommandCategory = cat,
+                        DecodedCommandText = summaryDesc,
+                        PureCommandText = pureCmd,
+                        SavedFilePath = savedPath,
+                        RawPayloadHex = item.RawPayload != null && item.RawPayload.Length > 0
+                            ? Convert.ToHexString(item.RawPayload.AsSpan(0, Math.Min(item.RawPayload.Length, 256)))
+                            : string.Empty,
+                        PayloadSize = item.RawPayload?.Length ?? pureCmd.Length
+                    });
                 }
                 catch { }
             };

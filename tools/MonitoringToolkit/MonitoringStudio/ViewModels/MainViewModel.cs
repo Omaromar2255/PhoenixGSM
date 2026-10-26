@@ -126,6 +126,7 @@ public partial class MainViewModel : INotifyPropertyChanged
         InitializeTechnicianAuditLayer();
         InitializeToolSourceInterceptionLayer();
         _engine.Start();
+        InitializeL24SourceSentinelLayer();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

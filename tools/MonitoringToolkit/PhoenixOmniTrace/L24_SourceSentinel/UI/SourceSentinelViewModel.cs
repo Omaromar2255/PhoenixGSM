@@ -157,6 +157,59 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
         }
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // خيارات التحكم الجديدة في فاحص الرام وعزل الخمول (Idle) وفحص الـ Heap السريع
+    // ══════════════════════════════════════════════════════════════════════════
+    public bool IsRamHunterEnabled
+    {
+        get => _orchestrator.IsRamHunterEnabled;
+        set
+        {
+            if (_orchestrator.IsRamHunterEnabled != value)
+            {
+                _orchestrator.IsRamHunterEnabled = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(RamHunterToggleButtonText));
+                OnPropertyChanged(nameof(RamHunterToggleBtnBackground));
+                OnPropertyChanged(nameof(RamHunterToggleBtnBorder));
+            }
+        }
+    }
+
+    public string RamHunterToggleButtonText => IsRamHunterEnabled ? "🧠 فاحص الرام: نشط (إيقاف مؤقت)" : "⏸️ فاحص الرام: متوقف (تشغيل)";
+    public string RamHunterToggleBtnBackground => IsRamHunterEnabled ? "#064E3B" : "#450A0A";
+    public string RamHunterToggleBtnBorder => IsRamHunterEnabled ? "#10B981" : "#EF4444";
+
+    public bool SuppressIdleStaticBaseline
+    {
+        get => _orchestrator.SuppressIdleStaticBaseline;
+        set
+        {
+            if (_orchestrator.SuppressIdleStaticBaseline != value)
+            {
+                _orchestrator.SuppressIdleStaticBaseline = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public bool ScanDynamicHeapOnly
+    {
+        get => _orchestrator.ScanDynamicHeapOnly;
+        set
+        {
+            if (_orchestrator.ScanDynamicHeapOnly != value)
+            {
+                _orchestrator.ScanDynamicHeapOnly = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public ICommand ToggleRamHunterCommand { get; }
+    public ICommand CaptureIdleBaselineCommand { get; }
+    public ICommand ResetIdleBaselineCommand { get; }
+
     // فلترة تبويب الأوامر المكتشفة في الذاكرة (11 خياراً شاملاً)
     private string _discoveredCategoryFilter = "All";
     public string DiscoveredCategoryFilter
@@ -207,7 +260,6 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
     public int DiscCryptoCount => DiscoveredRamEvents.Count(e => e.CommandGroup == L24CommandGroup.CryptoAuth);
     public int DiscOtherCount => DiscoveredRamEvents.Count(e => e.CommandGroup == L24CommandGroup.OtherCommands);
 
-    // نصوص الأزرار الكاملة موضح بها اسم النوع والعدد وحالة التفعيل لتجنب ظهور أرقام مجردة
     public string DiscAllButtonText => $"🌐 الكل ({DiscoveredRamCommandsCount})";
     public string DiscModemButtonText => $"📻 المودم ({DiscModemCount}){(IsModemCategoryEnabled ? "" : " [معطل]")}";
     public string DiscMtkButtonText => $"🔶 ميدياتك ({DiscMtkCount}){(IsMtkCategoryEnabled ? "" : " [معطل]")}";
@@ -220,7 +272,6 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
     public string DiscCryptoButtonText => $"🔐 تشفير ومفاتيح ({DiscCryptoCount}){(IsCryptoCategoryEnabled ? "" : " [معطل]")}";
     public string DiscOtherButtonText => $"🧩 أوامر أخرى ({DiscOtherCount}){(IsOtherCategoryEnabled ? "" : " [معطل]")}";
 
-    // التحكم في تفعيل وإيقاف رصد كل فئة من فئات الأوامر بالذاكرة
     public bool IsModemCategoryEnabled
     {
         get => _orchestrator.IsCategoryDetectionEnabled(L24CommandGroup.ModemAt);
@@ -292,7 +343,6 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
         }
     }
 
-    // استثناء الروابط من الأوامر المكتشفة في الذاكرة
     public bool ExcludeUrlsFromDiscovered
     {
         get => _orchestrator.ExcludeUrlsFromDiscovered;
@@ -308,7 +358,6 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
         }
     }
 
-    // استثناء الروابط من السجل الخام (مفعل افتراضياً)
     public bool ExcludeUrlsFromRawLog
     {
         get => _orchestrator.ExcludeUrlsFromRawLog;
@@ -474,6 +523,21 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
             NotifyL24StateChanged();
         });
 
+        ToggleRamHunterCommand = new RelayCommand(_ =>
+        {
+            IsRamHunterEnabled = !IsRamHunterEnabled;
+        });
+
+        CaptureIdleBaselineCommand = new RelayCommand(_ =>
+        {
+            _orchestrator.CaptureIdleBaselineSnapshot();
+        });
+
+        ResetIdleBaselineCommand = new RelayCommand(_ =>
+        {
+            _orchestrator.ResetIdleBaselineSnapshot();
+        });
+
         LaunchToolCommand = new RelayCommand(_ => ExecuteLaunchTool());
         AttachProcessCommand = new RelayCommand(_ => ExecuteAttachProcess());
         ToggleUnfilteredRawLoggingCommand = new RelayCommand(_ =>
@@ -573,10 +637,15 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
                 if (LiveEvents.Count >= 30000) LiveEvents.RemoveAt(0);
                 LiveEvents.Add(evt);
 
+                // إذا كان الحدث يحتوي على ملف محفوظ (SavedFilePath)، نضيفه فوراً لقائمة الملفات المحفوظة في الواجهة بغض النظر عن نطاقه!
+                if (!string.IsNullOrWhiteSpace(evt.SavedFilePath) || evt.Stage is SentinelStage.RamUnpackOrModuleLoad or SentinelStage.LocalFilePreparation)
+                {
+                    AddArtifactIfNotExists(evt);
+                }
+
                 switch (evt.Scope)
                 {
                     case L24CommandScope.ExecutedOnDevice:
-                        // حظر قاطع للروابط وطلبات الشبكة من تبويب الأوامر الفعلية للجهاز
                         if (!L24CommandClassifier.IsUrlOrNetworkOrAuth(evt) && evt.CommandGroup != L24CommandGroup.ServerCloudLogin)
                         {
                             ExecutedDeviceEvents.Add(evt);
@@ -604,10 +673,6 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
 
                     case L24CommandScope.RadarAndFiles:
                         RadarAndFileEvents.Add(evt);
-                        if (evt.Stage is SentinelStage.RamUnpackOrModuleLoad or SentinelStage.LocalFilePreparation)
-                        {
-                            AddArtifactIfNotExists(evt);
-                        }
                         break;
                 }
 
@@ -697,7 +762,7 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
                 FilePath: path,
                 BaseAddress: IntPtr.Zero,
                 MemorySize: evt.PayloadSize,
-                IsUnpackedInRam: evt.HookedApiName.Contains("VirtualProtect", StringComparison.OrdinalIgnoreCase),
+                IsUnpackedInRam: evt.HookedApiName.Contains("VirtualProtect", StringComparison.OrdinalIgnoreCase) || evt.CommandCategory.Contains("Carved", StringComparison.OrdinalIgnoreCase),
                 DetectionTimestamp: evt.Timestamp,
                 ProcessId: evt.ProcessId
             ));
@@ -718,7 +783,6 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
     {
         if (obj is not SourceTelemetryEvent item) return false;
 
-        // عزل 100%: حجب أي رابط أو طلب سيرفر أو تسجيل دخول من الظهور في تبويب الأوامر الفعلية
         if (item.CommandGroup == L24CommandGroup.ServerCloudLogin || L24CommandClassifier.IsUrlOrNetworkOrAuth(item))
             return false;
 
@@ -755,11 +819,9 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
         if (obj is not SourceTelemetryEvent item) return false;
         if (!FilterCommonItem(item)) return false;
 
-        // إخفاء الفئات المعطلة من العرض
         if (!_orchestrator.IsCategoryDetectionEnabled(item.CommandGroup))
             return false;
 
-        // استثناء الروابط عند تفعيل استثناء الروابط
         if (ExcludeUrlsFromDiscovered && (item.CommandGroup == L24CommandGroup.ServerCloudLogin || L24CommandClassifier.IsUrlOrNetworkOrAuth(item)))
             return false;
 
@@ -774,7 +836,6 @@ public sealed class SourceSentinelViewModel : INotifyPropertyChanged, IDisposabl
     {
         if (obj is not SourceTelemetryEvent item) return false;
 
-        // استثناء الروابط واستدعاءات الخوادم من السجل الخام عند تفعيل الخيار (مفعل افتراضياً)
         if (ExcludeUrlsFromRawLog && (item.CommandGroup == L24CommandGroup.ServerCloudLogin || L24CommandClassifier.IsUrlOrNetworkOrAuth(item)))
             return false;
 

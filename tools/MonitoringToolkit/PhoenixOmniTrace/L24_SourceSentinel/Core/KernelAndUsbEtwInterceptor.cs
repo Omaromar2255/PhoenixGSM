@@ -25,6 +25,9 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
     private CancellationTokenSource? _cts;
     private readonly ConcurrentDictionary<int, string> _trackedPids = new();
     private readonly ConcurrentDictionary<string, DateTime> _seenKernelEvents = new(StringComparer.OrdinalIgnoreCase);
+
+    // جدول ربط FileObject / FileKey باسم الملف الحقيقي في الكيرنل لالتقاط ملفات البوت واللودر في أحداث FileIORead و FileIOWrite حتى لو كان FileName فارغاً
+    private readonly ConcurrentDictionary<ulong, string> _fileObjectToNameMap = new();
     private bool _isDisposed;
 
     public event Action<SourceTelemetryEvent>? OnKernelActivityDetected;
@@ -142,6 +145,9 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
         try
         {
             if (!OperatingSystem.IsWindows()) return string.Empty;
+            string? fastCmd = PhoenixGSM.OmniTrace.Sensors.SmartFilePushArchiver.TryGetProcessCommandLineFast(pid, out _);
+            if (!string.IsNullOrWhiteSpace(fastCmd)) return fastCmd;
+
             using var searcher = new ManagementObjectSearcher($"SELECT CommandLine FROM Win32_Process WHERE ProcessId = {pid}");
             using var objects = searcher.Get();
             foreach (ManagementObject obj in objects)
@@ -182,6 +188,7 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
             _etwSession.EnableKernelProvider(
                 KernelTraceEventParser.Keywords.FileIO |
                 KernelTraceEventParser.Keywords.FileIOInit |
+                KernelTraceEventParser.Keywords.DiskFileIO |
                 KernelTraceEventParser.Keywords.Process
             );
 
@@ -241,9 +248,42 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
                 catch { }
             };
 
-            _etwSession.Source.Kernel.FileIOCreate += data => ProcessKernelFileEvent(data.ProcessID, data.FileName ?? "", "Create/Open", 0);
-            _etwSession.Source.Kernel.FileIORead += data => ProcessKernelFileEvent(data.ProcessID, data.FileName ?? "", "Read", data.IoSize);
-            _etwSession.Source.Kernel.FileIOWrite += data => ProcessKernelFileEvent(data.ProcessID, data.FileName ?? "", "Write", data.IoSize);
+            // حفظ العلاقة بين FileObject/FileKey واسم الملف الحقيقي في الكيرنل
+            _etwSession.Source.Kernel.FileIOName += data =>
+            {
+                if (!string.IsNullOrWhiteSpace(data.FileName) && data.FileKey != 0)
+                    _fileObjectToNameMap[data.FileKey] = data.FileName;
+            };
+
+            _etwSession.Source.Kernel.FileIOFileCreate += data =>
+            {
+                if (!string.IsNullOrWhiteSpace(data.FileName) && data.FileKey != 0)
+                    _fileObjectToNameMap[data.FileKey] = data.FileName;
+            };
+
+            _etwSession.Source.Kernel.FileIOCreate += data =>
+            {
+                string fName = data.FileName ?? "";
+                if (!string.IsNullOrWhiteSpace(fName) && data.FileObject != 0)
+                    _fileObjectToNameMap[data.FileObject] = fName;
+                ProcessKernelFileEvent(data.ProcessID, fName, "Create/Open", 0);
+            };
+
+            _etwSession.Source.Kernel.FileIORead += data =>
+            {
+                string fName = !string.IsNullOrWhiteSpace(data.FileName)
+                    ? data.FileName
+                    : (_fileObjectToNameMap.TryGetValue(data.FileObject, out var mapped) ? mapped : (_fileObjectToNameMap.TryGetValue(data.FileKey, out var mappedKey) ? mappedKey : ""));
+                ProcessKernelFileEvent(data.ProcessID, fName, "Read", data.IoSize);
+            };
+
+            _etwSession.Source.Kernel.FileIOWrite += data =>
+            {
+                string fName = !string.IsNullOrWhiteSpace(data.FileName)
+                    ? data.FileName
+                    : (_fileObjectToNameMap.TryGetValue(data.FileObject, out var mapped) ? mapped : (_fileObjectToNameMap.TryGetValue(data.FileKey, out var mappedKey) ? mappedKey : ""));
+                ProcessKernelFileEvent(data.ProcessID, fName, "Write", data.IoSize);
+            };
 
             _etwSession.Source.Dynamic.All += ProcessDynamicUsbAndSerialEtwEvent;
 
@@ -332,8 +372,12 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
         {
             if (string.IsNullOrWhiteSpace(fileName)) return;
             bool isTracked = _trackedPids.ContainsKey(pid);
+            bool isInToolOrTempFolder = fileName.Contains("UnlockTool", StringComparison.OrdinalIgnoreCase) ||
+                                        fileName.Contains("\\Temp\\", StringComparison.OrdinalIgnoreCase) ||
+                                        fileName.Contains("Chimera", StringComparison.OrdinalIgnoreCase) ||
+                                        fileName.Contains("3uTools", StringComparison.OrdinalIgnoreCase);
 
-            if (isTracked && IsBootOrLoaderOrArchiveFile(fileName))
+            if ((isTracked || isInToolOrTempFolder) && IsBootOrLoaderOrArchiveFile(fileName))
             {
                 string key = $"FILEIO:{pid}:{fileName}";
                 if (TryRecordTimedEvent(key, 3.0))
@@ -346,14 +390,12 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
 
                     string savedFile = string.Empty;
                     long savedLen = 0;
-                    string sha = string.Empty;
 
                     // حفظ نسخة كاملة من ملف البوت/اللودر/الفيرموير تلقائياً عند وصول الكيرنل إليه!
-                    if (L24FileArchiver.TryArchiveDiscoveredFile(fileName, $"KernelETW_{ioOp} ({procName})", out string sPath, out long sSize, out string sHash))
+                    if (L24FileArchiver.TryArchiveDiscoveredFile(fileName, $"KernelETW_{ioOp} ({procName})", out string sPath, out long sSize, out _))
                     {
                         savedFile = sPath;
                         savedLen = sSize;
-                        sha = sHash;
                     }
 
                     string saveNote = !string.IsNullOrWhiteSpace(savedFile)
@@ -506,6 +548,7 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
 
         _trackedPids.Clear();
         _seenKernelEvents.Clear();
+        _fileObjectToNameMap.Clear();
     }
 
     public void Dispose()

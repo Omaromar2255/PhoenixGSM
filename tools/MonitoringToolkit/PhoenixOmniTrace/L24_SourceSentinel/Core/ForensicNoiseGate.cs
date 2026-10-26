@@ -158,19 +158,25 @@ public static class L24FileArchiver
             if (Path.IsPathRooted(candidate) && File.Exists(candidate))
                 return candidate;
 
-            string fileName = Path.GetFileName(candidate);
+            string fileName = Path.GetFileName(candidate.Replace('/', '\\'));
             if (string.IsNullOrWhiteSpace(fileName)) return null;
 
             var searchDirs = new List<string>
             {
                 Path.GetTempPath(),
+                @"C:\Temp",
+                @"C:\UnlockTool",
+                @"C:\UnlockTool\Temp",
+                @"C:\UnlockTool\DataFiles",
+                @"C:\UnlockTool\ramdisk",
+                @"C:\Program Files (x86)\KEY-Tool",
+                @"C:\Program Files\KEY-Tool",
+                @"C:\Chimera",
+                @"C:\3uTools",
                 Environment.CurrentDirectory,
                 AppDomain.CurrentDomain.BaseDirectory,
                 Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"),
-                @"C:\UnlockTool",
-                @"C:\Program Files (x86)\KEY-Tool",
-                @"C:\Program Files\KEY-Tool"
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads")
             };
 
             lock (FileLock)
@@ -187,7 +193,7 @@ public static class L24FileArchiver
 
                 try
                 {
-                    string direct = Path.Combine(dir, candidate);
+                    string direct = Path.Combine(dir, candidate.Replace('/', '\\'));
                     if (File.Exists(direct)) return direct;
 
                     string byName = Path.Combine(dir, fileName);
@@ -197,7 +203,7 @@ public static class L24FileArchiver
                     {
                         IgnoreInaccessible = true,
                         RecurseSubdirectories = true,
-                        MaxRecursionDepth = 2,
+                        MaxRecursionDepth = 4, // زيادة عمق البحث للوصول لمجلدات اللودرات والرامديسك الفرعية
                         MatchCasing = MatchCasing.CaseInsensitive
                     };
                     foreach (var found in Directory.EnumerateFiles(dir, fileName, opts))
@@ -215,7 +221,7 @@ public static class L24FileArchiver
 
     private static byte[]? TryReadFileBytesShared(string path)
     {
-        for (int attempt = 0; attempt < 4; attempt++)
+        for (int attempt = 0; attempt < 5; attempt++)
         {
             try
             {
@@ -234,7 +240,7 @@ public static class L24FileArchiver
             }
             catch (IOException)
             {
-                Thread.Sleep(25);
+                Thread.Sleep(20);
             }
             catch
             {
@@ -252,10 +258,14 @@ public static class L24FileArchiver
             fullPath.Contains("CapturedArtifacts", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        if (fullPath.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase))
+        if (fullPath.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase) &&
+            !fullPath.StartsWith(@"C:\Windows\Temp\", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        if (fileName.EndsWith(".etl", StringComparison.OrdinalIgnoreCase) ||
+        if (fileName.StartsWith("AslLog_", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Equals("CXDUMMYFILE.TXT", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Equals("TRUSTPOL.TXT", StringComparison.OrdinalIgnoreCase) ||
+            fileName.EndsWith(".etl", StringComparison.OrdinalIgnoreCase) ||
             fileName.EndsWith(".squirrel-lock", StringComparison.OrdinalIgnoreCase) ||
             fileName.Equals("adb.log", StringComparison.OrdinalIgnoreCase))
             return true;
@@ -416,19 +426,19 @@ public static class RamCommandConsolidator
             }
 
             bool isSameMemoryNeighborhood = incoming.MemoryAddress > 0 && existing.MemoryAddress > 0 &&
-                                            Math.Abs(incoming.MemoryAddress - existing.MemoryAddress) <= 128;
-            bool isVeryRecentTyping = (now - existing.LastUpdatedUtc).TotalSeconds <= 1.5;
+                                            Math.Abs(incoming.MemoryAddress - existing.MemoryAddress) <= 256;
+            bool isRecentBufferUpdate = (now - existing.LastUpdatedUtc).TotalSeconds <= 15.0;
 
-            if (isSameMemoryNeighborhood && isVeryRecentTyping)
+            if (isSameMemoryNeighborhood && isRecentBufferUpdate)
             {
-                if (incomingPure.Length < existingPure.Length && incomingPure.Length >= 5 &&
+                if (incomingPure.Length < existingPure.Length && incomingPure.Length >= 4 &&
                     existingPure.StartsWith(incomingPure, StringComparison.OrdinalIgnoreCase))
                 {
                     shouldDrop = true;
                     return true;
                 }
 
-                if (incomingPure.Length > existingPure.Length && existingPure.Length >= 5 &&
+                if (incomingPure.Length > existingPure.Length && existingPure.Length >= 4 &&
                     incomingPure.StartsWith(existingPure, StringComparison.OrdinalIgnoreCase))
                 {
                     existing.NormalizedCommand = incomingPure;
@@ -605,7 +615,8 @@ public static class ForensicNoiseGate
             bool isBinaryHexPacket = cat.Contains("Binary Packet", StringComparison.OrdinalIgnoreCase) ||
                                      cat.Contains("BROM Handshake", StringComparison.OrdinalIgnoreCase) ||
                                      cat.Contains("Sahara", StringComparison.OrdinalIgnoreCase) ||
-                                     cat.Contains("DIAG Packet", StringComparison.OrdinalIgnoreCase);
+                                     cat.Contains("DIAG Packet", StringComparison.OrdinalIgnoreCase) ||
+                                     cat.Contains("Carved", StringComparison.OrdinalIgnoreCase);
 
             if (!isBinaryHexPacket)
             {

@@ -103,10 +103,10 @@
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="L24 Source Sentinel" FontSize="15" FontWeight="Bold" Foreground="#38BDF8" VerticalAlignment="Center" />
                                 <Border Background="#1C382F" BorderBrush="#00FF9D" BorderThickness="1" CornerRadius="4" Margin="10,0,0,0" Padding="6,1" VerticalAlignment="Center">
-                                    <TextBlock Text="ORGANIZED TABS + UNFILTERED RAW STREAM + AUTO FILE ARCHIVER" FontSize="9" FontWeight="Bold" Foreground="#00FF9D" />
+                                    <TextBlock Text="MULTI-VECTOR PRE-EXECUTION + SMART RAM HUNTER + AUTO BOOT/LOADER ARCHIVER" FontSize="9" FontWeight="Bold" Foreground="#00FF9D" />
                                 </Border>
                             </StackPanel>
-                            <TextBlock Text="عزل الأوامر المنفذة والمكتشفة + حفظ تلقائي لكافة الملفات + تبويب وملف مستقل للسجل الشامل الخام بدون فلترة" 
+                            <TextBlock Text="اعتراض الأوامر من الأداة قبل وأثناء التنفيذ (CMD/Shell/PTY/Sockets) + اكتشاف الرام مع عزل الخمول + حفظ تلقائي لملفات البوت واللودر" 
                                        FontSize="10.5" Foreground="#64748B" Margin="0,2,0,0" />
                         </StackPanel>
                     </StackPanel>
@@ -118,7 +118,7 @@
                                 BorderBrush="{Binding L24MasterButtonBorder}"
                                 Foreground="{Binding L24MasterStatusColor}"
                                 Style="{StaticResource SentinelBtn}" 
-                                Height="28" Padding="10,2" Margin="0,0,8,0"
+                                Height="28" Padding="10,2" Margin="0,0,6,0"
                                 ToolTip="{Binding L24MasterTooltip}">
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="{Binding L24MasterButtonText}" FontWeight="Bold" FontSize="11" VerticalAlignment="Center" />
@@ -128,6 +128,15 @@
                                 </Border>
                             </StackPanel>
                         </Button>
+
+                        <!-- زر مستقل لإيقاف أو تشغيل فاحص الرام عند الحاجة لتوفير الأداء مع بقاء رصد الأوامر المنفذة يعمل 100% -->
+                        <Button Content="{Binding RamHunterToggleButtonText}"
+                                Command="{Binding ToggleRamHunterCommand}"
+                                Background="{Binding RamHunterToggleBtnBackground}"
+                                BorderBrush="{Binding RamHunterToggleBtnBorder}"
+                                Style="{StaticResource SentinelBtn}"
+                                Height="28" Padding="8,2" Margin="0,0,6,0"
+                                ToolTip="إيقاف أو تشغيل فاحص الرام مؤقتاً عند الحاجة لتوفير الأداء والتركيز على التقاط الأوامر المنفذة بدقة 100%" />
 
                         <Button Content="🚀 تشغيل واعتراض أداة" 
                                 Command="{Binding LaunchToolCommand}"
@@ -139,12 +148,12 @@
                                 Style="{StaticResource SentinelBtn}" 
                                 Background="#1E293B" BorderBrush="#475569" Margin="0,0,5,0" />
 
-                        <Button Content="📜 تصدير السجل الخام الشامل" 
+                        <Button Content="📜 تصدير السجل الخام" 
                                 Command="{Binding ExportUnfilteredRawLogsCommand}"
                                 Style="{StaticResource SentinelBtn}" 
                                 Background="#7C2D12" BorderBrush="#F97316" Margin="0,0,5,0" />
 
-                        <Button Content="🗂️ تصدير كل فئة بملف مستقل" 
+                        <Button Content="🗂️ تصدير الفئات" 
                                 Command="{Binding ExportAllDiscoveredCategoriesSeparatelyCommand}"
                                 Style="{StaticResource SentinelBtn}" 
                                 Background="#3B0764" BorderBrush="#A855F7" Margin="0,0,5,0" />
@@ -154,7 +163,7 @@
                                 Style="{StaticResource SentinelBtn}" 
                                 Background="#065F46" BorderBrush="#10B981" Margin="0,0,5,0" />
 
-                        <Button Content="📁 مجلد السجلات" 
+                        <Button Content="📁 السجلات" 
                                 Command="{Binding OpenLogsFolderCommand}"
                                 Style="{StaticResource SentinelBtn}" 
                                 Background="#1E293B" BorderBrush="#334155" Margin="0,0,5,0" />
@@ -173,33 +182,44 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="🎯 نمط اكتشاف الرام:" Foreground="#38BDF8" FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <WrapPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="🎯 نمط الرام:" Foreground="#38BDF8" FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center" Margin="0,0,5,0" />
                         <ComboBox SelectedIndex="{Binding SelectedDiscoveryModeIndex, Mode=TwoWay}"
-                                  Width="295" Height="26" FontSize="11"
-                                  Background="#0F172A" Foreground="#0F172A" BorderBrush="#38BDF8" Margin="0,0,12,0">
+                                  Width="260" Height="25" FontSize="10.5"
+                                  Background="#0F172A" Foreground="#0F172A" BorderBrush="#38BDF8" Margin="0,0,10,0">
                             <ComboBoxItem Content="⚡ المنفذة للهاتف فقط (إيقاف فحص الرام العام)" />
                             <ComboBoxItem Content="📱 المنفذة + أوامر الهاتف فقط بالرام (AT/MTK/QC/Apple/ADB)" />
                             <ComboBoxItem Content="🧠 اكتشاف شامل للرام (يشمل الروابط وتسجيل الدخول والملفات والكل)" />
                         </ComboBox>
 
-                        <CheckBox Content="📥 إظهار رد الهاتف (بدون تكرار)"
+                        <CheckBox Content="🛡️ عزل أوامر الخمول الثابتة (Idle Filter)"
+                                  IsChecked="{Binding SuppressIdleStaticBaseline, Mode=TwoWay}"
+                                  Foreground="#34D399" FontWeight="SemiBold" FontSize="11"
+                                  VerticalAlignment="Center" Margin="0,0,10,0"
+                                  ToolTip="يمنع ظهور النصوص الثابتة المخزنة داخل ملف الأداة في وضع الخمول (Idle) ويعرض فقط الأوامر التي تولدها الأداة أثناء العمل. ألغِ التحديد إذا أردت استخراج كافة نصوص الأداة الثابتة." />
+
+                        <CheckBox Content="⚡ فحص الـ Heap النشط فقط"
+                                  IsChecked="{Binding ScanDynamicHeapOnly, Mode=TwoWay}"
+                                  Foreground="#38BDF8" FontWeight="SemiBold" FontSize="11"
+                                  VerticalAlignment="Center" Margin="0,0,10,0"
+                                  ToolTip="يحصر فحص الرام في مناطق الذاكرة الديناميكية القابلة للكتابة فقط لسرعة فائقة (أقل من 150ms)" />
+
+                        <Button Content="📸 تصفير/التقاط الخمول الآن"
+                                Command="{Binding CaptureIdleBaselineCommand}"
+                                Style="{StaticResource SentinelBtn}"
+                                Background="#1E293B" BorderBrush="#34D399" Padding="7,2" Margin="0,0,10,0" FontSize="10.5"
+                                ToolTip="التقاط حالة الرام الحالية كبصمة خمول بحيث يظهر بعدها فقط ما يستجد من أوامر" />
+
+                        <CheckBox Content="📥 رد الهاتف"
                                   IsChecked="{Binding ShowPhoneResponses, Mode=TwoWay}"
                                   Foreground="#00FFC2" FontWeight="SemiBold" FontSize="11"
-                                  VerticalAlignment="Center" Margin="0,0,12,0" />
+                                  VerticalAlignment="Center" Margin="0,0,10,0" />
 
-                        <CheckBox Content="📜 تسجيل السجل الخام آنياً"
+                        <CheckBox Content="📜 السجل الخام"
                                   IsChecked="{Binding IsUnfilteredRawLoggingEnabled, Mode=TwoWay}"
                                   Foreground="#F97316" FontWeight="SemiBold" FontSize="11"
-                                  VerticalAlignment="Center" Margin="0,0,12,0"
-                                  ToolTip="تشغيل أو إيقاف تسجيل السجل الخام الشامل (Unfiltered Raw Stream) على القرص والواجهة آنياً" />
-
-                        <CheckBox Content="🚫 استثناء الروابط (خام)"
-                                  IsChecked="{Binding ExcludeUrlsFromRawLog, Mode=TwoWay}"
-                                  Foreground="#FBBF24" FontWeight="SemiBold" FontSize="11"
-                                  VerticalAlignment="Center" Margin="0,0,12,0"
-                                  ToolTip="استثناء الروابط واستدعاءات الخوادم من السجل الخام الشامل (مفعل افتراضياً)" />
-                    </StackPanel>
+                                  VerticalAlignment="Center" Margin="0,0,10,0" />
+                    </WrapPanel>
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                         <Border Background="#3B0764" BorderBrush="#A855F7" BorderThickness="1" CornerRadius="5" 
@@ -213,9 +233,9 @@
                     </StackPanel>
 
                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="🔍 بحث شامل:" VerticalAlignment="Center" Foreground="#94A3B8" Margin="0,0,6,0" FontSize="11" />
+                        <TextBlock Text="🔍 بحث:" VerticalAlignment="Center" Foreground="#94A3B8" Margin="0,0,5,0" FontSize="11" />
                         <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" 
-                                 Width="210" Height="26" VerticalContentAlignment="Center"
+                                 Width="175" Height="25" VerticalContentAlignment="Center"
                                  Background="#0F172A" Foreground="#F8FAFC" BorderBrush="#334155" Padding="6,2" />
                     </StackPanel>
                 </Grid>
@@ -499,6 +519,7 @@
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                     <Button Content="تفعيل كافة الفئات" Command="{Binding EnableAllCategoriesCommand}" Style="{StaticResource SentinelBtn}" Background="#065F46" BorderBrush="#10B981" Margin="0,0,5,0" Padding="8,2" FontSize="10.5" />
                                     <Button Content="🚫 إيقاف الروابط فقط" Command="{Binding ExcludeUrlsCommand}" Style="{StaticResource SentinelBtn}" Background="#7C2D12" BorderBrush="#F97316" Margin="0,0,5,0" Padding="8,2" FontSize="10.5" />
+                                    <Button Content="🔄 إلغاء بصمة الخمول وإظهار الكل" Command="{Binding ResetIdleBaselineCommand}" Style="{StaticResource SentinelBtn}" Background="#3B0764" BorderBrush="#A855F7" Margin="0,0,5,0" Padding="8,2" FontSize="10.5" />
                                     <Button Content="✕ إغلاق اللوحة" Command="{Binding ToggleCategoryConfigPanelCommand}" Style="{StaticResource SentinelBtn}" Background="#1E293B" BorderBrush="#475569" Padding="8,2" FontSize="10.5" />
                                 </StackPanel>
                             </Grid>
@@ -667,7 +688,7 @@
                     </Grid.RowDefinitions>
 
                     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-                        <TextBlock Text="💾 الملفات المحفوظة والمكتبات المرصودة" FontWeight="Bold" FontSize="12" Foreground="#A855F7" VerticalAlignment="Center" />
+                        <TextBlock Text="💾 الملفات المحفوظة وملفات البوت واللودر" FontWeight="Bold" FontSize="12" Foreground="#A855F7" VerticalAlignment="Center" />
                         <Border Background="#2E1065" BorderBrush="#9333EA" BorderThickness="1" CornerRadius="4" Padding="6,1" Margin="8,0,0,0">
                             <TextBlock Text="{Binding LoadedArtifacts.Count, StringFormat='{}{0} عناصر'}" FontSize="10" Foreground="#D8B4FE" />
                         </Border>
