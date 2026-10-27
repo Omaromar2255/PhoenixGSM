@@ -89,16 +89,19 @@ public sealed partial class SourceSentinelOrchestrator
                 _heapHunter.StartHunting(proc.Id, proc.ProcessName);
                 _portPoller.StartPolling(proc.Id, proc.ProcessName);
                 _kernelInterceptor.StartMonitoring(proc.Id, proc.ProcessName);
-                _ramWatcher.ScanProcessModulesAndMemory(proc.Id, _logDirectory);
 
                 var token = _activeCts?.Token ?? CancellationToken.None;
                 Task.Run(async () =>
                 {
-                    while (!proc.HasExited && !token.IsCancellationRequested && !_isDisposed && _isActive)
+                    try
                     {
-                        await Task.Delay(1500, token).ConfigureAwait(false);
-                        _ramWatcher.ScanProcessModulesAndMemory(proc.Id, _logDirectory);
+                        await Task.Delay(8000, token).ConfigureAwait(false);
+                        if (!proc.HasExited && !token.IsCancellationRequested && !_isDisposed && _isActive)
+                        {
+                            _ramWatcher.ScanProcessModulesAndMemory(proc.Id, _logDirectory);
+                        }
                     }
+                    catch { }
                 }, token);
 
                 return true;
@@ -144,16 +147,19 @@ public sealed partial class SourceSentinelOrchestrator
             _heapHunter.StartHunting(proc.Id, proc.ProcessName);
             _portPoller.StartPolling(proc.Id, proc.ProcessName);
             _kernelInterceptor.StartMonitoring(proc.Id, proc.ProcessName);
-            _ramWatcher.ScanProcessModulesAndMemory(processId, _logDirectory);
 
             var token = _activeCts?.Token ?? CancellationToken.None;
             Task.Run(async () =>
             {
-                while (!proc.HasExited && !token.IsCancellationRequested && !_isDisposed && _isActive)
+                try
                 {
-                    await Task.Delay(1500, token).ConfigureAwait(false);
-                    _ramWatcher.ScanProcessModulesAndMemory(processId, _logDirectory);
+                    await Task.Delay(6000, token).ConfigureAwait(false);
+                    if (!proc.HasExited && !token.IsCancellationRequested && !_isDisposed && _isActive)
+                    {
+                        _ramWatcher.ScanProcessModulesAndMemory(processId, _logDirectory);
+                    }
                 }
+                catch { }
             }, token);
 
             return true;

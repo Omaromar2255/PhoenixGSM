@@ -120,7 +120,8 @@ public static class ForensicNoiseGate
             }
         }
 
-        if (api.Equals("LiveRAM_UniversalInterceptor", StringComparison.OrdinalIgnoreCase))
+        if (api.Equals("LiveRAM_UniversalInterceptor", StringComparison.OrdinalIgnoreCase) ||
+            api.Equals("LiveRAM_ExecutedProtocol", StringComparison.OrdinalIgnoreCase))
         {
             string rawStr = !string.IsNullOrWhiteSpace(evt.PureCommandText)
                 ? evt.PureCommandText
@@ -171,12 +172,14 @@ public static class ForensicNoiseGate
         string fp = ComputeFingerprint(evt);
         DateTime now = DateTime.UtcNow;
         bool isLiveBridge = evt.Scope == L24CommandScope.ExecutedOnDevice;
+        bool isFromRamScanner = api.Equals("LiveRAM_ExecutedProtocol", StringComparison.OrdinalIgnoreCase);
 
         if (SeenFingerprints.TryGetValue(fp, out var prevTime))
         {
             if (!isLiveBridge)
                 return false;
-            if ((now - prevTime).TotalSeconds < 0.8)
+            double cooldownSec = isFromRamScanner ? 120.0 : 0.8;
+            if ((now - prevTime).TotalSeconds < cooldownSec)
                 return false;
         }
 

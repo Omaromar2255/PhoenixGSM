@@ -54,10 +54,15 @@ public static class L24CommandClassifier
             return L24CommandScope.DiscoveredInRam;
         }
 
+        if (api.Equals("LiveRAM_ExecutedProtocol", StringComparison.OrdinalIgnoreCase))
+        {
+            return L24CommandScope.ExecutedOnDevice;
+        }
+
         if (api.Equals("LiveRAM_UniversalInterceptor", StringComparison.OrdinalIgnoreCase) ||
             api.Equals("PE_ExportTableAuditor", StringComparison.OrdinalIgnoreCase))
         {
-            if (stage == SentinelStage.RamUnpackOrModuleLoad)
+            if (stage is SentinelStage.RamUnpackOrModuleLoad or SentinelStage.LocalFilePreparation)
                 return L24CommandScope.RadarAndFiles;
 
             return L24CommandScope.DiscoveredInRam;

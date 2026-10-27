@@ -53,7 +53,7 @@ public sealed partial class SourceSentinelOrchestrator : IDisposable
     private readonly ConcurrentQueue<SourceTelemetryEvent> _unfilteredRawEvents = new();
     private readonly BlockingCollection<SourceTelemetryEvent> _unfilteredRawDiskQueue = new(new ConcurrentQueue<SourceTelemetryEvent>());
     private readonly ConcurrentDictionary<string, DateTime> _rawStreamMicroDebounce = new(StringComparer.OrdinalIgnoreCase);
-    private volatile bool _isUnfilteredRawLoggingEnabled = true;
+    private volatile bool _isUnfilteredRawLoggingEnabled = false;
 
     public bool IsUnfilteredRawLoggingEnabled
     {
@@ -181,7 +181,7 @@ public sealed partial class SourceSentinelOrchestrator : IDisposable
     }
 
     private readonly ConcurrentDictionary<L24CommandGroup, bool> _enabledCategories = new();
-    private volatile bool _excludeUrlsFromDiscovered = false;
+    private volatile bool _excludeUrlsFromDiscovered = true;
     private volatile bool _excludeUrlsFromRawLog = true;
 
     public bool ExcludeUrlsFromRawLog
@@ -297,6 +297,19 @@ public sealed partial class SourceSentinelOrchestrator : IDisposable
 
         _heapHunter.IsCategoryEnabled = IsCategoryDetectionEnabled;
         _heapHunter.ExcludeUrls = _excludeUrlsFromDiscovered;
+        _heapHunter.ScanDynamicHeapOnly = true;
+
+        // الإعدادات الافتراضية عالية الأداء: التركيز على أوامر الهاتف والبورتات (MTK / EDL / DIAG / Odin / Modem) وإيقاف الروابط و ADB
+        _enabledCategories[L24CommandGroup.ModemAt] = true;
+        _enabledCategories[L24CommandGroup.MediaTek] = true;
+        _enabledCategories[L24CommandGroup.Qualcomm] = true;
+        _enabledCategories[L24CommandGroup.AppleIos] = true;
+        _enabledCategories[L24CommandGroup.FileTransfer] = true;
+        _enabledCategories[L24CommandGroup.OtherCommands] = true;
+        _enabledCategories[L24CommandGroup.AdbFastboot] = false;
+        _enabledCategories[L24CommandGroup.ServerCloudLogin] = false;
+        _enabledCategories[L24CommandGroup.ArchiveUnpack] = false;
+        _enabledCategories[L24CommandGroup.CryptoAuth] = false;
     }
 
     public void Start()
@@ -314,21 +327,19 @@ public sealed partial class SourceSentinelOrchestrator : IDisposable
         _portPoller.StartPolling(0, "SystemWidePortMonitor");
         _multiExecInterceptor.Start();
 
-        try { _networkUrlSensor.Start(); } catch { }
-        try { _clipboardUrlSensor.Start(); } catch { }
         try { _tempFileSensor.Start(); } catch { }
-        try { _uiActionSensor.Start(); } catch { }
         try { _sessionStreamSensor.Start(); } catch { }
-        try { _filterCorrelatorSensor.Start(); } catch { }
-        try { _pnpArrivalSensor.Start(); } catch { }
-        try { _universalInterceptor.Start(); } catch { }
-        try { _toolSourceOrchestrator.Start(); } catch { }
+        if (IsCategoryDetectionEnabled(L24CommandGroup.ServerCloudLogin) && !_excludeUrlsFromDiscovered)
+        {
+            try { _networkUrlSensor.Start(); } catch { }
+            try { _clipboardUrlSensor.Start(); } catch { }
+        }
 
         _diskLoggerTask = Task.Run(() => DiskLoggerLoop(token), token);
         _unfilteredDiskLoggerTask = Task.Run(() => UnfilteredRawDiskLoggerLoop(token), token);
         _autoDiscoveryTask = Task.Run(() => AutoDiscoverGsmToolsLoop(token), token);
 
-        OnLogMessage?.Invoke("[L24 SourceSentinel] تم تفعيل وتشغيل الطبقة 24 بنجاح (الاعتراض المتعدد للأوامر + فحص الرام الذكي + صائد ملفات البوت نشطة الآن)");
+        OnLogMessage?.Invoke("[L24 SourceSentinel] تم تفعيل وتشغيل الطبقة 24 بنجاح (وضع الأداء الخفيف + رصد MTK/EDL/Modem/Odin المباشر نشط الآن)");
     }
 
     public void Stop()

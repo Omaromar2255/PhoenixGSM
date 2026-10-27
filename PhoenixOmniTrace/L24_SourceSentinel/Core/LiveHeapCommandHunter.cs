@@ -28,10 +28,13 @@ public sealed partial class LiveHeapCommandHunter : IDisposable
     private volatile bool _isWinUsbOrChildAdbActive;
     private volatile bool _isRamHunterEnabled = true;
     private volatile bool _suppressIdleStaticBaseline = true;
-    private volatile bool _scanDynamicHeapOnly = false;
+    private volatile bool _scanDynamicHeapOnly = true;
     private volatile bool _enableInMemoryLoaderCarving = true;
     private volatile bool _isCapturingBaselineNow;
     private int _parentScanCycleCounter;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool IsWow64Process(IntPtr hProcess, out bool wow64Process);
 
     public event Action<SourceTelemetryEvent>? OnCommandCaptured;
 
@@ -209,6 +212,14 @@ public sealed partial class LiveHeapCommandHunter : IDisposable
                         using var proc = Process.GetProcessById(target.Key);
                         if (!proc.HasExited)
                         {
+                            // عدم فحص الذاكرة أثناء مرحلة فك الضغط الأولية لـ VMProtect حتى تستقر الأداة وتفتح نافذتها دون استهلاك المعالج
+                            long workingSetMb = proc.WorkingSet64 / (1024 * 1024);
+                            string pLower = target.Value.ToLowerInvariant();
+                            if (pLower.Contains("unlocktool") && workingSetMb < 380 && proc.MainWindowHandle == IntPtr.Zero)
+                            {
+                                continue;
+                            }
+
                             bool isFirstBaselinePass = _suppressIdleStaticBaseline && !_pidBaselineCompleted.ContainsKey(target.Key);
                             ScanProcessHeapAndBuffers(target.Key, target.Value, token, recordAsBaselineOnly: isFirstBaselinePass);
                             if (isFirstBaselinePass)
@@ -223,22 +234,25 @@ public sealed partial class LiveHeapCommandHunter : IDisposable
                     }
                 }
 
-                await Task.Delay(350, token).ConfigureAwait(false);
+                await Task.Delay(550, token).ConfigureAwait(false);
             }
         }, token);
     }
 
     private void ScanProcessHeapAndBuffers(int pid, string processName, CancellationToken token, bool recordAsBaselineOnly)
     {
-        if (pid <= 0 || (!_isRamHunterEnabled && !recordAsBaselineOnly) || DiscoveryMode == L24DiscoveryMode.ExecutedOnly) return;
+        if (pid <= 0 || (!_isRamHunterEnabled && !recordAsBaselineOnly)) return;
         IntPtr hProc = IntPtr.Zero;
         try
         {
             hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
             if (hProc == IntPtr.Zero) return;
 
+            bool isWow64 = false;
+            try { IsWow64Process(hProc, out isWow64); } catch { }
+
             long currentAddr = 0x10000;
-            long maxAddr = Environment.Is64BitOperatingSystem ? 0x7FFFFFFEFFFFL : 0x7FFF0000L;
+            long maxAddr = (!Environment.Is64BitOperatingSystem || isWow64) ? 0x7FFF0000L : 0x7FFFFFFEFFFFL;
             uint mbiSize = (uint)Marshal.SizeOf<MEMORY_BASIC_INFORMATION>();
             const int chunkSize = 65536;
             const int overlap = 512;
@@ -260,7 +274,7 @@ public sealed partial class LiveHeapCommandHunter : IDisposable
                         isScannable = mbi.State == MEM_COMMIT &&
                                       mbi.Type == MEM_PRIVATE &&
                                       (mbi.Protect & PAGE_GUARD) == 0 &&
-                                      (prot == PAGE_READWRITE || prot == PAGE_EXECUTE_READWRITE || prot == PAGE_WRITECOPY);
+                                      (prot == PAGE_READWRITE || prot == PAGE_WRITECOPY);
                     }
                     else
                     {
@@ -273,7 +287,8 @@ public sealed partial class LiveHeapCommandHunter : IDisposable
                     }
 
                     long regionSize = mbi.RegionSize.ToInt64();
-                    if (isScannable && regionSize > 0 && regionSize <= 64 * 1024 * 1024)
+                    long maxRegionBytes = _scanDynamicHeapOnly ? 16 * 1024 * 1024 : 64 * 1024 * 1024;
+                    if (isScannable && regionSize > 0 && regionSize <= maxRegionBytes)
                     {
                         long offset = 0;
                         while (offset < regionSize && !token.IsCancellationRequested)
@@ -285,12 +300,15 @@ public sealed partial class LiveHeapCommandHunter : IDisposable
                                 ulong chunkHash = ComputeFastFnv1a64(buffer, bytesRead);
                                 long cacheKey = ((long)pid << 44) ^ chunkAddr;
 
-                                if (!recordAsBaselineOnly && _chunkHashCache.TryGetValue(cacheKey, out ulong prevHash) && prevHash == chunkHash)
+                                if (!recordAsBaselineOnly)
                                 {
-                                    offset += chunkSize;
-                                    continue;
+                                    if (_chunkHashCache.TryGetValue(cacheKey, out ulong prevHash) && prevHash == chunkHash)
+                                    {
+                                        offset += chunkSize;
+                                        continue;
+                                    }
+                                    _chunkHashCache[cacheKey] = chunkHash;
                                 }
-                                _chunkHashCache[cacheKey] = chunkHash;
 
                                 InspectBinaryAndTextBuffer(pid, processName, chunkAddr, buffer, bytesRead, isExecutableCodeSection, recordAsBaselineOnly);
                             }
@@ -318,8 +336,13 @@ public sealed partial class LiveHeapCommandHunter : IDisposable
     private static ulong ComputeFastFnv1a64(byte[] buf, int len)
     {
         ulong hash = 14695981039346656037UL;
-        int step = len > 4096 ? 4 : 1;
-        for (int i = 0; i < len; i += step)
+        var words = MemoryMarshal.Cast<byte, ulong>(buf.AsSpan(0, len & ~7));
+        for (int i = 0; i < words.Length; i++)
+        {
+            hash ^= words[i];
+            hash *= 1099511628211UL;
+        }
+        for (int i = len & ~7; i < len; i++)
         {
             hash ^= buf[i];
             hash *= 1099511628211UL;
@@ -337,7 +360,8 @@ public sealed partial class LiveHeapCommandHunter : IDisposable
         string rawValue,
         string targetRes,
         bool isAlreadyHex = false,
-        string savedFilePath = "")
+        string savedFilePath = "",
+        bool isConfirmedExecution = false)
     {
         string cooldownKey = $"{pid}:{category}:{rawValue}";
         DateTime now = DateTime.UtcNow;
@@ -351,7 +375,7 @@ public sealed partial class LiveHeapCommandHunter : IDisposable
             ProcessId = pid,
             ThreadId = 0,
             Stage = stage,
-            HookedApiName = "LiveRAM_UniversalInterceptor",
+            HookedApiName = isConfirmedExecution ? "LiveRAM_ExecutedProtocol" : "LiveRAM_UniversalInterceptor",
             CallerModuleOrigin = $"{processName} [RAM @ 0x{memAddress:X8}]",
             TargetResource = targetRes,
             CommandCategory = category,

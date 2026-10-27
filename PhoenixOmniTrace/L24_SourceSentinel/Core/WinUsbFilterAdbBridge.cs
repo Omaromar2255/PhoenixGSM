@@ -215,6 +215,11 @@ public sealed class WinUsbFilterAdbBridge : IDisposable
         if (cmd.Protocol == KnownProtocol.ADB ||
             proto.Contains("ADB", StringComparison.OrdinalIgnoreCase))
         {
+            bool isRilIpc = proto.Contains("ADB-RIL-IPC", StringComparison.OrdinalIgnoreCase);
+            // تجاهل أوامر ADB العادية إذا لم تكن أوامر مودم RIL IPC وذلك لمنع تلوث تبويب الأوامر المنفذة بأوامر ADB
+            if (!isRilIpc)
+                return;
+
             if (!IsCleanPrintableOrHexCommand(commandText))
                 return;
 
@@ -222,8 +227,7 @@ public sealed class WinUsbFilterAdbBridge : IDisposable
                 ? cLine.Trim()
                 : commandText;
 
-            bool isRilIpc = proto.Contains("ADB-RIL-IPC", StringComparison.OrdinalIgnoreCase);
-            string adbCategory = isRilIpc ? "ADB RIL / AT IPC Command" : "ADB / Interactive Shell";
+            string adbCategory = "ADB RIL / AT IPC Command";
             string targetService = !string.IsNullOrWhiteSpace(cmd.Service) ? cmd.Service : "/data/local/tmp/AT";
 
             _eventSink(new SourceTelemetryEvent
@@ -363,7 +367,7 @@ public sealed class WinUsbFilterAdbBridge : IDisposable
 
         if (isMtkDeviceOrProto ||
             PhoenixGSM.OmniTrace.Decoders.MtkProtocolDecoder.EvaluateMtk(raw.RawPayload) >= 0.70 ||
-            MtkBromSourceInterceptor.TryParseMtkCommand(raw.RawPayload, procName, pid, 0, portOrEp, "USB/VCOM", out _))
+            (raw.RawPayload.Length >= 4 && MtkBromSourceInterceptor.TryParseMtkCommand(raw.RawPayload, procName, pid, 0, portOrEp, "USB/VCOM", out _)))
         {
             string mtkCat = "MediaTek BROM / DA Command";
             string mtkDesc;
@@ -416,10 +420,17 @@ public sealed class WinUsbFilterAdbBridge : IDisposable
             return;
         }
 
-        // 4. Raw Serial / Modem Port Traffic
+        // 4. Raw Serial / Modem / Qualcomm EDL / Samsung Odin Port Traffic
         if (raw.Sensor == SensorType.Serial || raw.Transport == TransportType.SERIAL ||
             proto.Contains("SERIAL", StringComparison.OrdinalIgnoreCase) ||
-            proto.Contains("MODEM", StringComparison.OrdinalIgnoreCase))
+            proto.Contains("MODEM", StringComparison.OrdinalIgnoreCase) ||
+            proto.Contains("SAHARA", StringComparison.OrdinalIgnoreCase) ||
+            proto.Contains("FIREHOSE", StringComparison.OrdinalIgnoreCase) ||
+            proto.Contains("ODIN", StringComparison.OrdinalIgnoreCase) ||
+            proto.Contains("DIAG", StringComparison.OrdinalIgnoreCase) ||
+            portOrEp.Contains("9008", StringComparison.OrdinalIgnoreCase) ||
+            portOrEp.Contains("05C6", StringComparison.OrdinalIgnoreCase) ||
+            portOrEp.Contains("04E8", StringComparison.OrdinalIgnoreCase))
         {
             var (cat, decoded) = Decoders.RawPayloadClassifier.Classify("SerialPortCapture", portOrEp, 0, raw.RawPayload);
             _eventSink(new SourceTelemetryEvent
@@ -439,10 +450,8 @@ public sealed class WinUsbFilterAdbBridge : IDisposable
             return;
         }
 
-        // 5. Raw ADB / RIL-IPC / Interactive Commands
-        bool isRelevantAdb = proto.Equals("ADB-RIL-IPC", StringComparison.OrdinalIgnoreCase) ||
-                             proto.Equals("ADB-INTERACTIVE-CMD", StringComparison.OrdinalIgnoreCase) ||
-                             (proto.Equals("ADB-STREAM", StringComparison.OrdinalIgnoreCase) && dir == "OUT");
+        // 5. Raw ADB / RIL-IPC Commands (RIL-IPC only to prevent ADB spam in L24)
+        bool isRelevantAdb = proto.Equals("ADB-RIL-IPC", StringComparison.OrdinalIgnoreCase);
 
         if (isRelevantAdb)
         {

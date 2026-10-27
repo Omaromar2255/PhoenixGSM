@@ -69,10 +69,13 @@ public sealed class GsmToolSessionStreamSensor : IDisposable
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
     }
 
+    private DateTime _sensorStartTimeUtc = DateTime.UtcNow;
+
     public void Start()
     {
         if (_isRunning) return;
         _isRunning = true;
+        _sensorStartTimeUtc = DateTime.UtcNow.AddSeconds(-2);
         _cts = new CancellationTokenSource();
 
         InitializeWatchers();
@@ -183,8 +186,10 @@ public sealed class GsmToolSessionStreamSensor : IDisposable
 
         try
         {
-            long lastOffset = _fileOffsets.GetOrAdd(filePath, 0);
             var fileInfo = new FileInfo(filePath);
+            if (fileInfo.LastWriteTimeUtc < _sensorStartTimeUtc) return;
+
+            long lastOffset = _fileOffsets.GetOrAdd(filePath, 0);
             if (fileInfo.Length <= lastOffset && lastOffset > 0) return;
 
             string newContent;
@@ -217,15 +222,15 @@ public sealed class GsmToolSessionStreamSensor : IDisposable
 
         if (lines.Length == 0) return;
 
-        // Resolve active caller process (UnlockTool)
-        string callerName = "UnlockTool-2026-09-23-0.exe";
+        // Resolve active caller process (UnlockTool of any version date)
+        string callerName = "UnlockTool.exe";
         string callerPath = @"C:\UnlockTool\UnlockTool.exe";
         int callerPid = 0;
 
         try
         {
-            var unlockProcs = Process.GetProcessesByName("UnlockTool-2026-09-23-0")
-                .Concat(Process.GetProcessesByName("UnlockTool"))
+            var unlockProcs = Process.GetProcesses()
+                .Where(p => p.ProcessName.StartsWith("UnlockTool", StringComparison.OrdinalIgnoreCase))
                 .ToArray();
 
             if (unlockProcs.Length > 0)
@@ -234,6 +239,7 @@ public sealed class GsmToolSessionStreamSensor : IDisposable
                 callerName = $"{unlockProcs[0].ProcessName}.exe";
                 try { callerPath = unlockProcs[0].MainModule?.FileName ?? callerPath; } catch { }
             }
+            foreach (var p in unlockProcs) p.Dispose();
         }
         catch { }
 

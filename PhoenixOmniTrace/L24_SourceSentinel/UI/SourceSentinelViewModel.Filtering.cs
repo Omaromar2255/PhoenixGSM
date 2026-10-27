@@ -229,6 +229,9 @@ public sealed partial class SourceSentinelViewModel
         if (item.CommandGroup == L24CommandGroup.ServerCloudLogin || L24CommandClassifier.IsUrlOrNetworkOrAuth(item))
             return false;
 
+        if (item.CommandGroup == L24CommandGroup.AdbFastboot && !_orchestrator.IsCategoryDetectionEnabled(L24CommandGroup.AdbFastboot))
+            return false;
+
         return FilterCommonItem(item);
     }
 

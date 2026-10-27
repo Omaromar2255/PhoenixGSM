@@ -15,6 +15,12 @@ public static class LiveHeapPatterns
         "cat ", "sh ", "su ", "echo ", "dd ", "chmod ", "mount ", "rm ", "cp ", "mv ", "pm ", "am ", "setprop ", "getprop "
     };
 
+    public static readonly HashSet<string> StaticAtErrorTableEntries = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "+CPIN: SIM PIN", "+CPIN: SIM PUK", "+CPIN: SIM PIN2", "+CPIN: SIM PUK2",
+        "+CPIN: PH-SIM PIN", "+CPIN: PH-NET PIN", "+CPIN: PH-NET PUK", "+CPIN: PH-NETSUB PIN"
+    };
+
     public static readonly HashSet<string> TruncatedAtPrefixes = new(StringComparer.OrdinalIgnoreCase)
     {
         "AT+CGM", "AT+CIM", "AT+CNM", "AT+CFU", "AT+CSC",
@@ -32,11 +38,15 @@ public static class LiveHeapPatterns
         @"\b(?:060100[0-9A-Fa-f]{6,64}|120[dD]00[0-9A-Fa-f]{10,128}|514200[0-9A-Fa-f]{4,64}|516400[0-9A-Fa-f]{6,64})\b)",
         RegexOptions.Compiled);
 
-    // 2. أوامر وبروتوكولات وسجلات تنفيذ MediaTek الحية
+    // 2. أوامر وبروتوكولات وسجلات تنفيذ MediaTek الحية (تشمل سطور التنفيذ الكاملة وبافرات الواجهة الحية)
     public static readonly Regex MtkProtocolRegex = new(
-        @"(\b(?:MTK_DOWNLOAD_AGENT|MTK_BLOADER_INFO|MTK_AllInOne_DA|DA_PL_CRYPTO|Brom_[A-Za-z0-9_]{3,45}|DA_[A-Za-z0-9_]{3,45}|SLA_Challenge|DAA_Challenge|Send_DA|Jump_DA|CMD_Download_DA|CMD_Read16|CMD_Write16|CMD_Read32|CMD_Write32|CMD_GetHwCode|CMD_GetTargetConfig|CMD_GetMeId|CMD_GetSocId|XFLASH_[A-Za-z0-9_]{3,45}|EMMC_BOOT|UFS_BOOT|BROM_REGISTER_ACCESS)\b|" +
-        @"\b(?:preloader_[a-zA-Z0-9_]{2,50}\.bin|MT[0-9]{4}_Android_scatter\.txt|auth_sv5\.auth|DA_SWSEC[A-Za-z0-9_\.]*\.bin|DA_BR[A-Za-z0-9_\.]*\.bin|da_mt[0-9]{4}[A-Za-z0-9_\.]*\.bin)\b|" +
-        @"\b(?:Waiting for device|Bypassing authentication|Handshaking|Sending Download-Agent|Booting device|Reading partition info|Erasing FRP|Formatting userdata|Unlocking bootloader|Relocking bootloader|BOOTROM:0E8D:0003|PRELOADER:0E8D:2000|Hardware\s*:\s*MT[0-9]{4}[A-Za-z0-9\s\(\)\/]*|Security Config\s*:\s*[^\r\n\x00""\<]{2,80}|MEID\s*:\s*[0-9A-Fa-f]{8,32}|SOC ID\s*:\s*[0-9A-Fa-f]{16,64})\b|" +
+        @"(<h3\s+id=""header-mark"">[^\r\n\x00]{3,140}</h3>|" +
+        @"\b(?:BOOT DEVICE|ERASE FRP|FORMAT DATA|FACTORY RESET|UNLOCK BOOTLOADER|RELOCK BOOTLOADER|READ BACK|FLASH|AUTH BYPASS|DUMP NV|WRITE NV)\b|" +
+        @"\b(?:Initializing usb|Waiting for device|Bypassing authentication|Analyzing|Handshaking|Reading hardware info|Sending Download-Agent(?:\s*\[\d+\])?|Syncing with device|Booting device|Syncing with DA|Reading partition info|Reading device info|Erasing FRP|Formatting userdata|Unlocking bootloader|Relocking bootloader|Rebooting device|Writing|Erasing|Reading)\.{2,3}[^\r\n\x00""]{0,140}|" +
+        @"\b(?:Hardware|Security Config|MEID|SOC ID|Storage|Vendor|Boot1|Model Name|Product Name|Manufacturer|Platform|Android Version|Security Patch|Build ID)\s*:\s*[^\r\n\x00""\<]{2,140}|" +
+        @"\b(?:MTK_DOWNLOAD_AGENT|MTK_BLOADER_INFO|MTK_AllInOne_DA|DA_PL_CRYPTO|Brom_[A-Za-z0-9_]{3,45}|DA_[A-Za-z0-9_]{3,45}|SLA_Challenge|DAA_Challenge|Send_DA|Jump_DA|CMD_Download_DA|CMD_Read16|CMD_Write16|CMD_Read32|CMD_Write32|CMD_GetHwCode|CMD_GetTargetConfig|CMD_GetMeId|CMD_GetSocId|XFLASH_[A-Za-z0-9_]{3,45}|EMMC_BOOT|UFS_BOOT|BROM_REGISTER_ACCESS)\b|" +
+        @"\b(?:preloader_[a-zA-Z0-9_]{2,50}\.bin(?:\s*\[[^\r\n\x00]{2,60}\])?|MT[0-9]{4}_Android_scatter\.txt|auth_sv5\.auth|DA_SWSEC[A-Za-z0-9_\.]*\.bin|DA_BR[A-Za-z0-9_\.]*\.bin|da_mt[0-9]{4}[A-Za-z0-9_\.]*\.bin)\b|" +
+        @"\b(?:COM\d+\s*\((?:MediaTek|PreLoader|VCOM)[^\r\n\x00\)]{0,50}\)|COM\d+\s*\[(?:BOOTROM|PRELOADER):0E8D:[0-9A-Fa-f]{4}\]|BOOTROM:0E8D:0003|PRELOADER:0E8D:2000)\b|" +
         @"\b(?:erase|read|write|format|dump|flash|wipe|unlock|relock)\s+(?:nvram|nvdata|proinfo|protect1|protect2|seccfg|lk|lk2|boot|para|misc|recovery|userdata|frp|persistent|md1img|super|vbmeta|rpmb|preloader|pgpt)\b(?![""\,])[A-Za-z0-9_\-\s\.\/]{0,45})",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
@@ -48,13 +58,13 @@ public static class LiveHeapPatterns
         @"(?:echo|cat)\s+[^\r\n\x00""]{1,100}\s*>>?\s*\/(?:dev|data|sdcard|system|efs|vendor)\/[A-Za-z0-9_\-\.\/]+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    // 4. أوامر كوالكوم و EDL الموسعة (Firehose XML / Sahara / VIP / QMSL / DIAG)
+    // 4. أوامر كوالكوم و EDL الموسعة (Firehose XML / Sahara / VIP / QMSL / DIAG) مع استبعاد ترويسات SVG و <program name unknown>
     public static readonly Regex QualcommCommandRegex = new(
         @"(\b(?:QLIB_[A-Za-z0-9_]{4,65}|QPHONEMS_[A-Za-z0-9_]{4,65}|fh_loader(?:\.exe)?\s+[^\r\n\x00""]{3,160}|qsahara_server(?:\.exe)?\s+[^\r\n\x00""]{3,160}|edl(?:\.py|\.exe)?\s+[^\r\n\x00""]{3,140})\b|" +
-        @"<\?xml[\s\S]{10,450}?(?:</data>|</FUSMsg>|</patches>)|" +
-        @"<(?:program|erase|patch|read|ufs|emmc|configure|power|getstorageinfo|setbootablestoragedrive|firmwarewrite|getsha256digest|peek|poke|nop|sig|vip)\b[^>]{2,260}/?>|" +
+        @"<\?xml(?![\s\S]{0,120}<svg\b)[\s\S]{10,450}?(?:</data>|</FUSMsg>|</patches>)|" +
+        @"<(?!program\s+name\s+unknown)(?:program|erase|patch|read|ufs|emmc|configure|power|getstorageinfo|setbootablestoragedrive|firmwarewrite|getsha256digest|peek|poke|nop|sig|vip)\s+[A-Za-z0-9_]+\s*=\s*""[^""]*""[^>]{0,240}/?>|" +
         @"<response\s+value=""(?:ACK|NAK)""[^>]{0,180}/>|" +
-        @"\b(?:Calling handler for|Chip serial num|MSM_HW_ID|OEM_PK_HASH|Sahara protocol|Firehose|prog_emmc_firehose|prog_ufs_firehose|rawprogram[0-9]|patch[0-9])[A-Za-z0-9_\-\.\s\:\=0x\/]{2,120})",
+        @"\b(?:Calling handler for|Chip serial num|MSM_HW_ID|OEM_PK_HASH|Sahara protocol|Sending programmer|Connecting to flash programmer|Firehose|prog_emmc_firehose|prog_ufs_firehose|rawprogram[0-9]|patch[0-9])[A-Za-z0-9_\-\.\s\:\=0x\/\[\]]{2,140})",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     // 5. أنماط أجهزة Apple iOS / iPadOS الشاملة (الأطوار الـ 7)
@@ -124,13 +134,238 @@ public static class LiveHeapPatterns
         return false;
     }
 
+    private static readonly Regex InlineHtmlTagsRegex = new(
+        @"</?(?:b|font|span|h3|div|p|i|u|strong)\b[^>]*>",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex MultiSpaceAfterDotsRegex = new(
+        @"(\.{3}|\]|\:)\s{2,}",
+        RegexOptions.Compiled);
+
+    public static string StripInlineHtmlFormatting(string input)
+    {
+        if (string.IsNullOrEmpty(input) || !input.Contains('<'))
+            return input;
+        string replaced = input.Replace("<br>", "\n", StringComparison.OrdinalIgnoreCase)
+                               .Replace("<br/>", "\n", StringComparison.OrdinalIgnoreCase)
+                               .Replace("<br />", "\n", StringComparison.OrdinalIgnoreCase)
+                               .Replace("</h3>", "\n", StringComparison.OrdinalIgnoreCase)
+                               .Replace("&nbsp;", " ", StringComparison.OrdinalIgnoreCase)
+                               .Replace("\0", "\n", StringComparison.Ordinal);
+        string stripped = InlineHtmlTagsRegex.Replace(replaced, "");
+        string joined = Regex.Replace(stripped, @"\.{3}\s*\r?\n\s*(OK(?:\s*\[\w+\])?|FAIL|COM\d+(?:\s*\[[^\r\n]+\])?|preloader_[^\r\n]+)", "... $1\n", RegexOptions.IgnoreCase);
+        return MultiSpaceAfterDotsRegex.Replace(joined, "$1 ");
+    }
+
+    public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (ulong BeginAddr, ulong EndAddr, ulong SizeBytes, uint StartLba, uint Sectors)> DiscoveredGptPartitions = new(StringComparer.OrdinalIgnoreCase);
+
+    public static string LastCarvedPreloaderPath { get; set; } = string.Empty;
+    public static string LastCarvedGfhPath { get; set; } = string.Empty;
+    public static string LastCarvedScatterPath { get; set; } = string.Empty;
+
+    public static bool IsPureUiCosmeticOrDeviceInfoLine(string val)
+    {
+        if (string.IsNullOrWhiteSpace(val)) return true;
+        if (val.StartsWith("Initializing usb", StringComparison.OrdinalIgnoreCase) ||
+            val.StartsWith("Syncing with device", StringComparison.OrdinalIgnoreCase) ||
+            val.StartsWith("Model Name :", StringComparison.OrdinalIgnoreCase) ||
+            val.StartsWith("Product Name :", StringComparison.OrdinalIgnoreCase) ||
+            val.StartsWith("Manufacturer :", StringComparison.OrdinalIgnoreCase) ||
+            val.StartsWith("Platform :", StringComparison.OrdinalIgnoreCase) ||
+            val.StartsWith("Android Version :", StringComparison.OrdinalIgnoreCase) ||
+            val.StartsWith("Security Patch :", StringComparison.OrdinalIgnoreCase) ||
+            val.StartsWith("Build ID :", StringComparison.OrdinalIgnoreCase) ||
+            val.StartsWith("Build :", StringComparison.OrdinalIgnoreCase) ||
+            val.StartsWith("Build Date :", StringComparison.OrdinalIgnoreCase) ||
+            val.StartsWith("Vendor :", StringComparison.OrdinalIgnoreCase) ||
+            val.StartsWith("Boot1 :", StringComparison.OrdinalIgnoreCase) ||
+            val.Equals("BOOT DEVICE", StringComparison.OrdinalIgnoreCase) ||
+            val.Equals("ERASE FRP", StringComparison.OrdinalIgnoreCase) ||
+            val.Equals("FORMAT DATA", StringComparison.OrdinalIgnoreCase) ||
+            val.Equals("FACTORY RESET", StringComparison.OrdinalIgnoreCase) ||
+            val.Equals("READ BACK", StringComparison.OrdinalIgnoreCase) ||
+            val.Equals("FLASH", StringComparison.OrdinalIgnoreCase) ||
+            val.StartsWith("<h3", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        return false;
+    }
+
+    public static bool TryTranslateToLowLevelMtkCommand(string val, out string lowLevelCommand, out string lowLevelDesc, out string associatedFilePath)
+    {
+        lowLevelCommand = string.Empty;
+        lowLevelDesc = string.Empty;
+        associatedFilePath = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(val) || IsPureUiCosmeticOrDeviceInfoLine(val))
+            return false;
+
+        if (val.StartsWith("Waiting for device...", StringComparison.OrdinalIgnoreCase) && val.Contains("0E8D", StringComparison.OrdinalIgnoreCase))
+        {
+            var comM = Regex.Match(val, @"COM\d+", RegexOptions.IgnoreCase);
+            string port = comM.Success ? comM.Value.ToUpperInvariant() : "VCOM";
+            string mode = val.Contains("0003") ? "BOOTROM (0E8D:0003)" : "PRELOADER (0E8D:2000)";
+            lowLevelCommand = $"USB_VCOM_OPEN :: CreateFile(\"\\\\.\\{port}\", GENERIC_READ|GENERIC_WRITE) [Mode={mode}]";
+            lowLevelDesc = $"فتح قناة اتصال البوت المنخفضة عبر المنفذ التسلسلي ({port}) [{mode}]";
+            return true;
+        }
+
+        if (val.StartsWith("Handshaking... OK", StringComparison.OrdinalIgnoreCase))
+        {
+            lowLevelCommand = "BROM_START_CMD :: TX=[A0 0A 50 05] -> RX=[5F F5 AF FA]";
+            lowLevelDesc = "أمر مصافحة معالج MediaTek BROM الثنائي المباشر (A0 0A 50 05 -> 5F F5 AF FA)";
+            return true;
+        }
+
+        if (val.StartsWith("Bypassing authentication... OK", StringComparison.OrdinalIgnoreCase))
+        {
+            lowLevelCommand = "BROM_SLA_DAA_BYPASS :: CMD_WRITE32(0xD4, Reg=0x10007000 [WDT_MODE], Val=0x22000064) + USB_CTRL_XFER(bmReq=0xA1, bReq=0x00, BromRegisterAccess)";
+            lowLevelDesc = "أمر تعطيل المؤقت الحارس (WDT=0x10007000) وتجاوز حماية المصادقة (SLA/DAA) عبر أمر الكتابة بالمسجلات CMD_WRITE32 (0xD4)";
+            if (!string.IsNullOrEmpty(LastCarvedGfhPath)) associatedFilePath = LastCarvedGfhPath;
+            return true;
+        }
+
+        if (val.StartsWith("Analyzing...", StringComparison.OrdinalIgnoreCase) && val.Contains("preloader_", StringComparison.OrdinalIgnoreCase))
+        {
+            var m = Regex.Match(val, @"(preloader_[A-Za-z0-9_]+\.bin)\s*(?:\[([^\]]+)\])?", RegexOptions.IgnoreCase);
+            string pFile = m.Success ? m.Groups[1].Value : "preloader.bin";
+            string meta = m.Success && m.Groups[2].Success ? m.Groups[2].Value : "EMI";
+            associatedFilePath = LastCarvedPreloaderPath;
+            string savedNote = !string.IsNullOrEmpty(associatedFilePath) ? $" | SavedFile={associatedFilePath}" : "";
+            lowLevelCommand = $"EMI_DRAM_PARSE :: LoadInternalPreloader(File=\"{pFile}\", Config=[{meta}], Header=MTK_BLOADER_INFO_v38){savedNote}";
+            lowLevelDesc = $"تحميل وتفكيك ملف تهيئة الذاكرة الداخلي (EMI Preloader: {pFile} [{meta}]) لضبط توقيتات الـ DRAM";
+            return true;
+        }
+
+        if (val.StartsWith("Hardware :", StringComparison.OrdinalIgnoreCase))
+        {
+            string hwInfo = val["Hardware :".Length..].Trim();
+            var hexM = Regex.Match(hwInfo, @"([0-9A-Fa-f]{4})\s+([0-9A-Fa-f]{4})\s+([0-9A-Fa-f]{4})\s+([0-9A-Fa-f]{4})");
+            if (!hexM.Success) return false;
+            lowLevelCommand = $"BROM_GET_HW_DICT :: CMD_GET_HW_CODE(0xFD)->0x{hexM.Groups[1].Value} | CMD_GET_HW_SW_VER(0xFC)->[HW_SUB=0x{hexM.Groups[2].Value}, HW_VER=0x{hexM.Groups[3].Value}, SW_VER=0x{hexM.Groups[4].Value}] ({hwInfo})";
+            lowLevelDesc = "أوامر قراءة معرف المعالج وإصدار العتاد من الـ BROM: CMD_GET_HW_CODE (0xFD) + CMD_GET_HW_SW_VER (0xFC)";
+            return true;
+        }
+
+        if (val.StartsWith("Security Config :", StringComparison.OrdinalIgnoreCase))
+        {
+            string sec = val["Security Config :".Length..].Trim();
+            if (sec.Length < 2 || (!sec.Contains("SCB", StringComparison.OrdinalIgnoreCase) && !sec.Contains("SBC", StringComparison.OrdinalIgnoreCase) && !sec.Contains("SLA", StringComparison.OrdinalIgnoreCase) && !sec.Contains("DAA", StringComparison.OrdinalIgnoreCase)))
+                return false;
+            lowLevelCommand = $"BROM_GET_TARGET_CONFIG :: CMD_GET_TARGET_CONFIG(0xD8) -> SEC_CFG=[{sec}]";
+            lowLevelDesc = $"أمر فحص سجلات الحماية الأمنية للمعالج CMD_GET_TARGET_CONFIG (0xD8) -> [{sec}]";
+            return true;
+        }
+
+        if (val.StartsWith("MEID :", StringComparison.OrdinalIgnoreCase) || val.StartsWith("SOC ID :", StringComparison.OrdinalIgnoreCase))
+        {
+            bool isSoc = val.StartsWith("SOC ID", StringComparison.OrdinalIgnoreCase);
+            string idVal = val[(val.IndexOf(':') + 1)..].Trim();
+            if (!Regex.IsMatch(idVal, @"^[0-9A-Fa-f]{16,64}$")) return false;
+            lowLevelCommand = isSoc
+                ? $"BROM_GET_SOC_ID :: CMD_GET_SOC_ID(0xE7) -> RX_SOC_ID[32B]={idVal}"
+                : $"BROM_GET_ME_ID :: CMD_GET_ME_ID(0xE1) -> RX_MEID[16B]={idVal}";
+            lowLevelDesc = isSoc
+                ? $"أمر قراءة البصمة الرقمية للمعالج CMD_GET_SOC_ID (0xE7): {idVal}"
+                : $"أمر قراءة الرقم التسلسلي الفريد للمعالج CMD_GET_ME_ID (0xE1): {idVal}";
+            return true;
+        }
+
+        if (val.StartsWith("Sending Download-Agent", StringComparison.OrdinalIgnoreCase) && val.Contains("OK", StringComparison.OrdinalIgnoreCase))
+        {
+            associatedFilePath = !string.IsNullOrEmpty(LastCarvedGfhPath) ? LastCarvedGfhPath : LastCarvedPreloaderPath;
+            string savedNote = !string.IsNullOrEmpty(associatedFilePath) ? $" | PayloadFile={associatedFilePath}" : "";
+            lowLevelCommand = $"BROM_SEND_DA :: CMD_SEND_DA(0xD7, TargetAddr=0x00200000 [SRAM], Stage=DA_Stage1) -> ChecksumVerify=OK{savedNote}";
+            lowLevelDesc = "أمر حقن وإرسال وكيل التحميل (Download-Agent Stage 1) إلى ذاكرة SRAM الداخلية (0x00200000) عبر الأمر CMD_SEND_DA (0xD7)";
+            return true;
+        }
+
+        if (val.StartsWith("Booting device... OK", StringComparison.OrdinalIgnoreCase))
+        {
+            associatedFilePath = LastCarvedPreloaderPath;
+            lowLevelCommand = "BROM_JUMP_DA :: CMD_JUMP_DA(0xD5, JumpAddr=0x00200000) -> DA_STAGE1_INIT_DRAM(EMI=preloader_u520.bin) -> DA_SEND_STAGE2(TargetAddr=0x40000000 [DRAM])";
+            lowLevelDesc = "أمر القفز لتنفيذ وكيل التحميل CMD_JUMP_DA (0xD5 @ 0x00200000) وتهيئة الـ DRAM وتحميل المرحلة الثانية DA Stage 2 (@ 0x40000000)";
+            return true;
+        }
+
+        if (val.StartsWith("Storage :", StringComparison.OrdinalIgnoreCase))
+        {
+            string st = val["Storage :".Length..].Trim();
+            if (!st.Contains("CID", StringComparison.OrdinalIgnoreCase) || st.Length < 20) return false;
+            lowLevelCommand = $"DA_READ_STORAGE_INFO :: DA_CMD_SYNC(0xC0) & EMMC_SEND_CID -> [{st}]";
+            lowLevelDesc = $"أمر وكيل التحميل (DA) لقراءة معرف شريحة الذاكرة الداخلية (eMMC/UFS CID): {st}";
+            return true;
+        }
+
+        if (val.StartsWith("Reading partition info...", StringComparison.OrdinalIgnoreCase) && val.Contains("OK", StringComparison.OrdinalIgnoreCase))
+        {
+            var cntM = Regex.Match(val, @"OK\s*\[(\d+)\]", RegexOptions.IgnoreCase);
+            string cntStr = cntM.Success ? $"Count={cntM.Groups[1].Value}" : "OK";
+            associatedFilePath = LastCarvedScatterPath;
+            string savedNote = !string.IsNullOrEmpty(associatedFilePath) ? $" | ScatterFile={associatedFilePath}" : "";
+            lowLevelCommand = $"DA_READ_GPT_TABLE :: DA_CMD_READ_PGPT(Addr=0x00000000, Length=0x00008000 [32KiB], Region=EMMC_USER, {cntStr}){savedNote}";
+            lowLevelDesc = "أمر قراءة جدول تقسيمات الذاكرة الخام (Primary GPT @ 0x0..0x8000) عبر وكيل التحميل DA واستخراج عناوين القطاعات";
+            return true;
+        }
+
+        if (val.StartsWith("Reading device info...", StringComparison.OrdinalIgnoreCase) && val.Contains("[", StringComparison.Ordinal))
+        {
+            var pm = Regex.Match(val, @"\[([A-Za-z0-9_]+)\]");
+            string partName = pm.Success ? pm.Groups[1].Value : "super";
+            string addrInfo = GetPartitionAddressTag(partName);
+            lowLevelCommand = $"DA_READ_PARTITION_PROBE :: DA_CMD_READ_DATA(Partition=\"{partName}\"{addrInfo}, Target=\"build.prop\")";
+            lowLevelDesc = $"أمر قراءة قطاع النظام ({partName}{addrInfo}) عبر وكيل التحميل DA لاستخراج خصائص البناء (build.prop)";
+            return true;
+        }
+
+        if (val.StartsWith("Erasing ", StringComparison.OrdinalIgnoreCase) ||
+            val.StartsWith("Formatting ", StringComparison.OrdinalIgnoreCase) ||
+            val.StartsWith("Writing ", StringComparison.OrdinalIgnoreCase) ||
+            (val.StartsWith("Reading ", StringComparison.OrdinalIgnoreCase) && !val.StartsWith("Reading hardware", StringComparison.OrdinalIgnoreCase) && !val.StartsWith("Reading partition", StringComparison.OrdinalIgnoreCase) && !val.StartsWith("Reading device", StringComparison.OrdinalIgnoreCase)))
+        {
+            var pm = Regex.Match(val, @"\b(nvram|nvdata|proinfo|protect1|protect2|seccfg|lk|lk2|boot|para|misc|recovery|userdata|frp|persist|md1img|super|vbmeta|vbmeta_system|vbmeta_vendor|spmfw|sspm_1|sspm_2|gz1|gz2|dtbo|logo|tee1|tee2|cache|carrier|otp|flashinfo|preloader|pgpt)\b", RegexOptions.IgnoreCase);
+            string partName = pm.Success ? pm.Groups[1].Value.ToLowerInvariant() : "partition";
+            string addrInfo = GetPartitionAddressTag(partName);
+            string daOp = val.StartsWith("Erasing", StringComparison.OrdinalIgnoreCase) || val.StartsWith("Formatting", StringComparison.OrdinalIgnoreCase)
+                ? "DA_CMD_FORMAT_PARTITION (0x010005)"
+                : (val.StartsWith("Writing", StringComparison.OrdinalIgnoreCase) ? "DA_CMD_WRITE_PARTITION (0x010003)" : "DA_CMD_READ_PARTITION (0x010004)");
+            lowLevelCommand = $"{daOp} :: [Partition=\"{partName}\"{addrInfo}] ({val})";
+            lowLevelDesc = $"أمر تنفيذ مباشر من وكيل التحميل DA على قطاع الذاكرة [{partName}{addrInfo}]: {val}";
+            return true;
+        }
+
+        return false;
+    }
+
+    public static string GetPartitionAddressTag(string partName)
+    {
+        if (DiscoveredGptPartitions.TryGetValue(partName, out var p))
+        {
+            return $", BeginAddr=0x{p.BeginAddr:X8}, EndAddr=0x{p.EndAddr:X8}, Size=0x{p.SizeBytes:X8} ({p.SizeBytes / 1024} KiB)";
+        }
+        return string.Empty;
+    }
+
+    public static bool IsConfirmedLiveExecutionStep(string val)
+    {
+        if (string.IsNullOrWhiteSpace(val) || IsPureUiCosmeticOrDeviceInfoLine(val)) return false;
+        if (TryTranslateToLowLevelMtkCommand(val, out _, out _, out _))
+            return true;
+        if (val.Contains("[BOOTROM:0E8D:", StringComparison.OrdinalIgnoreCase) ||
+            val.Contains("[PRELOADER:0E8D:", StringComparison.OrdinalIgnoreCase) ||
+            val.Contains("0E8D&PID_0003", StringComparison.OrdinalIgnoreCase) ||
+            val.Contains("05C6&PID_9008", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        return false;
+    }
+
     public static bool IsHtmlOrUiFormatNoise(string val)
     {
-        return val.Contains("</b>", StringComparison.OrdinalIgnoreCase) ||
-               val.Contains("</li>", StringComparison.OrdinalIgnoreCase) ||
-               val.Contains("</font>", StringComparison.OrdinalIgnoreCase) ||
-               val.Contains("</span>", StringComparison.OrdinalIgnoreCase) ||
+        return val.Contains("</li>", StringComparison.OrdinalIgnoreCase) ||
                val.Contains("<a href=", StringComparison.OrdinalIgnoreCase) ||
+               val.Contains("<svg", StringComparison.OrdinalIgnoreCase) ||
                val.Equals("bgcolor", StringComparison.OrdinalIgnoreCase) ||
                val.Equals("bgcolor=", StringComparison.OrdinalIgnoreCase) ||
                val.Equals("bgcolor-color", StringComparison.OrdinalIgnoreCase);

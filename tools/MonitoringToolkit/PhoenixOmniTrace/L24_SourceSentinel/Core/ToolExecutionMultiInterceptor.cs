@@ -38,12 +38,10 @@ public sealed class ToolExecutionMultiInterceptor : IDisposable
 
     private static readonly string[] TargetCliBinaries =
     [
-        "cmd", "powershell", "pwsh", "conhost", "openconsole",
-        "adb", "fastboot", "fh_loader", "qsahara_server", "edl", "spd_dump",
+        "fh_loader", "qsahara_server", "edl", "spd_dump",
         "irecovery", "ideviceinfo", "ideviceactivation", "idevice_id", "idevicepair",
         "idevicerestore", "idevicebackup2", "ideviceinstaller", "iproxy", "gaster",
-        "python", "python3", "7z", "7za", "tar", "unzip", "lz4", "simg2img", "lpunpack",
-        "openssl", "curl", "wget", "devcon", "pnputil", "filter-x64", "filter-x86"
+        "devcon", "pnputil", "filter-x64", "filter-x86"
     ];
 
     private static readonly Regex AdbSocketCommandRegex = new(
@@ -85,8 +83,6 @@ public sealed class ToolExecutionMultiInterceptor : IDisposable
         InitializePreExecutionStagingWatchers();
 
         _pebTreeTask = Task.Run(() => FastPebProcessTreeLoop(token), token);
-        _consolePtyTask = Task.Run(() => InteractiveConsoleAndPtyLoop(token), token);
-        _loopbackSocketTask = Task.Run(() => AdbAndUsbmuxLoopbackProbeLoop(token), token);
         _namedPipeTask = Task.Run(() => NamedPipeActivityScannerLoop(token), token);
     }
 
@@ -133,12 +129,28 @@ public sealed class ToolExecutionMultiInterceptor : IDisposable
                         string pNameLower = pName.ToLowerInvariant();
 
                         bool isTargetCli = TargetCliBinaries.Any(b => pNameLower.Equals(b, StringComparison.OrdinalIgnoreCase) || pNameLower.StartsWith(b + ".", StringComparison.OrdinalIgnoreCase));
+                        if (!isTargetCli && _trackedToolPids.IsEmpty)
+                        {
+                            _seenChildProcessCmds[pid] = pName;
+                            continue;
+                        }
+
                         string? cmdLine = SmartFilePushArchiver.TryGetProcessCommandLineFast(pid, out int parentPid);
 
-                        bool isChildOfTrackedTool = parentPid > 0 && (_trackedToolPids.ContainsKey(parentPid) || _seenChildProcessCmds.ContainsKey(parentPid));
+                        bool isChildOfTrackedTool = parentPid > 0 && _trackedToolPids.ContainsKey(parentPid);
 
                         if (!isChildOfTrackedTool && !isTargetCli)
+                        {
+                            _seenChildProcessCmds[pid] = pName;
                             continue;
+                        }
+
+                        // استبعاد أوامر ADB و Conhost وعمليات النظام غير المرتبطة بالهاتف
+                        if (pNameLower is "adb" or "conhost" or "openconsole" or "svchost" or "dllhost" or "opencode" or "opencode-cli" or "git" or "powershell" or "pwsh" or "l24liveharness")
+                        {
+                            _seenChildProcessCmds[pid] = pName;
+                            continue;
+                        }
 
                         if (string.IsNullOrWhiteSpace(cmdLine))
                         {
@@ -189,7 +201,7 @@ public sealed class ToolExecutionMultiInterceptor : IDisposable
             }
             catch { }
 
-            try { await Task.Delay(35, token).ConfigureAwait(false); }
+            try { await Task.Delay(1200, token).ConfigureAwait(false); }
             catch (OperationCanceledException) { break; }
         }
     }
@@ -348,6 +360,8 @@ public sealed class ToolExecutionMultiInterceptor : IDisposable
         {
             string ext = Path.GetExtension(e.FullPath).ToLowerInvariant();
             string name = Path.GetFileName(e.FullPath).ToLowerInvariant();
+            if (name.StartsWith("__pss", StringComparison.OrdinalIgnoreCase))
+                return;
 
             if (ext is ".bat" or ".cmd" or ".ps1" or ".sh" or ".at" or ".seq" ||
                 (ext == ".xml" && (name.Contains("rawprogram") || name.Contains("patch") || name.Contains("firehose"))))

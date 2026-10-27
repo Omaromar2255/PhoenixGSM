@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
@@ -48,7 +48,6 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
         _cts = new CancellationTokenSource();
         var token = _cts.Token;
 
-        Task.Run(() => StartWmiProcessWatcher(token), token);
         Task.Run(() => StartEtwKernelSession(token), token);
     }
 
@@ -196,7 +195,6 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
             {
                 ulong xhciKeywords = 0x40000000000385D5UL | 0x8000000000000000UL;
                 ulong serialKeywords = 0x40000000000007E0UL | 0x8000000000000000UL;
-                _etwSession.EnableProvider(XhciProviderGuid, TraceEventLevel.Verbose, matchAnyKeywords: xhciKeywords);
                 _etwSession.EnableProvider(SerialClassExtensionV2Guid, TraceEventLevel.Verbose, matchAnyKeywords: serialKeywords);
                 _etwSession.EnableProvider(SerialClassExtensionGuid, TraceEventLevel.Verbose, matchAnyKeywords: 0xC000000000000000UL);
             }
@@ -251,18 +249,22 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
             // حفظ العلاقة بين FileObject/FileKey واسم الملف الحقيقي في الكيرنل
             _etwSession.Source.Kernel.FileIOName += data =>
             {
+                if (_trackedPids.IsEmpty) return;
+                if (_fileObjectToNameMap.Count > 15000) _fileObjectToNameMap.Clear();
                 if (!string.IsNullOrWhiteSpace(data.FileName) && data.FileKey != 0)
                     _fileObjectToNameMap[data.FileKey] = data.FileName;
             };
 
             _etwSession.Source.Kernel.FileIOFileCreate += data =>
             {
+                if (!_trackedPids.ContainsKey(data.ProcessID)) return;
                 if (!string.IsNullOrWhiteSpace(data.FileName) && data.FileKey != 0)
                     _fileObjectToNameMap[data.FileKey] = data.FileName;
             };
 
             _etwSession.Source.Kernel.FileIOCreate += data =>
             {
+                if (!_trackedPids.ContainsKey(data.ProcessID)) return;
                 string fName = data.FileName ?? "";
                 if (!string.IsNullOrWhiteSpace(fName) && data.FileObject != 0)
                     _fileObjectToNameMap[data.FileObject] = fName;
@@ -271,6 +273,7 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
 
             _etwSession.Source.Kernel.FileIORead += data =>
             {
+                if (!_trackedPids.ContainsKey(data.ProcessID)) return;
                 string fName = !string.IsNullOrWhiteSpace(data.FileName)
                     ? data.FileName
                     : (_fileObjectToNameMap.TryGetValue(data.FileObject, out var mapped) ? mapped : (_fileObjectToNameMap.TryGetValue(data.FileKey, out var mappedKey) ? mappedKey : ""));
@@ -279,6 +282,7 @@ public sealed class KernelAndUsbEtwInterceptor : IDisposable
 
             _etwSession.Source.Kernel.FileIOWrite += data =>
             {
+                if (!_trackedPids.ContainsKey(data.ProcessID)) return;
                 string fName = !string.IsNullOrWhiteSpace(data.FileName)
                     ? data.FileName
                     : (_fileObjectToNameMap.TryGetValue(data.FileObject, out var mapped) ? mapped : (_fileObjectToNameMap.TryGetValue(data.FileKey, out var mappedKey) ? mappedKey : ""));
