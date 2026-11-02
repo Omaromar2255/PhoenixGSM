@@ -95,6 +95,18 @@
                                 Style="{StaticResource SentinelBtn}" 
                                 Background="#7C2D12" BorderBrush="#F97316" Margin="0,0,5,0" />
 
+                        <Button Content="⚡ تصدير المنفذة (منظمة)" 
+                                Command="{Binding ExportExecutedCommandsSeparatelyCommand}"
+                                Style="{StaticResource SentinelBtn}" 
+                                Background="#047857" BorderBrush="#10B981" Margin="0,0,5,0"
+                                ToolTip="تصدير الأوامر الفعلية المنفذة للهاتف مقسمة كل نوع بملف ومجلد مستقل مع سكريبتات إعادة تشغيل (Batch / Python / Clean List / JSON)" />
+
+                        <Button Content="📱 تصدير التجربة (منظمة)" 
+                                Command="{Binding ExportPureTestCommandsSeparatelyCommand}"
+                                Style="{StaticResource SentinelBtn}" 
+                                Background="#0284C7" BorderBrush="#38BDF8" Margin="0,0,5,0"
+                                ToolTip="تصدير أوامر الهاتف الصافية للتجربة والاختبار مقسمة كل نوع بملف ومجلد مستقل مع سكريبتات قابلة لإعادة الاستخدام" />
+
                         <Button Content="🗂️ تصدير الفئات" 
                                 Command="{Binding ExportAllDiscoveredCategoriesSeparatelyCommand}"
                                 Style="{StaticResource SentinelBtn}" 
@@ -223,7 +235,66 @@
                     </StackPanel>
                 </TabItem.Header>
                 <Grid>
-                    <DataGrid ItemsSource="{Binding FilteredExecutedEvents}"
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- شريط خيارات وتصفية الأوامر المنفذة للهاتف -->
+                    <Border Grid.Row="0" Background="#0C121E" BorderBrush="#1E293B" BorderThickness="0,0,0,1" Padding="8,4">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <WrapPanel Grid.Column="0" VerticalAlignment="Center">
+                                <RadioButton Content="{Binding ExecAllButtonText}" IsChecked="{Binding IsExecAllSelected, Mode=OneWay}"
+                                             Command="{Binding SetExecutedCategoryFilterCommand}" CommandParameter="All"
+                                             Style="{StaticResource FilterPillBtn}" Margin="0,0,4,0" />
+                                <RadioButton Content="{Binding ExecModemButtonText}" IsChecked="{Binding IsExecModemSelected, Mode=OneWay}"
+                                             Command="{Binding SetExecutedCategoryFilterCommand}" CommandParameter="ModemAt"
+                                             Style="{StaticResource FilterPillBtn}" Margin="0,0,4,0" />
+                                <RadioButton Content="{Binding ExecMtkButtonText}" IsChecked="{Binding IsExecMtkSelected, Mode=OneWay}"
+                                             Command="{Binding SetExecutedCategoryFilterCommand}" CommandParameter="MediaTek"
+                                             Style="{StaticResource FilterPillBtn}" Margin="0,0,4,0" />
+                                <RadioButton Content="{Binding ExecQualcommButtonText}" IsChecked="{Binding IsExecQualcommSelected, Mode=OneWay}"
+                                             Command="{Binding SetExecutedCategoryFilterCommand}" CommandParameter="Qualcomm"
+                                             Style="{StaticResource FilterPillBtn}" Margin="0,0,4,0" />
+                                <RadioButton Content="{Binding ExecAppleButtonText}" IsChecked="{Binding IsExecAppleSelected, Mode=OneWay}"
+                                             Command="{Binding SetExecutedCategoryFilterCommand}" CommandParameter="AppleIos"
+                                             Style="{StaticResource FilterPillBtn}" Margin="0,0,4,0" />
+                                <RadioButton Content="{Binding ExecAdbButtonText}" IsChecked="{Binding IsExecAdbSelected, Mode=OneWay}"
+                                             Command="{Binding SetExecutedCategoryFilterCommand}" CommandParameter="AdbFastboot"
+                                             Style="{StaticResource FilterPillBtn}" Margin="0,0,4,0" />
+                                <RadioButton Content="{Binding ExecOtherButtonText}" IsChecked="{Binding IsExecOtherSelected, Mode=OneWay}"
+                                             Command="{Binding SetExecutedCategoryFilterCommand}" CommandParameter="OtherCommands"
+                                             Style="{StaticResource FilterPillBtn}" Margin="0,0,4,0" />
+                            </WrapPanel>
+
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Content="📦 تصدير كل نوع منفصل + سكريبتات"
+                                        Command="{Binding ExportExecutedCommandsSeparatelyCommand}"
+                                        Style="{StaticResource SentinelBtn}"
+                                        Background="#065F46" BorderBrush="#10B981" Margin="0,0,5,0" Padding="8,3"
+                                        ToolTip="تصدير كافة الأوامر المنفذة مقسمة كل بروتوكول بملف ومجلد مستقل مع سكريبتات إعادة تشغيل (Batch / Python / Clean List / JSON)" />
+
+                                <Button Content="📤 تصدير الفئة الحالية"
+                                        Command="{Binding ExportCurrentExecutedCategoryCommand}"
+                                        Style="{StaticResource SentinelBtn}"
+                                        Background="#1E293B" BorderBrush="#38BDF8" Margin="0,0,5,0" Padding="8,3"
+                                        ToolTip="تصدير أوامر الفئة المعروضة حالياً بتنسيقات قابلة لإعادة الاستخدام" />
+
+                                <Button Content="📋 نسخ الأوامر الصافية"
+                                        Command="{Binding CopyExecutedCommandsToClipboardCommand}"
+                                        Style="{StaticResource SentinelBtn}"
+                                        Background="#1E1E2E" BorderBrush="#6366F1" Padding="8,3"
+                                        ToolTip="نسخ الأوامر الصافية المعروضة حالياً للحافظة مباشرة (سطر لكل أمر جاهزة للتنفيذ)" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <DataGrid Grid.Row="1" ItemsSource="{Binding FilteredExecutedEvents}"
                               SelectedItem="{Binding SelectedEvent}"
                               AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
                               HeadersVisibility="Column" GridLinesVisibility="Horizontal"
@@ -253,7 +324,66 @@
                     </StackPanel>
                 </TabItem.Header>
                 <Grid>
-                    <DataGrid ItemsSource="{Binding FilteredPurePhoneEvents}"
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- شريط خيارات وتصفية أوامر التجربة والاختبار -->
+                    <Border Grid.Row="0" Background="#0C121E" BorderBrush="#1E293B" BorderThickness="0,0,0,1" Padding="8,4">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <WrapPanel Grid.Column="0" VerticalAlignment="Center">
+                                <RadioButton Content="{Binding PureAllButtonText}" IsChecked="{Binding IsPureAllSelected, Mode=OneWay}"
+                                             Command="{Binding SetPureCategoryFilterCommand}" CommandParameter="All"
+                                             Style="{StaticResource FilterPillBtn}" Margin="0,0,4,0" />
+                                <RadioButton Content="{Binding PureModemButtonText}" IsChecked="{Binding IsPureModemSelected, Mode=OneWay}"
+                                             Command="{Binding SetPureCategoryFilterCommand}" CommandParameter="ModemAt"
+                                             Style="{StaticResource FilterPillBtn}" Margin="0,0,4,0" />
+                                <RadioButton Content="{Binding PureMtkButtonText}" IsChecked="{Binding IsPureMtkSelected, Mode=OneWay}"
+                                             Command="{Binding SetPureCategoryFilterCommand}" CommandParameter="MediaTek"
+                                             Style="{StaticResource FilterPillBtn}" Margin="0,0,4,0" />
+                                <RadioButton Content="{Binding PureQualcommButtonText}" IsChecked="{Binding IsPureQualcommSelected, Mode=OneWay}"
+                                             Command="{Binding SetPureCategoryFilterCommand}" CommandParameter="Qualcomm"
+                                             Style="{StaticResource FilterPillBtn}" Margin="0,0,4,0" />
+                                <RadioButton Content="{Binding PureAppleButtonText}" IsChecked="{Binding IsPureAppleSelected, Mode=OneWay}"
+                                             Command="{Binding SetPureCategoryFilterCommand}" CommandParameter="AppleIos"
+                                             Style="{StaticResource FilterPillBtn}" Margin="0,0,4,0" />
+                                <RadioButton Content="{Binding PureAdbButtonText}" IsChecked="{Binding IsPureAdbSelected, Mode=OneWay}"
+                                             Command="{Binding SetPureCategoryFilterCommand}" CommandParameter="AdbFastboot"
+                                             Style="{StaticResource FilterPillBtn}" Margin="0,0,4,0" />
+                                <RadioButton Content="{Binding PureOtherButtonText}" IsChecked="{Binding IsPureOtherSelected, Mode=OneWay}"
+                                             Command="{Binding SetPureCategoryFilterCommand}" CommandParameter="OtherCommands"
+                                             Style="{StaticResource FilterPillBtn}" Margin="0,0,4,0" />
+                            </WrapPanel>
+
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Content="📦 تصدير كل نوع منفصل + سكريبتات"
+                                        Command="{Binding ExportPureTestCommandsSeparatelyCommand}"
+                                        Style="{StaticResource SentinelBtn}"
+                                        Background="#0284C7" BorderBrush="#38BDF8" Margin="0,0,5,0" Padding="8,3"
+                                        ToolTip="تصدير أوامر التجربة والاختبار مقسمة كل بروتوكول بملف ومجلد مستقل مع سكريبتات جاهزة للتنفيذ الفوري (Batch / Python / Clean List / JSON)" />
+
+                                <Button Content="📤 تصدير الفئة الحالية"
+                                        Command="{Binding ExportCurrentPureTestCategoryCommand}"
+                                        Style="{StaticResource SentinelBtn}"
+                                        Background="#1E293B" BorderBrush="#38BDF8" Margin="0,0,5,0" Padding="8,3"
+                                        ToolTip="تصدير أوامر التجربة للفئة المحددة حالياً بتنسيقات قابلة لإعادة الاستخدام" />
+
+                                <Button Content="📋 نسخ أوامر التجربة"
+                                        Command="{Binding CopyPureTestCommandsToClipboardCommand}"
+                                        Style="{StaticResource SentinelBtn}"
+                                        Background="#1E1E2E" BorderBrush="#6366F1" Padding="8,3"
+                                        ToolTip="نسخ أوامر التجربة المعروضة حالياً للحافظة مباشرة (جاهزة للصق والتجربة المباشرة)" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <DataGrid Grid.Row="1" ItemsSource="{Binding FilteredPurePhoneEvents}"
                               SelectedItem="{Binding SelectedEvent}"
                               AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
                               HeadersVisibility="Column" GridLinesVisibility="Horizontal"

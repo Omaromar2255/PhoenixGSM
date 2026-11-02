@@ -120,8 +120,8 @@ public static class ForensicNoiseGate
             }
         }
 
-        if (api.Equals("LiveRAM_UniversalInterceptor", StringComparison.OrdinalIgnoreCase) ||
-            api.Equals("LiveRAM_ExecutedProtocol", StringComparison.OrdinalIgnoreCase))
+        if (api.Equals("LiveRAM_UniversalInterceptor", StringComparison.OrdinalIgnoreCase))
+
         {
             string rawStr = !string.IsNullOrWhiteSpace(evt.PureCommandText)
                 ? evt.PureCommandText
@@ -178,7 +178,7 @@ public static class ForensicNoiseGate
         {
             if (!isLiveBridge)
                 return false;
-            double cooldownSec = isFromRamScanner ? 120.0 : 0.8;
+            double cooldownSec = isFromRamScanner ? 2.0 : 0.8;
             if ((now - prevTime).TotalSeconds < cooldownSec)
                 return false;
         }

@@ -252,7 +252,7 @@ public sealed partial class LiveHeapCommandHunter : IDisposable
             try { IsWow64Process(hProc, out isWow64); } catch { }
 
             long currentAddr = 0x10000;
-            long maxAddr = (!Environment.Is64BitOperatingSystem || isWow64) ? 0x7FFF0000L : 0x7FFFFFFEFFFFL;
+            long maxAddr = (!Environment.Is64BitOperatingSystem || isWow64) ? 0xFFFE0000L : 0x7FFFFFFEFFFFL;
             uint mbiSize = (uint)Marshal.SizeOf<MEMORY_BASIC_INFORMATION>();
             const int chunkSize = 65536;
             const int overlap = 512;
@@ -310,7 +310,7 @@ public sealed partial class LiveHeapCommandHunter : IDisposable
                                     _chunkHashCache[cacheKey] = chunkHash;
                                 }
 
-                                InspectBinaryAndTextBuffer(pid, processName, chunkAddr, buffer, bytesRead, isExecutableCodeSection, recordAsBaselineOnly);
+                                InspectBinaryAndTextBuffer(hProc, pid, processName, chunkAddr, buffer, bytesRead, isExecutableCodeSection, recordAsBaselineOnly);
                             }
                             offset += chunkSize;
                         }

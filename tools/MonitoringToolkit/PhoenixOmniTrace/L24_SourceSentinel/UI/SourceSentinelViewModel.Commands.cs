@@ -34,6 +34,14 @@ public sealed partial class SourceSentinelViewModel
     public ICommand OpenCapturedFilesFolderCommand { get; }
     public ICommand ClearOriginFilterCommand { get; }
     public ICommand SetDiscoveredCategoryFilterCommand { get; }
+    public ICommand ExportExecutedCommandsSeparatelyCommand { get; }
+    public ICommand ExportCurrentExecutedCategoryCommand { get; }
+    public ICommand CopyExecutedCommandsToClipboardCommand { get; }
+    public ICommand ExportPureTestCommandsSeparatelyCommand { get; }
+    public ICommand ExportCurrentPureTestCategoryCommand { get; }
+    public ICommand CopyPureTestCommandsToClipboardCommand { get; }
+    public ICommand SetExecutedCategoryFilterCommand { get; }
+    public ICommand SetPureCategoryFilterCommand { get; }
 
     private void ExecuteLaunchTool()
     {

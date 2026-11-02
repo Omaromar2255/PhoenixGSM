@@ -128,23 +128,223 @@ public sealed partial class SourceSentinelViewModel
         }
     }
 
-    private void ExecuteExportPurePhoneCommands()
+    public void ExecuteExportExecutedCommandsSeparately()
+    {
+        var items = ExecutedDeviceEvents.ToList();
+        var result = L24ReusableExportEngine.ExportSeparatedByProtocol(
+            _orchestrator.LogDirectory,
+            "الأوامر الفعلية المنفذة للجهاز",
+            items,
+            isExecutedCommands: true);
+
+        if (result.Success)
+        {
+            StatusMessage = $"تم تصدير {result.TotalCommandsCount} أمر منفذ عبر {result.ExportedProtocolsCount} فئات بنجاح إلى: {result.ExportDirectory}";
+            var dlgRes = MessageBox.Show(
+                $"تم تصدير الأوامر الفعلية المنفذة للجهاز بنجاح:\n\n" +
+                $"• إجمالي الأوامر المنفذة: {result.TotalCommandsCount}\n" +
+                $"• عدد الفئات المنفصلة: {result.ExportedProtocolsCount}\n" +
+                $"• المجلد:\n{result.ExportDirectory}\n\n" +
+                $"تتضمن الحزمة سكريبتات تشغيل تلقائي (Batch / Python) وقوائم نقية بدون شوائب وملفات JSON مهيكلة.\n\n" +
+                $"هل تريد فتح مجلد التصدير الآن؟",
+                "تصدير الأوامر المنفذة للهاتف (منظمة وقابلة لإعادة الاستخدام)",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Information);
+
+            if (dlgRes == MessageBoxResult.Yes)
+                OpenDirectoryInExplorer(result.ExportDirectory);
+        }
+        else
+        {
+            MessageBox.Show(result.ErrorMessage, "تنبيه التصدير", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    public void ExecuteExportCurrentExecutedCategory()
+    {
+        if (_executedCategoryFilter == "All")
+        {
+            ExecuteExportExecutedCommandsSeparately();
+            return;
+        }
+
+        var visibleItems = FilteredExecutedEvents.Cast<SourceTelemetryEvent>().ToList();
+        if (visibleItems.Count == 0)
+        {
+            MessageBox.Show("لا توجد أوامر مسجلة في الفئة المحددة حالياً.", "تنبيه", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (Enum.TryParse<L24CommandGroup>(_executedCategoryFilter, out var grp))
+        {
+            var result = L24ReusableExportEngine.ExportSingleCategory(
+                _orchestrator.LogDirectory,
+                "الأوامر المنفذة",
+                grp,
+                visibleItems,
+                isExecutedCommands: true);
+
+            if (result.Success)
+            {
+                StatusMessage = $"تم تصدير فئة [{L24CommandClassifier.GetGroupArabicTitle(grp)}] ({result.TotalCommandsCount} أمر) إلى: {result.ExportDirectory}";
+                var dlgRes = MessageBox.Show(
+                    $"تم تصدير أوامر فئة [{L24CommandClassifier.GetGroupArabicTitle(grp)}] بنجاح ({result.TotalCommandsCount} أمر).\n\nالمجلد:\n{result.ExportDirectory}\n\nهل تريد فتح المجلد؟",
+                    "تصدير الفئة المنفذة المحددة",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Information);
+
+                if (dlgRes == MessageBoxResult.Yes)
+                    OpenDirectoryInExplorer(result.ExportDirectory);
+            }
+            else
+            {
+                MessageBox.Show(result.ErrorMessage, "خطأ", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+    }
+
+    public void ExecuteCopyExecutedCommandsToClipboard()
     {
         try
         {
-            var items = PurePhoneTestableEvents.ToList();
-            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            string baseFile = Path.Combine(_orchestrator.LogDirectory, $"L24_PurePhone_Testable_{timestamp}");
+            var visibleItems = FilteredExecutedEvents.Cast<SourceTelemetryEvent>().ToList();
+            if (visibleItems.Count == 0)
+            {
+                StatusMessage = "لا توجد أوامر معروضة لنسخها.";
+                return;
+            }
 
-            WriteCategoryExportFiles(baseFile, "أوامر الهاتف الصافية القابلة للتجربة المباشرة", items);
-            StatusMessage = $"تم تصدير أوامر الهاتف للتجربة ({items.Count} أمر) إلى: {baseFile}.txt";
-            MessageBox.Show($"تم تصدير أوامر الهاتف الصافية للتجربة بنجاح:\n{baseFile}.txt\n{baseFile}.json",
-                "تصدير أوامر الهاتف للتجربة", MessageBoxButton.OK, MessageBoxImage.Information);
+            string text = L24ReusableExportEngine.FormatCleanCommandsForClipboard(visibleItems);
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                Clipboard.SetDataObject(text, true);
+                StatusMessage = $"تم نسخ {visibleItems.Count} أمر منفذ نقي للحافظة جاهزة للاستخدام الفوري بنجاح.";
+            }
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"تعذر تصدير أوامر الهاتف: {ex.Message}", "خطأ", MessageBoxButton.OK, MessageBoxImage.Error);
+            StatusMessage = $"تعذر النسخ للحافظة: {ex.Message}";
         }
+    }
+
+    public void ExecuteExportPureTestCommandsSeparately()
+    {
+        var items = PurePhoneTestableEvents.ToList();
+        var result = L24ReusableExportEngine.ExportSeparatedByProtocol(
+            _orchestrator.LogDirectory,
+            "أوامر الهاتف الصافية للتجربة والاختبار المباشر",
+            items,
+            isExecutedCommands: false);
+
+        if (result.Success)
+        {
+            StatusMessage = $"تم تصدير {result.TotalCommandsCount} أمر تجربة عبر {result.ExportedProtocolsCount} فئات بنجاح إلى: {result.ExportDirectory}";
+            var dlgRes = MessageBox.Show(
+                $"تم تصدير أوامر الهاتف الصافية للتجربة بنجاح:\n\n" +
+                $"• إجمالي أوامر التجربة: {result.TotalCommandsCount}\n" +
+                $"• عدد الفئات المنفصلة: {result.ExportedProtocolsCount}\n" +
+                $"• المجلد:\n{result.ExportDirectory}\n\n" +
+                $"تتضمن الحزمة سكريبتات تشغيل تلقائي (Batch / Python) وقوائم نقية بدون شوائب وملفات JSON مهيكلة.\n\n" +
+                $"هل تريد فتح مجلد التصدير الآن؟",
+                "تصدير أوامر الهاتف للتجربة (منظمة وقابلة لإعادة الاستخدام)",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Information);
+
+            if (dlgRes == MessageBoxResult.Yes)
+                OpenDirectoryInExplorer(result.ExportDirectory);
+        }
+        else
+        {
+            MessageBox.Show(result.ErrorMessage, "تنبيه التصدير", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    public void ExecuteExportCurrentPureTestCategory()
+    {
+        if (_pureCategoryFilter == "All")
+        {
+            ExecuteExportPureTestCommandsSeparately();
+            return;
+        }
+
+        var visibleItems = FilteredPurePhoneEvents.Cast<SourceTelemetryEvent>().ToList();
+        if (visibleItems.Count == 0)
+        {
+            MessageBox.Show("لا توجد أوامر تجربة في الفئة المحددة حالياً.", "تنبيه", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (Enum.TryParse<L24CommandGroup>(_pureCategoryFilter, out var grp))
+        {
+            var result = L24ReusableExportEngine.ExportSingleCategory(
+                _orchestrator.LogDirectory,
+                "أوامر التجربة",
+                grp,
+                visibleItems,
+                isExecutedCommands: false);
+
+            if (result.Success)
+            {
+                StatusMessage = $"تم تصدير أوامر تجربة فئة [{L24CommandClassifier.GetGroupArabicTitle(grp)}] ({result.TotalCommandsCount} أمر) إلى: {result.ExportDirectory}";
+                var dlgRes = MessageBox.Show(
+                    $"تم تصدير أوامر تجربة فئة [{L24CommandClassifier.GetGroupArabicTitle(grp)}] بنجاح ({result.TotalCommandsCount} أمر).\n\nالمجلد:\n{result.ExportDirectory}\n\nهل تريد فتح المجلد؟",
+                    "تصدير فئة أوامر التجربة المحددة",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Information);
+
+                if (dlgRes == MessageBoxResult.Yes)
+                    OpenDirectoryInExplorer(result.ExportDirectory);
+            }
+            else
+            {
+                MessageBox.Show(result.ErrorMessage, "خطأ", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+    }
+
+    public void ExecuteCopyPureTestCommandsToClipboard()
+    {
+        try
+        {
+            var visibleItems = FilteredPurePhoneEvents.Cast<SourceTelemetryEvent>().ToList();
+            if (visibleItems.Count == 0)
+            {
+                StatusMessage = "لا توجد أوامر تجربة معروضة لنسخها.";
+                return;
+            }
+
+            string text = L24ReusableExportEngine.FormatCleanCommandsForClipboard(visibleItems);
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                Clipboard.SetDataObject(text, true);
+                StatusMessage = $"تم نسخ {visibleItems.Count} أمر تجربة صافٍ للحافظة جاهزة للتجربة المباشرة بنجاح.";
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"تعذر النسخ للحافظة: {ex.Message}";
+        }
+    }
+
+    private void ExecuteExportPurePhoneCommands()
+    {
+        ExecuteExportPureTestCommandsSeparately();
+    }
+
+    private static void OpenDirectoryInExplorer(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = path,
+                    UseShellExecute = true
+                });
+            }
+        }
+        catch { }
     }
 
     private static void WriteCategoryExportFiles(string basePathWithoutExt, string headerTitle, List<SourceTelemetryEvent> items)

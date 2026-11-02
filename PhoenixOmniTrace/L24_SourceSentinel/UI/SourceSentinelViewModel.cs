@@ -274,7 +274,7 @@ public sealed partial class SourceSentinelViewModel : INotifyPropertyChanged, ID
         FilteredExecutedEvents.Filter = FilterExecutedDeviceItem;
 
         FilteredPurePhoneEvents = CollectionViewSource.GetDefaultView(PurePhoneTestableEvents);
-        FilteredPurePhoneEvents.Filter = FilterCommonItem;
+        FilteredPurePhoneEvents.Filter = FilterPurePhoneItem;
 
         FilteredDiscoveredRamEvents = CollectionViewSource.GetDefaultView(DiscoveredRamEvents);
         FilteredDiscoveredRamEvents.Filter = FilterDiscoveredRamItem;
@@ -401,6 +401,16 @@ public sealed partial class SourceSentinelViewModel : INotifyPropertyChanged, ID
         OpenCapturedFilesFolderCommand = new RelayCommand(_ => ExecuteOpenCapturedFilesFolder());
         ClearOriginFilterCommand = new RelayCommand(_ => { ActiveOriginFilter = null; SelectedArtifact = null; });
         SetDiscoveredCategoryFilterCommand = new RelayCommand(param => { if (param is string cat) DiscoveredCategoryFilter = cat; });
+        SetExecutedCategoryFilterCommand = new RelayCommand(param => { if (param is string cat) ExecutedCategoryFilter = cat; });
+        SetPureCategoryFilterCommand = new RelayCommand(param => { if (param is string cat) PureCategoryFilter = cat; });
+
+        ExportExecutedCommandsSeparatelyCommand = new RelayCommand(_ => ExecuteExportExecutedCommandsSeparately());
+        ExportCurrentExecutedCategoryCommand = new RelayCommand(_ => ExecuteExportCurrentExecutedCategory());
+        CopyExecutedCommandsToClipboardCommand = new RelayCommand(_ => ExecuteCopyExecutedCommandsToClipboard());
+
+        ExportPureTestCommandsSeparatelyCommand = new RelayCommand(_ => ExecuteExportPureTestCommandsSeparately());
+        ExportCurrentPureTestCategoryCommand = new RelayCommand(_ => ExecuteExportCurrentPureTestCategory());
+        CopyPureTestCommandsToClipboardCommand = new RelayCommand(_ => ExecuteCopyPureTestCommandsToClipboard());
 
         _orchestrator.Start();
     }
@@ -499,6 +509,8 @@ public sealed partial class SourceSentinelViewModel : INotifyPropertyChanged, ID
         OnPropertyChanged(nameof(DiscoveredRamCommandsCount));
         OnPropertyChanged(nameof(RadarEventsCount));
         OnPropertyChanged(nameof(UnfilteredRawEventsCount));
+        UpdateExecutedCategoryCounters();
+        UpdatePureCategoryCounters();
     }
 
     private void AddArtifactIfNotExists(SourceTelemetryEvent evt)

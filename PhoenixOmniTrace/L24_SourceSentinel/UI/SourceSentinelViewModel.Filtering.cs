@@ -220,6 +220,144 @@ public sealed partial class SourceSentinelViewModel
         FilteredRadarEvents.Refresh();
         FilteredUnfilteredRawEvents.Refresh();
         FilteredEvents.Refresh();
+        UpdateExecutedCategoryCounters();
+        UpdatePureCategoryCounters();
+    }
+
+    // فلترة تبويب الأوامر الفعلية المنفذة للجهاز (Tab 1: Executed Phone Commands)
+    private string _executedCategoryFilter = "All";
+    public string ExecutedCategoryFilter
+    {
+        get => _executedCategoryFilter;
+        set
+        {
+            if (_executedCategoryFilter != value)
+            {
+                _executedCategoryFilter = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsExecAllSelected));
+                OnPropertyChanged(nameof(IsExecModemSelected));
+                OnPropertyChanged(nameof(IsExecMtkSelected));
+                OnPropertyChanged(nameof(IsExecQualcommSelected));
+                OnPropertyChanged(nameof(IsExecAppleSelected));
+                OnPropertyChanged(nameof(IsExecAdbSelected));
+                OnPropertyChanged(nameof(IsExecOtherSelected));
+                FilteredExecutedEvents.Refresh();
+            }
+        }
+    }
+
+    public bool IsExecAllSelected => ExecutedCategoryFilter == "All";
+    public bool IsExecModemSelected => ExecutedCategoryFilter == "ModemAt";
+    public bool IsExecMtkSelected => ExecutedCategoryFilter == "MediaTek";
+    public bool IsExecQualcommSelected => ExecutedCategoryFilter == "Qualcomm";
+    public bool IsExecAppleSelected => ExecutedCategoryFilter == "AppleIos";
+    public bool IsExecAdbSelected => ExecutedCategoryFilter == "AdbFastboot";
+    public bool IsExecOtherSelected => ExecutedCategoryFilter == "OtherCommands";
+
+    public int ExecModemCount => ExecutedDeviceEvents.Count(e => e.CommandGroup == L24CommandGroup.ModemAt);
+    public int ExecMtkCount => ExecutedDeviceEvents.Count(e => e.CommandGroup == L24CommandGroup.MediaTek);
+    public int ExecQualcommCount => ExecutedDeviceEvents.Count(e => e.CommandGroup == L24CommandGroup.Qualcomm);
+    public int ExecAppleCount => ExecutedDeviceEvents.Count(e => e.CommandGroup == L24CommandGroup.AppleIos);
+    public int ExecAdbCount => ExecutedDeviceEvents.Count(e => e.CommandGroup == L24CommandGroup.AdbFastboot);
+    public int ExecOtherCount => ExecutedDeviceEvents.Count(e => e.CommandGroup != L24CommandGroup.ModemAt &&
+                                                                 e.CommandGroup != L24CommandGroup.MediaTek &&
+                                                                 e.CommandGroup != L24CommandGroup.Qualcomm &&
+                                                                 e.CommandGroup != L24CommandGroup.AppleIos &&
+                                                                 e.CommandGroup != L24CommandGroup.AdbFastboot);
+
+    public string ExecAllButtonText => $"🌐 الكل ({ExecutedCommandsCount})";
+    public string ExecModemButtonText => $"📻 المودم ({ExecModemCount})";
+    public string ExecMtkButtonText => $"🔶 ميدياتك ({ExecMtkCount})";
+    public string ExecQualcommButtonText => $"🔷 كوالكوم ({ExecQualcommCount})";
+    public string ExecAppleButtonText => $"🍎 أبل ({ExecAppleCount})";
+    public string ExecAdbButtonText => $"🤖 ADB ({ExecAdbCount})";
+    public string ExecOtherButtonText => $"🧩 أخرى ({ExecOtherCount})";
+
+    public void UpdateExecutedCategoryCounters()
+    {
+        OnPropertyChanged(nameof(ExecModemCount));
+        OnPropertyChanged(nameof(ExecMtkCount));
+        OnPropertyChanged(nameof(ExecQualcommCount));
+        OnPropertyChanged(nameof(ExecAppleCount));
+        OnPropertyChanged(nameof(ExecAdbCount));
+        OnPropertyChanged(nameof(ExecOtherCount));
+
+        OnPropertyChanged(nameof(ExecAllButtonText));
+        OnPropertyChanged(nameof(ExecModemButtonText));
+        OnPropertyChanged(nameof(ExecMtkButtonText));
+        OnPropertyChanged(nameof(ExecQualcommButtonText));
+        OnPropertyChanged(nameof(ExecAppleButtonText));
+        OnPropertyChanged(nameof(ExecAdbButtonText));
+        OnPropertyChanged(nameof(ExecOtherButtonText));
+    }
+
+    // فلترة تبويب أوامر الهاتف الصافية للتجربة (Tab 2: Pure Phone Testable Commands)
+    private string _pureCategoryFilter = "All";
+    public string PureCategoryFilter
+    {
+        get => _pureCategoryFilter;
+        set
+        {
+            if (_pureCategoryFilter != value)
+            {
+                _pureCategoryFilter = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsPureAllSelected));
+                OnPropertyChanged(nameof(IsPureModemSelected));
+                OnPropertyChanged(nameof(IsPureMtkSelected));
+                OnPropertyChanged(nameof(IsPureQualcommSelected));
+                OnPropertyChanged(nameof(IsPureAppleSelected));
+                OnPropertyChanged(nameof(IsPureAdbSelected));
+                OnPropertyChanged(nameof(IsPureOtherSelected));
+                FilteredPurePhoneEvents.Refresh();
+            }
+        }
+    }
+
+    public bool IsPureAllSelected => PureCategoryFilter == "All";
+    public bool IsPureModemSelected => PureCategoryFilter == "ModemAt";
+    public bool IsPureMtkSelected => PureCategoryFilter == "MediaTek";
+    public bool IsPureQualcommSelected => PureCategoryFilter == "Qualcomm";
+    public bool IsPureAppleSelected => PureCategoryFilter == "AppleIos";
+    public bool IsPureAdbSelected => PureCategoryFilter == "AdbFastboot";
+    public bool IsPureOtherSelected => PureCategoryFilter == "OtherCommands";
+
+    public int PureModemCount => PurePhoneTestableEvents.Count(e => e.CommandGroup == L24CommandGroup.ModemAt);
+    public int PureMtkCount => PurePhoneTestableEvents.Count(e => e.CommandGroup == L24CommandGroup.MediaTek);
+    public int PureQualcommCount => PurePhoneTestableEvents.Count(e => e.CommandGroup == L24CommandGroup.Qualcomm);
+    public int PureAppleCount => PurePhoneTestableEvents.Count(e => e.CommandGroup == L24CommandGroup.AppleIos);
+    public int PureAdbCount => PurePhoneTestableEvents.Count(e => e.CommandGroup == L24CommandGroup.AdbFastboot);
+    public int PureOtherCount => PurePhoneTestableEvents.Count(e => e.CommandGroup != L24CommandGroup.ModemAt &&
+                                                                   e.CommandGroup != L24CommandGroup.MediaTek &&
+                                                                   e.CommandGroup != L24CommandGroup.Qualcomm &&
+                                                                   e.CommandGroup != L24CommandGroup.AppleIos &&
+                                                                   e.CommandGroup != L24CommandGroup.AdbFastboot);
+
+    public string PureAllButtonText => $"🌐 الكل ({PurePhoneCommandsCount})";
+    public string PureModemButtonText => $"📻 المودم ({PureModemCount})";
+    public string PureMtkButtonText => $"🔶 ميدياتك ({PureMtkCount})";
+    public string PureQualcommButtonText => $"🔷 كوالكوم ({PureQualcommCount})";
+    public string PureAppleButtonText => $"🍎 أبل ({PureAppleCount})";
+    public string PureAdbButtonText => $"🤖 ADB ({PureAdbCount})";
+    public string PureOtherButtonText => $"🧩 أخرى ({PureOtherCount})";
+
+    public void UpdatePureCategoryCounters()
+    {
+        OnPropertyChanged(nameof(PureModemCount));
+        OnPropertyChanged(nameof(PureMtkCount));
+        OnPropertyChanged(nameof(PureQualcommCount));
+        OnPropertyChanged(nameof(PureAppleCount));
+        OnPropertyChanged(nameof(PureAdbCount));
+        OnPropertyChanged(nameof(PureOtherCount));
+
+        OnPropertyChanged(nameof(PureAllButtonText));
+        OnPropertyChanged(nameof(PureModemButtonText));
+        OnPropertyChanged(nameof(PureMtkButtonText));
+        OnPropertyChanged(nameof(PureQualcommButtonText));
+        OnPropertyChanged(nameof(PureAppleButtonText));
+        OnPropertyChanged(nameof(PureAdbButtonText));
+        OnPropertyChanged(nameof(PureOtherButtonText));
     }
 
     private bool FilterExecutedDeviceItem(object obj)
@@ -232,7 +370,51 @@ public sealed partial class SourceSentinelViewModel
         if (item.CommandGroup == L24CommandGroup.AdbFastboot && !_orchestrator.IsCategoryDetectionEnabled(L24CommandGroup.AdbFastboot))
             return false;
 
-        return FilterCommonItem(item);
+        if (!FilterCommonItem(item)) return false;
+
+        if (_executedCategoryFilter != "All")
+        {
+            if (_executedCategoryFilter == "OtherCommands")
+            {
+                if (item.CommandGroup == L24CommandGroup.ModemAt ||
+                    item.CommandGroup == L24CommandGroup.MediaTek ||
+                    item.CommandGroup == L24CommandGroup.Qualcomm ||
+                    item.CommandGroup == L24CommandGroup.AppleIos ||
+                    item.CommandGroup == L24CommandGroup.AdbFastboot)
+                    return false;
+            }
+            else if (Enum.TryParse<L24CommandGroup>(_executedCategoryFilter, out var grp))
+            {
+                if (item.CommandGroup != grp) return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool FilterPurePhoneItem(object obj)
+    {
+        if (obj is not SourceTelemetryEvent item) return false;
+        if (!FilterCommonItem(item)) return false;
+
+        if (_pureCategoryFilter != "All")
+        {
+            if (_pureCategoryFilter == "OtherCommands")
+            {
+                if (item.CommandGroup == L24CommandGroup.ModemAt ||
+                    item.CommandGroup == L24CommandGroup.MediaTek ||
+                    item.CommandGroup == L24CommandGroup.Qualcomm ||
+                    item.CommandGroup == L24CommandGroup.AppleIos ||
+                    item.CommandGroup == L24CommandGroup.AdbFastboot)
+                    return false;
+            }
+            else if (Enum.TryParse<L24CommandGroup>(_pureCategoryFilter, out var grp))
+            {
+                if (item.CommandGroup != grp) return false;
+            }
+        }
+
+        return true;
     }
 
     private bool FilterCommonItem(object obj)
